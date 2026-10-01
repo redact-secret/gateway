@@ -1,0 +1,101 @@
+# Architecture
+
+Status: approved design baseline; implementation and numerical limits remain subject to the tracked ADRs and qualification evidence. This document describes the target contract, not implemented features.
+
+## Ownership and dependencies
+
+| Repository | Responsibility |
+| --- | --- |
+| `redact-secret/redact-secret` | Authoritative deterministic detection and redaction engine |
+| `redact-secret/redact-secret-adapters` | In-process host integrations |
+| `redact-secret/redact-secret-vault` | Mapping storage and restore authorization |
+| `redact-secret/redact-secret-benchmarks` | Measurement and evidence |
+| `redact-secret/gateway` | HTTP deployment and protocol boundary |
+
+Gateway depends directly on the Rust core. Core must not depend on Gateway, adapters, or Vault. Network parsing, route selection, JSON field classification, transport, deployment, and operational behavior belong here. Detector logic must not be duplicated here. No Vault dependency is required for the first stable release.
+
+Core issue #1001 retains the architecture origin and cross-repository contract; gateway implementation ownership moves here. Completing this design baseline alone does not satisfy #1001's threat-model and prototype-measurement acceptance criteria.
+
+## Deployment and trust assumptions
+
+Version 0.1.0 targets one application trust domain: a localhost companion or a Kubernetes sidecar. A shared internal gateway is a future scope, even if the executable could technically listen remotely.
+
+The application and Gateway see original plaintext. The provider receives transformed model-bound content plus its required transport credentials. A compromised application can leak before Gateway or bypass it unless the deployment enforces traversal. A compromised Gateway host can inspect memory and credentials; process isolation is not encryption or a trusted execution environment.
+
+Alpha listeners default to loopback. Non-loopback exposure requires an explicitly documented deployment trust model; remote clients and multi-tenant authorization are not qualified for 0.1.0. Kubernetes binding/address details must be validated against the chosen Pod networking configuration. Upstream TLS certificate and hostname verification are mandatory. First stable does not promise built-in inbound TLS termination; remote exposure is not made supported by placing a TLS reverse proxy in front of it.
+
+## Planned internal structure
+
+One private binary crate initially, with modules for configuration, boundary orchestration, protocol/OpenAI handling, core integration, transport, health, and safe telemetry. Use `docs/decisions/` for ADRs, `docs/contracts/` for protocol/configuration contracts, and `tests/` for synthetic integration tests. Split into internal crates only when concrete dependency or testing needs justify it. Internal modules are not public plugin APIs.
+
+Preferred initial stack: Rust plus Tokio/Axum/Reqwest and a JSON implementation. Pin selected versions and toolchain during scaffolding. Benchmark scan scheduling before deciding whether a bounded worker pool is needed; synchronous CPU work must not indefinitely monopolize the async reactor.
+
+## Request state machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> Admit
+    Admit --> Receive: permitted route and capacity
+    Admit --> Reject: unsupported or overloaded
+    Receive --> Validate: complete bounded body
+    Receive --> Reject: timeout or size overflow
+    Validate --> Inspect: supported classified payload
+    Validate --> Reject: malformed or unsupported
+    Inspect --> Serialize: complete core success
+    Inspect --> Reject: failure or incomplete inspection
+    Serialize --> Forward: transformation validated
+    Serialize --> Reject: serialization or output limit failure
+    Forward --> Relay: upstream response
+    Forward --> Terminate: transport failure or cancellation
+    Relay --> Terminate: completion, error, or cancellation
+    Reject --> [*]
+    Terminate --> [*]
+```
+
+No original or partially inspected request-body bytes leave before `Forward`. New upstream requests use the transformed body, recomputed length, and vetted headers. A partial upstream transmission cannot be rolled back; later transport failures must never trigger replay of the original payload. Do not claim cancellation retracts data already delivered to a provider.
+
+## Protocol boundary
+
+Support endpoint-specific request subsets rather than a general JSON/text proxy. Alpha 1 targets `POST /v1/chat/completions`; Beta 1 adds the qualified text subset of `POST /v1/responses`. Route matching is exact. Health/readiness paths are local and never become upstream routes.
+
+Every allowed request field is classified as inspected application text, validated structural/control data, or rejected content. Recursively classify nested fields; unknown fields are rejected by default. Build contracts for prompt/instructions, messages, tool results, app-submitted tool arguments, metadata, and tool descriptions/schema text. Structural values must have an explicit semantic contract: a label such as model ID does not permit arbitrary sensitive text to escape through it. Restrict enums/identifiers/values as needed, reject unsafe/unclassifiable values, and document intentionally transmitted structural data.
+
+Parse JSON once and reject ambiguous input such as duplicate keys. Require valid UTF-8. Inspect decoded strings so JSON escaping cannot bypass checks. Preserve JSON types and keys, and define field traversal and placeholder/session scope deterministically. Do not run a text replacement over raw serialized JSON. English/Korean support derives from the selected core profiles; Gateway tests ensure Unicode and escaping survive transformation.
+
+App-submitted tool arguments may be JSON encoded inside strings. Their interpretation and transformation need a dedicated contract; blindly parsing every string as nested JSON is not acceptable. Redaction does not grant execution permission, and Gateway does not execute tools.
+
+Files, images, audio, URL content, stored conversation/file references, encrypted/opaque content, arbitrary binary uploads, and realtime are initially rejected. Their contents cannot be inspected through the initial text boundary. Request compression is initially rejected; any later support must bound decompressed bytes and expansion. Transport chunking is receipt framing only, never incremental upstream forwarding.
+
+## Core integration
+
+The bridge uses pinned public core APIs and the selected credential/optional PII profile. Gateway controls field selection and transport admission; core controls detection/redaction. Validate core semantics for truncation, maximum findings, detector failures, and partial results. Any signal that inspection was not complete must reject the request. Do not invent a guarantee if a core API lacks the necessary completion signal; track a cross-repository contract blocker instead.
+
+Compile/initialize reusable policies at startup where supported. Mutable per-request state must not cross requests. Placeholder scope and double-redaction behavior are explicit contracts, with tests for inputs already sanitized by adapters. Never trust a client header claiming that input was already scanned.
+
+## Credentials and outbound routing
+
+Alpha uses caller-supplied provider authentication headers. Credentials are necessary transport authority, not model-bound text. No persistent key storage, key broker, or key rotation product is included. Beta 1 adds a separate local caller token; it must be stripped before upstream forwarding and must never substitute for the provider credential.
+
+Configure upstream origins and routes statically. Never derive a destination from caller headers, URL parameters, body values, or absolute-form targets. Disable redirects; do not silently use inherited environment proxy settings. Reject CONNECT and upgrades. Reject disallowed query strings. Define header allowlists, hop-by-hop removal, organization/project header treatment, credential forwarding, and response-header handling. Vetted upstream origins and DNS/network restrictions must prevent SSRF and destination rebinding; do not build arbitrary user-configurable internal service access into the initial scope. Configuration is trusted operator input, but must still be validated against the supported destination policy.
+
+## Responses, retries, and cancellation
+
+Relay qualified upstream JSON and SSE responses; do not claim response redaction. Bound response headers, buffering, total bytes where applicable, stream lifetime, and idle time. Avoid accumulating an entire SSE stream. Propagate downstream disconnects to the upstream operation, bound slow consumers, and terminate stalled streams.
+
+Gateway adds no automatic upstream retries in 0.1.0. SDK retries remain SDK behavior and must be qualified/documented. Do not claim exactly-once delivery. After response headers or stream bytes have been sent, a later error cannot be converted into a new HTTP status; terminate according to the documented stream error contract without falsely reporting normal completion.
+
+## Limits, errors, and telemetry
+
+Choose explicit limits for request bytes, JSON depth/node count, inspected text, findings, transformed output, connections/concurrency, queues, response buffers, and admission/body/upstream/idle/total deadlines. Test near and across each limit; document numeric defaults after measurement. Request memory is bounded in aggregate, not merely per request. Overload fails before unbounded allocation.
+
+Use gateway-owned safe error codes for malformed/unsupported input, limit exhaustion, incomplete scan, overload, and transport failure. Document status mappings and SDK retry implications; gateway errors must not echo payload fragments. Provider response/error bodies are relayed under the supported response contract and can themselves contain sensitive data.
+
+Telemetry may include bounded route IDs, version identifiers, coarse outcomes, timing, and aggregate counters. Exclude bodies, raw URLs/query values, keys, raw findings, matched snippets, unbounded labels, and detector scoring internals. Health reports process liveness; readiness indicates valid configuration, initialized core, and ability to accept work. Neither endpoint probes a provider using a credential by default.
+
+## Qualification and extensions
+
+Tests cover no upstream body on rejection; field coverage; core-result completeness; escaped/Unicode/duplicate-key inputs; structural preservation; credential isolation; redirects/SSRF; resource bounds; stream disconnect/failure/backpressure; SDK retries; and artifact execution.
+
+Gateway owns protocol and transport fixtures; core owns detector regressions; benchmark/evaluation repositories own comparative evidence. Report source commits, exact core pin, configuration/profile, SDK pins, input sizes, concurrency, and methodology for performance claims.
+
+Post-stable expansions require separate ADRs: Anthropic, response inspection, shared gateways, optional Vault contract integration, additional OS artifacts, launchers, and Helm. They are not implied by the initial stable contract.
