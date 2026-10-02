@@ -45,7 +45,7 @@ def post(url):
     try:
         doc = json.loads(raw)
         code = doc.get("error", {}).get("code") if isinstance(doc.get("error"), dict) else None
-        relayed = doc.get("id") == "synthetic-fake-provider"
+        relayed = doc.get("id") == "synthetic-stand-in"
     except ValueError:
         pass
     print(json.dumps({"status": status, "code": code, "relayed": relayed}))

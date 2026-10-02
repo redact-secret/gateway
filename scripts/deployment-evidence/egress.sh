@@ -47,7 +47,7 @@ provider="$RUN_ID-provider"
 docker run -d --name "$provider" --network "$upnet" --ip "$PROVIDER_IP" \
   --network-alias api.openai.com "${HARDEN[@]}" \
   -v "$work/certs:/certs:ro" -v "$DE_DIR/tools:/tools:ro" "$PY_IMAGE" \
-  python /tools/fake_provider.py serve --cert /certs/leaf.pem --key /certs/leaf.key >/dev/null
+  python /tools/tls_stand_in.py serve --cert /certs/leaf.pem --key /certs/leaf.key >/dev/null
 wait_log "$provider" listening
 
 gw="$RUN_ID-gateway"
@@ -85,7 +85,7 @@ case "$res" in
   *) check "app cannot resolve the provider name" yes "no ($res)" ;;
 esac
 
-stats="$(docker exec "$provider" python /tools/fake_provider.py sync)"
+stats="$(docker exec "$provider" python /tools/tls_stand_in.py sync)"
 say "provider counters after the application's attempts: $stats"
 check "provider connections (gateway only)" 1 "$(jget "$stats" accepted)"
 check "provider requests served" 1 "$(jget "$stats" requests)"
@@ -103,7 +103,7 @@ docker run -d --name "$ctl" --network "$upnet" "${HARDEN[@]}" \
 res="$(docker exec "$ctl" python /tools/client.py connect "$PROVIDER_IP" 443)"
 say "control direct attempt: $res"
 check "control reaches the provider directly (probe can detect a bypass)" connected "$(jget "$res" result)"
-stats="$(docker exec "$provider" python /tools/fake_provider.py sync)"
+stats="$(docker exec "$provider" python /tools/tls_stand_in.py sync)"
 check "provider counted the control connection" 2 "$(jget "$stats" accepted)"
 
 if [ "$CHECK_FAILED" -ne 0 ]; then

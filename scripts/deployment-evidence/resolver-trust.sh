@@ -38,7 +38,7 @@ docker run -d --name "$holder" --network none --read-only --security-opt no-new-
       ip addr add "$a/32" dev lo
     done
     ip -6 addr add fd00:ec2::254/128 dev lo
-    exec python /tools/fake_provider.py serve --cert /certs/leaf.pem --key /certs/leaf.key --ipv6' >/dev/null
+    exec python /tools/tls_stand_in.py serve --cert /certs/leaf.pem --key /certs/leaf.key --ipv6' >/dev/null
 wait_log "$holder" listening
 
 # The trust store used by the "CA installed" cases: the image's own bundle plus the throwaway CA.
@@ -48,7 +48,7 @@ docker rm "$cid" >/dev/null
 cat "$work/system-bundle.crt" "$work/certs/ca.pem" >"$work/bundle-with-throwaway-ca.crt"
 chmod 0644 "$work/bundle-with-throwaway-ca.crt"
 
-sync_stat() { docker exec "$holder" python /tools/fake_provider.py sync; }
+sync_stat() { docker exec "$holder" python /tools/tls_stand_in.py sync; }
 post() { docker exec "$holder" python /tools/client.py post http://127.0.0.1:8787/v1/chat/completions; }
 
 # run_case <label> <hosts-ips (space separated)> <trust: system|with-ca> <want-code> <want-accept-delta> <want-tls-failed-delta> <want-requests-delta>

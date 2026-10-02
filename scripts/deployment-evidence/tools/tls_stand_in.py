@@ -5,8 +5,8 @@ Stdlib only. Serves TLS on port 443 (all IPv4 addresses of its network namespace
 --ipv6) with a throwaway certificate, answers every request with a fixed synthetic JSON body, and
 keeps exact counters. It NEVER logs or stores request bytes: only counts and peer addresses.
 
-  fake_provider.py serve --cert C --key K [--ipv6]   run (prints `listening` once ready)
-  fake_provider.py sync                               print counters as JSON once every accepted
+  tls_stand_in.py serve --cert C --key K [--ipv6]   run (prints `listening` once ready)
+  tls_stand_in.py sync                               print counters as JSON once every accepted
                                                       connection has been fully handled
 
 `sync` is the deterministic barrier: it drains every listener's accept queue (a connection the
@@ -21,7 +21,7 @@ import sys
 import threading
 
 CONTROL = ("127.0.0.1", 9000)
-BODY = b'{"id":"synthetic-fake-provider","object":"chat.completion","choices":[]}'
+BODY = b'{"id":"synthetic-stand-in","object":"chat.completion","choices":[]}'
 lock = threading.Condition()
 stats = {"accepted": 0, "tls_failed": 0, "requests": 0, "peers": {}}
 inflight = 0
@@ -139,4 +139,4 @@ if __name__ == "__main__":
         opts = dict(zip(rest[0::2], rest[1::2]))
         serve(opts["--cert"], opts["--key"], ipv6)
     else:
-        sys.exit("usage: fake_provider.py serve --cert C --key K [--ipv6] | sync")
+        sys.exit("usage: tls_stand_in.py serve --cert C --key K [--ipv6] | sync")
