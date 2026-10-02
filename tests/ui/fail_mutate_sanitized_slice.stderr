@@ -1,0 +1,5 @@
+error[E0594]: cannot assign to data in a `&` reference
+ --> tests/ui/fail_mutate_sanitized_slice.rs:5:5
+  |
+5 |     request.body()[0] = 1;
+  |     ^^^^^^^^^^^^^^^^^^^^^ cannot assign
