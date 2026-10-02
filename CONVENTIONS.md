@@ -36,6 +36,8 @@ Gateway-generated errors use stable safe codes; preserve no offending text in er
 
 Prefer explicit states, typed failures, small modules, and reviewable ownership. Avoid panics and unchecked operations on untrusted input. Keep CPU inspection scheduling bounded and separate from transport assumptions. Any asynchronous worker or task must have a cancellation and cleanup owner.
 
+Structural rules from the ADRs (see `docs/decisions/`): only `transport` holds HTTP clients and credentials, and it accepts only the sealed `SanitizedRequest` that only `boundary` can construct; protocol modules never send requests; capacity permits are owned by the resource they guard (a started synchronous job keeps its CPU and memory permits until it really finishes, never the HTTP future); build an immutable `RuntimePlan` at startup and keep per-request state and credentials request-local; no global mutable scanner behind a request-serializing lock; error and diagnostic types never own bodies or credentials; do not assume core APIs (`Policy::compile()`, cooperative cancellation) that the pinned core has not been verified to provide. Do not state a performance, zero-copy, or fast-path claim without measurements recorded per ADR 0008.
+
 Fixtures contain synthetic credentials and invented PII only. Use fake upstreams for rejection and transport tests. Real provider credentials are never needed for ordinary CI. Optional live qualification runs are explicit, cost-bounded, and do not publish payloads or credentials.
 
 Scaffolding establishes real commands for formatting, linting, tests, locked builds, artifact smoke checks, and configuration validation. Until implemented, documentation must label commands as proposed rather than runnable.
@@ -54,4 +56,4 @@ Preserve Alpha 1 MVP delivery separately from skeleton completion. A compiling e
 
 Build once from the candidate commit and qualify the exact artifacts. Record checksums, source commit, toolchain, core pin, dependency lock, configuration version, SDK compatibility, and supported platforms. Do not assert signing, SBOM, provenance, or security review exists before those checks are implemented.
 
-Document upgrade and rollback behavior. Never silently reinterpret configuration or weaken rejection behavior to preserve compatibility. License selection is an explicit maintainer decision before distribution.
+Document upgrade and rollback behavior. Never silently reinterpret configuration or weaken rejection behavior to preserve compatibility. License selection is an explicit maintainer decision before distribution. As of 2026-10-02 no license is selected and GitHub private vulnerability reporting is not enabled; both are open release blockers tracked in [ADR 0010](docs/decisions/0010-release-prerequisites-license-and-reporting.md).

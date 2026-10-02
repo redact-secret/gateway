@@ -26,9 +26,13 @@ Alpha listeners default to loopback. Non-loopback exposure requires an explicitl
 
 ## Planned internal structure
 
-One private binary crate initially, with modules for configuration, boundary orchestration, protocol/OpenAI handling, core integration, transport, health, and safe telemetry. Use `docs/decisions/` for ADRs, `docs/contracts/` for protocol/configuration contracts, and `tests/` for synthetic integration tests. Split into internal crates only when concrete dependency or testing needs justify it. Internal modules are not public plugin APIs.
+One private binary crate initially, with modules for configuration (`config`), admission (`admission`), boundary orchestration (`boundary`), protocol/OpenAI handling (`protocol`), core integration (`core_bridge`), transport (`transport`), health (`health`), and safe telemetry (`telemetry`). Use `docs/decisions/` for ADRs, `docs/contracts/` for protocol/configuration contracts, and `tests/` for synthetic integration tests. Split into internal crates only when concrete dependency or testing needs justify it. Internal modules are not public plugin APIs, and there is no dynamic loader. Everything in this section is planned; no module exists yet (see [ADR 0005](docs/decisions/0005-protocol-expansion-and-central-enforcement.md)).
 
-Preferred initial stack: Rust plus Tokio/Axum/Reqwest and a JSON implementation. Pin selected versions and toolchain during scaffolding. Benchmark scan scheduling before deciding whether a bounded worker pool is needed; synchronous CPU work must not indefinitely monopolize the async reactor.
+Authority is centralized and flows one way: `protocol` modules define endpoint-specific parsing, classification, and output rules; `boundary` owns inspection and approval and is the only creator of the sealed final request; `core_bridge` owns pinned core semantics; `admission` owns capacity and permits; `transport` owns routing, TLS, headers, credentials, and transmission. Protocol modules never create HTTP clients or send requests. New providers reuse the central admission and forwarding checks.
+
+Startup builds one immutable `RuntimePlan` (route/origin mapping, protocol contracts, core profile and policy, limits and deadlines, shared transport clients). Deployment authority, content policy, and resource policy are separate parts of it, and per-request state and credentials stay request-local ([ADR 0006](docs/decisions/0006-runtime-plan-and-authority-separation.md)). Decisions and contracts are indexed in [docs/decisions/README.md](docs/decisions/README.md).
+
+Preferred initial stack: Rust plus Tokio/Axum/Reqwest and a JSON implementation. Pin selected versions and toolchain during scaffolding. Measure scan scheduling (inline, bounded `spawn_blocking`, or a dedicated pool) before choosing; synchronous CPU work must not indefinitely monopolize the async reactor. A started synchronous job may be non-interruptible, so the worker owns its CPU and memory permits until real completion ([ADR 0004](docs/decisions/0004-cancellation-and-synchronous-core-work.md)).
 
 ## Request state machine
 
@@ -52,6 +56,8 @@ stateDiagram-v2
     Terminate --> [*]
 ```
 
+Requests are represented by three types, `ReceivedRequest`, `ValidatedRequest`, and a sealed `SanitizedRequest`. Transport accepts only the last, which only `boundary` can create, after classification, complete core processing, output validation, and association with an approved route plan. There is no raw-body fallback. This is a structural safeguard, not proof of detector coverage ([ADR 0002](docs/decisions/0002-request-states-and-forwarding-authority.md), [request-state contract](docs/contracts/request-state.md)).
+
 No original or partially inspected request-body bytes leave before `Forward`. New upstream requests use the transformed body, recomputed length, and vetted headers. A partial upstream transmission cannot be rolled back; later transport failures must never trigger replay of the original payload. Do not claim cancellation retracts data already delivered to a provider.
 
 ## Protocol boundary
@@ -70,7 +76,7 @@ Files, images, audio, URL content, stored conversation/file references, encrypte
 
 The bridge uses pinned public core APIs and the selected credential/optional PII profile. Gateway controls field selection and transport admission; core controls detection/redaction. Validate core semantics for truncation, maximum findings, detector failures, and partial results. Any signal that inspection was not complete must reject the request. Do not invent a guarantee if a core API lacks the necessary completion signal; track a cross-repository contract blocker instead.
 
-Compile/initialize reusable policies at startup where supported. Mutable per-request state must not cross requests. Placeholder scope and double-redaction behavior are explicit contracts, with tests for inputs already sanitized by adapters. Never trust a client header claiming that input was already scanned.
+Completeness rules are in the [core-completeness contract](docs/contracts/core-completeness.md); `Policy::compile()` and cooperative cancellation are not assumed to exist until the #5 probe verifies the exact pin. Compile/initialize reusable policies at startup where supported. Mutable per-request state must not cross requests. Placeholder scope and double-redaction behavior are explicit contracts, with tests for inputs already sanitized by adapters. Never trust a client header claiming that input was already scanned.
 
 ## Credentials and outbound routing
 
@@ -86,7 +92,7 @@ Gateway adds no automatic upstream retries in 0.1.0. SDK retries remain SDK beha
 
 ## Limits, errors, and telemetry
 
-Choose explicit limits for request bytes, JSON depth/node count, inspected text, findings, transformed output, connections/concurrency, queues, response buffers, and admission/body/upstream/idle/total deadlines. Test near and across each limit; document numeric defaults after measurement. Request memory is bounded in aggregate, not merely per request. Overload fails before unbounded allocation.
+Choose explicit limits for request bytes, JSON depth/node count, inspected text, findings, transformed output, connections/concurrency, queues, response buffers, and admission/body/upstream/idle/total deadlines. Test near and across each limit; document numeric defaults after measurement. Request memory is bounded in aggregate, not merely per request. Overload fails before unbounded allocation. Capacities for receipt, inspection CPU and queue, buffered memory, upstream calls, and response streams are separate, reserved before allocation or scheduling, and held until the owning resource really ends ([ADR 0003](docs/decisions/0003-resource-admission-and-lifetime.md), [resource-limits contract](docs/contracts/resource-limits.md)). Parsing uses one working structure, rejects duplicate keys, budgets parsed nodes/strings/findings/output, and does not promise secure erasure ([ADR 0007](docs/decisions/0007-parsing-copying-and-plaintext-lifetime.md)). Performance measurement is a gate for every numeric choice ([ADR 0008](docs/decisions/0008-performance-measurement-gate.md)).
 
 Use gateway-owned safe error codes for malformed/unsupported input, limit exhaustion, incomplete scan, overload, and transport failure. Document status mappings and SDK retry implications; gateway errors must not echo payload fragments. Provider response/error bodies are relayed under the supported response contract and can themselves contain sensitive data.
 
