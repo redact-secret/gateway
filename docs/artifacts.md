@@ -53,8 +53,8 @@ Verify a downloaded bundle with `sha256sum -c SHA256SUMS` (use `shasum -a 256 -c
 
 Artifact distribution is gated and nothing is published. Before any publication:
 
-1. A license is selected by the maintainer ([ADR 0010](decisions/0010-release-prerequisites-license-and-reporting.md), open).
-2. Private vulnerability reporting is enabled and verified (ADR 0010, open).
+1. A license is selected by the maintainer (MIT, done; [ADR 0010](decisions/0010-release-prerequisites-license-and-reporting.md)).
+2. Private vulnerability reporting is enabled (done) and verified with an end-to-end test report (ADR 0010, open).
 3. The Alpha 1 MVP qualification epic is complete (#8 and dependents), plus the other Alpha 1 gates in `SECURITY.md`.
 4. A registry and image name are selected, and a separate, environment-gated publish workflow is reviewed. Signing, SBOM, and provenance are not produced by the current workflow.
 
