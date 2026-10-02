@@ -21,15 +21,17 @@ async function collect(model: string, gateway = gateways.standard) {
 }
 
 // Observed, not assumed: whether the SDK RAISES on a truncated stream. The gateway ends such a
-// stream without the terminating chunk (ADR 0018) but, since ADR 0019, also sends
-// `Connection: close`; Node's fetch (undici) then reports a clean end for the cut, so the SDK
-// yields a shorter stream and no error. The safe invariant asserted above is that no completion
-// is ever fabricated; applications must require a `finish_reason` themselves.
+// stream without the terminating chunk (ADR 0018) and, since ADR 0019, also sends
+// `Connection: close`. Whether Node's fetch (undici) reports that cut as an error depends on the
+// Node.js version: Node 22.16.0 (undici 6.21.2) ended the stream normally, Node 24 raised. What
+// is asserted is the version-independent safe invariant: no completion is ever fabricated, so a
+// caller that requires `finish_reason` is correct on every version. The observation is recorded.
 const observations: Array<Record<string, unknown>> = [];
 after(() => {
   writeEvidence("stream-truncation-observations-node.json", {
     sdk: "openai (npm) 7.27.0",
     node: process.version,
+    undici: process.versions.undici,
     observations,
   });
 });
@@ -131,7 +133,7 @@ describe("SSE streaming (Node SDK)", () => {
     observations.push({ case: "provider cut the stream after two events", sdk_raised: r.raised, events: r.events, finish_reason: r.finish });
   });
 
-  it("control: undici raises on a truncated chunked stream on a keep-alive connection but not on `Connection: close`", async () => {
+  it("control: how this Node's fetch treats a truncated chunked stream, keep-alive versus `Connection: close`", async () => {
     async function direct(model: string): Promise<string> {
       const r = await fetch(`${directProvider}/v1/chat/completions`, {
         method: "POST",
@@ -148,8 +150,8 @@ describe("SSE streaming (Node SDK)", () => {
     const keepAlive = await direct("qual-sse-interrupted");
     const close = await direct("qual-sse-interrupted-close");
     observations.push({ case: "control: direct truncated chunked stream", keep_alive: keepAlive, connection_close: close });
-    assert.equal(keepAlive, "error", "truncation on a keep-alive connection is detected");
-    assert.equal(close, "clean end", "truncation on a `Connection: close` response is not (undici behavior)");
+    assert.equal(keepAlive, "error", "truncation on a keep-alive connection is detected on every version");
+    // `close` is recorded, not asserted: it differs between Node.js versions (see the note above).
   });
 
   it("a stalled provider stream is cut by the gateway's idle deadline, again with no fabricated completion", async () => {

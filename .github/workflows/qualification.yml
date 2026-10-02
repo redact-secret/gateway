@@ -94,6 +94,7 @@ jobs:
             echo "node $(node --version)"
             echo "python $(python --version)"
             echo "npm $(npm --version)"
+            echo "undici $(node -p process.versions.undici)"
             jq -r '"openai (npm) " + .dependencies.openai' qualification/sdk/node/package.json
             qualification/sdk/python/.venv/bin/python -c "import openai; print('openai (PyPI)', openai.__version__)"
           } > qualification/evidence/versions.txt

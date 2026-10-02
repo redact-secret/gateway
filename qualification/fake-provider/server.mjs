@@ -225,7 +225,7 @@ async function runScenario(call, req, res, json) {
       case "qual-sse-interrupted":
       case "qual-sse-interrupted-close": {
         // The -close variant announces `Connection: close` like the gateway does (control for
-        // the Node/undici observation in docs/contracts/errors-and-telemetry.md).
+        // the Node.js fetch observation in docs/contracts/errors-and-telemetry.md).
         beginSse(res, call, model.endsWith("-close") ? { connection: "close" } : {});
         res.write(events[0]);
         await new Promise((r) => res.write(events[1], r)); // both events handed to the kernel
