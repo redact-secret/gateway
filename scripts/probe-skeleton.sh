@@ -13,7 +13,7 @@ for p in healthz readyz; do
   echo "GET /$p -> $code"
   test "$code" = 200
 done
-code="$(curl -s -o "$scratch/proxy.out" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/v1/chat/completions")"
+code="$(curl -s -o "$scratch/proxy.out" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer sk-SYNTHETIC-REVOKED-CI-NOT-A-KEY' -d '{}' "$base/v1/chat/completions")"
 echo "POST /v1/chat/completions -> $code"
 test "$code" = 422
 grep -q unsupported_input "$scratch/proxy.out"
