@@ -2,7 +2,7 @@
 
 Status: implemented for the verified skeleton (#7). Governing decision: [ADR 0012](decisions/0012-release-candidate-artifact-build.md). Nothing described here is published or distributable.
 
-The artifacts contain the **skeleton**: `--version`, `validate-config`, and a loopback server with `/healthz` and `/readyz`. Every other route, including `/v1/chat/completions`, is rejected locally with 404 `unsupported_input`. It is not a sanitizing proxy; the proxy arrives with the Alpha 1 MVP (#8).
+The artifacts contain the **skeleton**: `--version`, `validate-config`, and a loopback server with `/healthz` and `/readyz`. Every other route is rejected locally with 404 `unsupported_input`. `POST /v1/chat/completions` runs strict admission and validation (#18) and then always ends in a local `501 not_implemented`; nothing is forwarded. It is not a sanitizing proxy; the proxy arrives with the Alpha 1 MVP (#8).
 
 ## Target matrix
 

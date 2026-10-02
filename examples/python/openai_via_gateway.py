@@ -1,7 +1,7 @@
 """DRAFT: the proxy endpoint is not available until the Alpha 1 MVP (#8).
 
 Do not run this expecting success. Today the gateway skeleton answers
-POST /v1/chat/completions with 404 `unsupported_input` and forwards nothing.
+POST /v1/chat/completions with local safe errors (422 `unsupported_input` for an unsupported body, 501 `not_implemented` for a valid one) and forwards nothing.
 
 Shows the intended shape only: an existing OpenAI SDK pointed at the gateway base URL.
 The key below is an obviously fake placeholder. Never put a real key in this file.
