@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 
 use crate::admission::Admission;
+use crate::boundary::Inspection;
 use crate::chat_route::{self, ChatRoute};
 use crate::config::{ConfigError, RouteId, RuntimePlan};
 use crate::health::{self, HealthState};
@@ -77,21 +78,33 @@ pub struct Services {
 }
 
 impl Services {
-    /// Required initialization for the skeleton: the shared transport client. Core
-    /// initialization is a stub until #5 lands (the plan already validated the profile
-    /// name through the core's own parser); #5 extends this function.
+    /// Required initialization: the shared transport client and the core inspection
+    /// workers (one registry per worker, built from the plan's profile, optional PII
+    /// selection, and limits). Readiness depends on both succeeding.
     ///
     /// # Errors
-    /// [`StartupError::Init`] when the transport client cannot be built.
+    /// [`StartupError::Init`] when the transport client or core inspection cannot be built.
     pub fn init(plan: &RuntimePlan) -> Result<Self, StartupError> {
         let upstream = Upstream::from_plan(plan).map_err(|_| StartupError::Init)?;
         let admission = Arc::new(Admission::new(plan.resources().capacity()));
+        let inspection = Arc::new(
+            Inspection::start(
+                Arc::clone(&admission),
+                plan.content(),
+                plan.resources().limits(),
+                plan.resources().capacity(),
+            )
+            .map_err(|_| StartupError::Init)?,
+        );
         // The route id is the reviewed one from the static table, never from a request.
-        let chat = Arc::new(ChatRoute::new(
-            Arc::clone(&admission),
-            *plan.resources().limits(),
-            RouteId::new(destination::OPENAI_CHAT_COMPLETIONS_ROUTE),
-        ));
+        let chat = Arc::new(
+            ChatRoute::new(
+                Arc::clone(&admission),
+                *plan.resources().limits(),
+                RouteId::new(destination::OPENAI_CHAT_COMPLETIONS_ROUTE),
+            )
+            .with_inspection(inspection),
+        );
         Ok(Self {
             upstream,
             admission,

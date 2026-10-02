@@ -433,3 +433,32 @@ async fn awaiting_and_dropping_a_handle_in_async_code_behaves_the_same() {
     gate.release.send(()).expect("release");
     assert!(eventually(|| admission.try_inspection().is_ok()));
 }
+
+#[test]
+fn a_job_that_owns_its_memory_keeps_it_after_the_awaiter_is_dropped() {
+    // `submit_job` (used by the request path): the memory reservation travels inside the
+    // closure and its result, so it is released only when the job really ends, and a
+    // cancelled result is dropped by the worker together with that reservation.
+    let admission = admission(2, 20);
+    let pool = pool(1, 1);
+    let permit = admission.try_inspection().expect("permit");
+    let memory = admission.try_reserve_memory(20).expect("memory");
+    let (started_tx, started) = mpsc::channel();
+    let (release, release_rx) = mpsc::channel::<()>();
+    let handle = pool
+        .submit_job(permit, move |_| {
+            let _ = started_tx.send(());
+            let _ = release_rx.recv();
+            memory
+        })
+        .expect("submitted");
+    started.recv().expect("started");
+    drop(handle);
+    assert_eq!(
+        admission.try_reserve_memory(1).unwrap_err(),
+        AdmissionError::Overload
+    );
+    release.send(()).expect("release");
+    assert!(eventually(|| admission.try_reserve_memory(20).is_ok()));
+    assert!(eventually(|| admission.try_inspection().is_ok()));
+}

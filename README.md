@@ -43,6 +43,8 @@ Gateway use alone does not enforce traffic traversal. Deployments needing mandat
 
 The first product is a single-application localhost proxy or Kubernetes sidecar, with static configuration, fixed upstream routing, bounded resource consumption, health/readiness endpoints, and explicit fail-closed semantics.
 
+Current status (#19): on `POST /v1/chat/completions`, an admitted and validated request is inspected through the pinned core (profile and optional PII selection from the static `content` policy) and transformed into a fresh bounded body, but it is still not forwarded: it ends in a local `501 not_implemented` until forwarding (#20) lands. `Warn` findings reject by default (`content.on_warn`); see [configuration](docs/configuration.md) and [ADR 0015](docs/decisions/0015-core-inspection-and-request-transformation.md).
+
 Alpha 1 targets a documented OpenAI Chat Completions text subset, including ordinary JSON responses and SSE response relay. Request inspection is buffered; HTTP chunked receipt does not authorize incremental forwarding. Tool payload coverage is expanded and qualified in Alpha 2. Responses API text support is planned for Beta 1.
 
 Unsupported initially: images, audio, files, external content references, provider-stored conversation references, realtime/WebSocket input, transparent MITM, CONNECT tunnels, arbitrary destinations, response redaction, reversible restoration, shared multi-tenant operation, and a policy control plane. Unsupported content is rejected rather than silently bypassed.

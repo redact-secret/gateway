@@ -11,9 +11,12 @@
 //! 4. [`validate_with`]: one strict parse and the endpoint matrix, yielding a
 //!    [`ValidatedRequest`] that keeps the reservation alive.
 //!
-//! After step 4 the request still ends in a local `not_implemented` rejection: the
-//! forwarding path (#19 inspection, #20 transport) does not exist, so no byte of any
-//! request is ever sent upstream. This module holds no HTTP client and never imports the
+//! 5. when an [`Inspection`] service is attached (production wiring), the request is
+//!    inspected through the pinned core and approved into a `SanitizedRequest`
+//!    ([`Inspection::inspect_and_approve`], #19); any failure is a fixed local rejection.
+//!
+//! An approved request still ends in a local `not_implemented` rejection: forwarding (#20)
+//! does not exist, so no byte of any request is ever sent upstream. This module holds no HTTP client and never imports the
 //! transport module.
 //!
 //! Every rejection closes the connection (`Connection: close`): a body that was not read
@@ -35,7 +38,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 
 use crate::admission::{Admission, AdmissionError, RequestLimits};
+use crate::boundary::{BoundaryError, Inspection};
 use crate::config::RouteId;
+use crate::core_bridge::CoreBridgeError;
 use crate::protocol::chat::ChatRequest;
 use crate::protocol::{self, Protocol, ProtocolError, ValidatedRequest};
 use crate::telemetry::SafeCode;
@@ -71,6 +76,8 @@ pub enum Reject {
     LimitExceeded,
     /// Admitted and validated, but forwarding does not exist yet.
     NotImplemented,
+    /// Inspection or approval failed (fail closed; see [`BoundaryError`]).
+    Inspection(BoundaryError),
 }
 
 impl Reject {
@@ -92,6 +99,14 @@ impl Reject {
             Self::Overload => (StatusCode::SERVICE_UNAVAILABLE, SafeCode::Overload),
             Self::Unsupported => (StatusCode::UNPROCESSABLE_ENTITY, SafeCode::UnsupportedInput),
             Self::NotImplemented => (StatusCode::NOT_IMPLEMENTED, SafeCode::NotImplemented),
+            Self::Inspection(error) => match error.code() {
+                SafeCode::UnsupportedInput => {
+                    (StatusCode::UNPROCESSABLE_ENTITY, SafeCode::UnsupportedInput)
+                }
+                SafeCode::LimitExceeded => (StatusCode::PAYLOAD_TOO_LARGE, SafeCode::LimitExceeded),
+                SafeCode::Overload => (StatusCode::SERVICE_UNAVAILABLE, SafeCode::Overload),
+                code => (StatusCode::INTERNAL_SERVER_ERROR, code),
+            },
         }
     }
 }
@@ -112,7 +127,7 @@ impl IntoResponse for Reject {
             Self::Method => {
                 headers.insert(header::ALLOW, HeaderValue::from_static("POST"));
             }
-            Self::Overload => {
+            Self::Overload | Self::Inspection(BoundaryError::Core(CoreBridgeError::Overload)) => {
                 headers.insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
             }
             _ => {}
@@ -189,6 +204,7 @@ pub struct ChatRoute {
     limits: RequestLimits,
     max_body: usize,
     route: RouteId,
+    inspection: Option<Arc<Inspection>>,
 }
 
 impl ChatRoute {
@@ -203,7 +219,16 @@ impl ChatRoute {
             limits,
             max_body,
             route,
+            inspection: None,
         }
+    }
+
+    /// Attach the startup-built inspection service. Without it an admitted request ends in
+    /// `not_implemented` without inspection (it still reaches nothing).
+    #[must_use]
+    pub fn with_inspection(mut self, inspection: Arc<Inspection>) -> Self {
+        self.inspection = Some(inspection);
+        self
     }
 
     /// The approved route id admitted requests are bound to.
@@ -233,13 +258,25 @@ impl ChatRoute {
     /// response; nothing is forwarded.
     pub async fn handle(&self, request: Request) -> Response {
         match self.admit(request).await {
-            // #19 inspects and #20 forwards the validated request. Until then it is
-            // dropped here, which releases its permits and reservation.
-            Ok(validated) => {
-                drop(validated);
-                Reject::NotImplemented.into_response()
-            }
+            Ok(admitted) => self.inspect(admitted).await.into_response(),
             Err(reject) => reject.into_response(),
+        }
+    }
+
+    /// Inspect and approve an admitted request. Success would be handed to forwarding (#20);
+    /// until then the approved value is dropped here, releasing its reservation, and the
+    /// answer is a local `not_implemented`. Every failure is a fixed local rejection.
+    async fn inspect(&self, admitted: Admitted) -> Reject {
+        let Some(inspection) = &self.inspection else {
+            return Reject::NotImplemented;
+        };
+        let (validated, route) = admitted.into_parts();
+        match inspection.inspect_and_approve(validated, route).await {
+            Ok(sanitized) => {
+                drop(sanitized);
+                Reject::NotImplemented
+            }
+            Err(error) => Reject::Inspection(error),
         }
     }
 
@@ -461,6 +498,11 @@ mod tests {
             Reject::Unsupported,
             Reject::LimitExceeded,
             Reject::NotImplemented,
+            Reject::Inspection(BoundaryError::OutputLimit),
+            Reject::Inspection(BoundaryError::Serialization),
+            Reject::Inspection(BoundaryError::Core(CoreBridgeError::Blocked)),
+            Reject::Inspection(BoundaryError::Core(CoreBridgeError::Incomplete)),
+            Reject::Inspection(BoundaryError::Core(CoreBridgeError::Overload)),
         ] {
             let (status, code) = reject.status_and_code();
             assert!(status.is_client_error() || status.is_server_error());

@@ -1,0 +1,9 @@
+error[E0451]: fields `output` and `summary` of struct `CompleteInspection` are private
+ --> tests/ui/fail_construct_complete_inspection.rs:7:9
+  |
+6 |     CompleteInspection {
+  |     ------------------ in this type
+7 |         output: Vec::new(),
+  |         ^^^^^^ private field
+8 |         summary: InspectionSummary::default(),
+  |         ^^^^^^^ private field

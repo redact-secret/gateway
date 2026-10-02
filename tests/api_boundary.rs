@@ -21,4 +21,6 @@ fn unvalidated_types_cannot_reach_forwarding() {
     cases.compile_fail("tests/ui/fail_sanitized_default.rs");
     cases.compile_fail("tests/ui/fail_mutate_sanitized_body.rs");
     cases.compile_fail("tests/ui/fail_mutate_sanitized_slice.rs");
+    cases.compile_fail("tests/ui/fail_construct_complete_inspection.rs");
+    cases.compile_fail("tests/ui/fail_approve_raw_output.rs");
 }

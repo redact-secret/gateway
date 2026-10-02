@@ -153,9 +153,9 @@ No completeness blocker: `Ok`/`Err` is a sound fail-closed signal for the pinned
 | `DetectorRegistry` is `!Send + !Sync` | Worked around with a registry per owner thread. Not blocking. | core issue (draft 2) |
 | `Ok` is implicit, "no partial success" not frozen as contract | Verified for beta.12 by reading and testing; not guaranteed to stay. | core issue (draft 3) |
 | No request-scoped placeholder numbering / multi-leaf scan | Solved in the gateway (`RequestScope`). | core issue (draft 4, optional) |
-| `Warn` findings remain in output under `DefaultPolicy` | Policy decision: reject, redact, or pass. The bridge exposes `unredacted_findings`. | #19 / policy epic |
-| Object-key text inspection | Keys are treated as structural and not inspected in the reference traversal. Whether free-form keys (for example in `metadata`) need inspection is a classification decision. | #18 / #19 |
-| Provisional safe code for `Blocked` | Mapped to `unsupported_input`. | #4 / #18 |
+| `Warn` findings remain in output under `DefaultPolicy` | Decided in #19: reject by default; forward only with `content.on_warn = "forward"` (deliberate operator choice). See [ADR 0015](../decisions/0015-core-inspection-and-request-transformation.md). | resolved (#19) |
+| Object-key text inspection | Decided in #19: keys are fixed schema names in the supported subset, and every free-form-keyed object is rejected by the matrix, so no key text is inspected or needed. | resolved (#19) |
+| Provisional safe code for `Blocked` | Kept as `unsupported_input` (`422`), now also used for rejected `Warn`. | resolved (#19) |
 | Quiet-host measurement and `spawn_blocking` comparison | Not done on this loaded machine. | follow-up under #5 / #18 |
 
 ### Draft core-side issues (not filed)
@@ -164,3 +164,22 @@ No completeness blocker: `Ok`/`Err` is a sound fail-closed signal for the pinned
 2. **API: thread-shareable inspection handle.** `DetectorRegistry` is `!Send + !Sync` only because `Detector` has no `Send + Sync` supertrait; a built-in-only registry holds no custom detector. Request a `Send + Sync` handle for built-in-only construction (or an opt-in bound). Gateway currently builds one registry per worker thread (about 15 us each), which works, so this is a request, not a blocker. Relates to core #1097 reopen trigger and #1066.
 3. **Contract: state "`Ok` means complete, no partial success" as a frozen guarantee.** Whole-input `Ok` currently means every detector ran over the full normalized input, and every limit, detector, policy, and placeholder failure is an `Err`. Ask core to state this once in the public contract and freeze it in beta.13 so a future detector time budget cannot produce a partial `Ok`. Relates to core #1066 and #1065.
 4. **Feature: multi-leaf scan with request-scoped placeholder numbering.** Each call restarts at `<SECRET_1>`, so scanning N JSON leaves needs an offsetting formatter in the host. Optional helper (or documented formatter recipe) for request-wide numbering and key context. Gateway implements the offset itself, so this is optional.
+
+## Wired evidence (#19)
+
+The probe's bridge is now on the Chat Completions route (`boundary::Inspection`, `core_bridge::pool`). Executed on the pinned core (`redact-secret =0.1.0-beta.12`, `Cargo.lock` source `registry+https://github.com/rust-lang/crates.io-index`, checked by the existing `PINNED_CORE_VERSION` test), `cargo test --locked` on Apple silicon, macOS, rustc 1.98.1:
+
+| Claim | Test (all passing; the suites below were also run 12 times in a row without a failure) |
+| --- | --- |
+| Synthetic `ghp_SYNTHETICREVOKED...` tokens are redacted under the `full` profile in every supported text field (string and part `content`, `stop` array and string, `user`), numbered 1..7 in traversal order | `tests/inspection_transform.rs` `synthetic_secrets_in_every_supported_text_field_are_redacted_in_order`, `single_string_stop_is_inspected` |
+| Escaped (`\u0067\u0068\u0070...`) tokens are decoded before inspection; escapes, quotes, line separators, emoji, and Korean text stay valid JSON and equal after decode | `escaped_input_is_decoded_before_inspection_and_stays_valid_json`, `english_and_korean_text_survive_byte_for_byte_semantically` |
+| Keys, value types, array form, and controls are preserved; the body is a fresh document | `keys_types_and_controls_are_preserved`, `serialization_is_a_fresh_document_not_the_original_bytes`, `protocol::chat` `serialization_round_trips_through_the_matrix_and_is_bounded` |
+| `Block` rejects; `Warn` rejects by default; `Warn` forwards only with `on_warn = forward`; a finding in `model` rejects | `block_findings_reject_the_request`, `warn_findings_reject_by_default`, `warn_findings_forward_unchanged_only_when_the_operator_chose_forward`, `model_is_never_rewritten_and_any_finding_in_it_rejects`, and the HTTP equivalents in `tests/inspection_route.rs` |
+| Finding limit, request-wide input limit, and transformed-output bound reject (no truncation); core `Err` paths leave zero upstream bytes (fake upstream asserted empty after every HTTP case) | `finding_limit_rejects_with_no_partial_result`, `request_wide_input_limit_rejects_even_when_each_text_fits`, `transformed_output_over_its_bound_is_rejected_not_truncated`, `tests/inspection_route.rs` |
+| Detector, policy, and placeholder failures map to `incomplete_inspection` (unreachable with built-in detectors, proven through custom implementations) | `tests/core_probe_semantics.rs` (27 tests, unchanged), `core_bridge::map_core_error` |
+| Pre-redacted input is ordinary text; numbering is request-local and restarts per request, also under concurrency | `pre_redacted_input_is_ordinary_text_and_numbering_is_request_wide`, `request_state_does_not_leak_across_requests` |
+| Dropping the awaiting future does not release the inspection permit or memory; a cancelled queued job never runs; 200 immediate cancel-and-retry attempts against 2 permits return all capacity | `dropping_the_awaiting_future_does_not_release_capacity_early`, `repeated_cancelled_requests_stay_within_capacity_and_all_capacity_returns`, `tests/core_probe_scheduling.rs` `a_job_that_owns_its_memory_keeps_it_after_the_awaiter_is_dropped` |
+| Readiness depends on core initialization (an unsupported PII selector fails `Services::init`, no listener is bound) | `readiness_depends_on_successful_core_initialization` |
+| Completeness proof and raw bytes cannot reach approval or transport | compile-fail `tests/ui/fail_construct_complete_inspection.rs`, `tests/ui/fail_approve_raw_output.rs` and the existing `SanitizedRequest` cases |
+
+Not measured here: throughput or latency of the wired path (ADR 0008 numbers are still owed from a quiet host), and the pool size and `max_findings` are provisional.

@@ -10,6 +10,7 @@
 //! reported: field names and values are caller payload.
 
 use std::fmt;
+use std::io::{self, Write};
 
 use serde_json::Number;
 
@@ -283,6 +284,118 @@ impl ChatRequest {
         count
     }
 
+    /// Serialize a fresh JSON document from the typed request (never from the original
+    /// bytes): canonical key order, the same keys, types, and array order, with every
+    /// string escaped by the JSON writer. The output is bounded while it is produced, so an
+    /// oversized result is refused before it is fully allocated.
+    ///
+    /// # Errors
+    /// [`SerializeError::Limit`] when the output would exceed `max_bytes`;
+    /// [`SerializeError::Invalid`] for any other writer failure (not reachable for the
+    /// supported matrix, but never ignored).
+    pub fn serialize_bounded(&self, max_bytes: usize) -> Result<Vec<u8>, SerializeError> {
+        let mut estimate = 256_usize;
+        self.for_each_text(|_, text| estimate = estimate.saturating_add(text.len()));
+        let mut out = Bounded {
+            buf: Vec::with_capacity(estimate.min(max_bytes)),
+            max: max_bytes,
+            overflow: false,
+        };
+        match self.write_to(&mut out) {
+            Ok(()) => Ok(out.buf),
+            Err(_) if out.overflow => Err(SerializeError::Limit),
+            Err(_) => Err(SerializeError::Invalid),
+        }
+    }
+
+    fn write_to(&self, w: &mut Bounded) -> io::Result<()> {
+        w.write_all(b"{\"model\":")?;
+        json_str(w, &self.model)?;
+        w.write_all(b",\"messages\":[")?;
+        for (index, message) in self.messages.iter().enumerate() {
+            if index > 0 {
+                w.write_all(b",")?;
+            }
+            w.write_all(b"{\"role\":\"")?;
+            w.write_all(message.role.as_str().as_bytes())?;
+            w.write_all(b"\",\"content\":")?;
+            match &message.content {
+                Content::Text(text) => json_str(w, text)?,
+                Content::Parts(parts) => {
+                    w.write_all(b"[")?;
+                    for (part, text) in parts.iter().enumerate() {
+                        if part > 0 {
+                            w.write_all(b",")?;
+                        }
+                        w.write_all(b"{\"type\":\"text\",\"text\":")?;
+                        json_str(w, text)?;
+                        w.write_all(b"}")?;
+                    }
+                    w.write_all(b"]")?;
+                }
+            }
+            w.write_all(b"}")?;
+        }
+        w.write_all(b"]")?;
+        if let Some(stream) = self.stream {
+            w.write_all(b",\"stream\":")?;
+            json_bool(w, stream)?;
+        }
+        if let Some(options) = self.stream_options {
+            w.write_all(b",\"stream_options\":{")?;
+            if let Some(usage) = options.include_usage {
+                w.write_all(b"\"include_usage\":")?;
+                json_bool(w, usage)?;
+            }
+            w.write_all(b"}")?;
+        }
+        let params = &self.params;
+        for (key, value) in [
+            ("temperature", &params.temperature),
+            ("top_p", &params.top_p),
+            ("max_tokens", &params.max_tokens),
+            ("max_completion_tokens", &params.max_completion_tokens),
+            ("presence_penalty", &params.presence_penalty),
+            ("frequency_penalty", &params.frequency_penalty),
+            ("n", &params.n),
+            ("seed", &params.seed),
+        ] {
+            if let Some(number) = value {
+                w.write_all(b",\"")?;
+                w.write_all(key.as_bytes())?;
+                w.write_all(b"\":")?;
+                serde_json::to_writer(&mut *w, number).map_err(io::Error::from)?;
+            }
+        }
+        match &self.stop {
+            Some(Stop::One(text)) => {
+                w.write_all(b",\"stop\":")?;
+                json_str(w, text)?;
+            }
+            Some(Stop::Many(items)) => {
+                w.write_all(b",\"stop\":[")?;
+                for (index, text) in items.iter().enumerate() {
+                    if index > 0 {
+                        w.write_all(b",")?;
+                    }
+                    json_str(w, text)?;
+                }
+                w.write_all(b"]")?;
+            }
+            None => {}
+        }
+        if let Some(user) = &self.user {
+            w.write_all(b",\"user\":")?;
+            json_str(w, user)?;
+        }
+        if let Some(format) = self.response_format {
+            w.write_all(b",\"response_format\":{\"type\":\"")?;
+            w.write_all(format.as_str().as_bytes())?;
+            w.write_all(b"\"}")?;
+        }
+        w.write_all(b"}")
+    }
+
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         Self {
@@ -306,6 +419,45 @@ impl fmt::Debug for ChatRequest {
             .field("texts", &self.text_count())
             .finish_non_exhaustive()
     }
+}
+
+/// Why serialization of the transformed request failed. Carries nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SerializeError {
+    /// The output would exceed the transformed-output bound.
+    Limit,
+    /// The writer failed for another reason.
+    Invalid,
+}
+
+/// Output sink that refuses to grow past its bound.
+struct Bounded {
+    buf: Vec<u8>,
+    max: usize,
+    overflow: bool,
+}
+
+impl Write for Bounded {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        if self.buf.len().saturating_add(data.len()) > self.max {
+            self.overflow = true;
+            return Err(io::Error::other("output bound"));
+        }
+        self.buf.extend_from_slice(data);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn json_str(w: &mut Bounded, text: &str) -> io::Result<()> {
+    serde_json::to_writer(w, text).map_err(io::Error::from)
+}
+
+fn json_bool(w: &mut Bounded, value: bool) -> io::Result<()> {
+    w.write_all(if value { b"true" } else { b"false" })
 }
 
 /// Classify a parsed document against the matrix, consuming it.
@@ -781,6 +933,31 @@ mod tests {
         let body =
             format!(r#"{{"model":"{long_model}","messages":[{{"role":"user","content":"x"}}]}}"#);
         assert_eq!(run(&body).unwrap_err(), ProtocolError::Unsupported);
+    }
+
+    #[test]
+    fn serialization_round_trips_through_the_matrix_and_is_bounded() {
+        let body = r#"{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"aé\"\n"}]},{"role":"assistant","content":"한국어"}],"stream":true,"stream_options":{"include_usage":true},"temperature":0.5,"max_tokens":7,"n":1,"seed":-3,"stop":["x"],"user":"u","response_format":{"type":"json_object"}}"#;
+        let request = run(body).expect("supported");
+        let out = request.serialize_bounded(4096).expect("fits");
+        // The fresh document satisfies the same matrix and carries the same texts.
+        let again = run(std::str::from_utf8(&out).expect("utf8")).expect("round trip");
+        assert_eq!(texts(&request), texts(&again));
+        assert_eq!(request.params(), again.params());
+        assert_eq!(
+            request.serialize_bounded(4096).expect("fits"),
+            again.serialize_bounded(4096).expect("fits")
+        );
+        // Exactly at the bound passes, one byte under refuses (never truncates).
+        assert!(request.serialize_bounded(out.len()).is_ok());
+        assert_eq!(
+            request.serialize_bounded(out.len() - 1).unwrap_err(),
+            SerializeError::Limit
+        );
+        assert_eq!(
+            request.serialize_bounded(0).unwrap_err(),
+            SerializeError::Limit
+        );
     }
 
     #[test]

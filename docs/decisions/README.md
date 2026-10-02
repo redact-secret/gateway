@@ -28,6 +28,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0012](0012-release-candidate-artifact-build.md) | Release-candidate artifact build for the skeleton | Accepted (design); implemented (scaffold) | #7 |
 | [0013](0013-fixed-https-destinations-and-outbound-authority.md) | Fixed HTTPS destinations and outbound authority | Accepted (design); implemented (destination, client, address policy); body forwarding planned | #23 |
 | [0014](0014-chat-completions-admission.md) | Chat Completions request admission and provisional limits | Accepted; implemented (admission, strict budgeted parse, field matrix); forwarding planned | #18 |
+| [0015](0015-core-inspection-and-request-transformation.md) | Core inspection and validated request transformation | Accepted; implemented (inspection, Block/Warn policy, fresh bounded serialization, approval); forwarding planned | #19 |
 
 ## Contracts
 
