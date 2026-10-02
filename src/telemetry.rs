@@ -14,6 +14,10 @@ pub enum SafeCode {
     IncompleteInspection,
     Overload,
     TransportFailure,
+    /// Static configuration failed validation (startup only; never a request outcome).
+    InvalidConfig,
+    /// Readiness is false: validated plan or required initialization is missing.
+    NotReady,
 }
 
 impl SafeCode {
@@ -27,6 +31,8 @@ impl SafeCode {
             Self::IncompleteInspection => "incomplete_inspection",
             Self::Overload => "overload",
             Self::TransportFailure => "transport_failure",
+            Self::InvalidConfig => "invalid_config",
+            Self::NotReady => "not_ready",
         }
     }
 }

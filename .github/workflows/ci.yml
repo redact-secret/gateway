@@ -104,9 +104,34 @@ jobs:
             "redact-secret-gateway "*" (core redact-secret "*")") ;;
             *) echo "unexpected version line" >&2; exit 1 ;;
           esac
-      # TODO(#4): when config validation and health land, add real startup checks here
-      # (validate a synthetic config, start `serve` on loopback, probe liveness/readiness).
-      # Only add commands that exist on main; do not stub them.
+      - name: Validate the skeleton config
+        run: cargo run --locked --quiet -- validate-config examples/config.skeleton.json
+      - name: Serve on loopback, probe health, reject proxy route, stop on SIGTERM
+        run: |
+          set -eu
+          cargo build --locked --quiet
+          bin=target/debug/redact-secret-gateway
+          "$bin" serve examples/config.skeleton.json >serve.out 2>serve.err &
+          pid=$!
+          i=0
+          until grep -q '^listening ' serve.out 2>/dev/null; do
+            i=$((i + 1))
+            if [ "$i" -gt 100 ] || ! kill -0 "$pid" 2>/dev/null; then
+              echo "server did not start" >&2; exit 1
+            fi
+            sleep 0.1
+          done
+          base="http://127.0.0.1:8787"
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$base/healthz")" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$base/readyz")" = 200
+          code="$(curl -s -o proxy.out -w '%{http_code}' -X POST -d '{}' "$base/v1/chat/completions")"
+          test "$code" = 404
+          grep -q unsupported_input proxy.out
+          kill -TERM "$pid"
+          status=0
+          wait "$pid" || status=$?
+          test "$status" -eq 0
+          grep -q 'shutdown complete' serve.out
       - name: Perf workload scaffold smoke (tiny sizes, no payloads in output)
         run: cargo run --locked --quiet --example perf_workloads -- --smoke
 

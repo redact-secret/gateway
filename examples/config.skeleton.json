@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "deployment": {
+    "listener": {
+      "address": "127.0.0.1:8787"
+    }
+  },
+  "content": {
+    "profile": "common"
+  },
+  "resources": {
+    "capacity": {
+      "receipt": 1,
+      "memory_units": 1,
+      "inspection": 1,
+      "upstream": 1,
+      "stream": 1
+    }
+  }
+}
