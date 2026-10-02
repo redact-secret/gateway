@@ -72,18 +72,24 @@ for f in direct nginx haproxy; do
   n="$(wc -l <"$work/$f.jsonl" | tr -d ' ')"
   check "$f path completed all cases" 36 "$n"
 done
-# Gateway invariants that must hold directly (not intermediary-dependent): the ambiguous-framing
-# heads are closed with no response, and Connection: close is answered and honored.
+# Gateway invariants that must hold directly (not intermediary-dependent), pinned to the behavior
+# of this commit (ADR 0019 as amended by #43): a head carrying both length and transfer-coding
+# fields is answered with a local 400 malformed_input and Connection: close before any handler
+# runs; pipelined bytes after the first request are never served; Connection: close is answered
+# and honored. If the guard's observable behavior changes, this check fails and the evidence and
+# its document must be re-recorded.
 direct_of() { docker run --rm "${HARDEN[@]}" -v "$work:/out:ro" "$PY_IMAGE" python -c "
 import json,sys
 for l in open('/out/direct.jsonl'):
     r=json.loads(l)
     if r['id']==sys.argv[1]:
-        print(len(r['responses']), r['eof'], r.get('after_response'), (r['responses'] or [{}])[0].get('connection'))
+        f=(r['responses'] or [{}])[0]
+        print(len(r['responses']), r['eof'], r.get('after_response'), f.get('connection'), f.get('status'), f.get('code'))
 " "$1"; }
-check "direct: CL+TE closes with no response" "0 True None None" "$(direct_of c02-cl-and-te-cl-first)"
-check "direct: pipelined pair yields one response, then the connection closes" "1 True None close" "$(direct_of c29-pipelined-pair)"
-check "direct: keep-alive request is answered Connection: close and closed" "1 False closed close" "$(direct_of c35-connection-close-behavior)"
+check "direct: CL then TE is answered 400 malformed_input, Connection: close" "1 False None close 400 malformed_input" "$(direct_of c02-cl-and-te-cl-first)"
+check "direct: TE then CL is answered 400 malformed_input, Connection: close" "1 False None close 400 malformed_input" "$(direct_of c03-cl-and-te-te-first)"
+check "direct: pipelined pair yields one response, then the connection closes" "1 True None close 502 upstream_unavailable" "$(direct_of c29-pipelined-pair)"
+check "direct: keep-alive request is answered Connection: close and closed" "1 False closed close 502 upstream_unavailable" "$(direct_of c35-connection-close-behavior)"
 
 # The evidence directory keeps the raw per-case JSON and logs (sanitized by construction: the logs
 # contain request lines and status codes only, never bodies or credentials). Scan to be sure.
