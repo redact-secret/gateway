@@ -57,8 +57,7 @@ jq -n -S \
   description: "Verified skeleton (health endpoints only; not a sanitizing proxy). Not published.",
   distributable: false,
   distribution_blockers: [
-    "license not selected (ADR 0010)",
-    "private vulnerability reporting not verified (ADR 0010)",
+    "private vulnerability reporting enabled but no end-to-end test report recorded (ADR 0010)",
     "Alpha 1 MVP qualification epic not complete"
   ],
   source: { commit: $commit, working_tree_dirty: $dirty },
