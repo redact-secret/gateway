@@ -15,9 +15,11 @@ use tokio::net::TcpListener;
 use tokio::sync::Notify;
 
 use crate::admission::Admission;
+use crate::admission::RequestLimits;
 use crate::boundary::Inspection;
 use crate::chat_route::{self, ChatRoute};
 use crate::config::{ConfigError, RouteId, RuntimePlan};
+use crate::head_guard::{HeadGuardListener, close_after_response};
 use crate::health::{self, HealthState};
 use crate::telemetry::{Metrics, SafeCode};
 use crate::transport::Upstream;
@@ -211,13 +213,17 @@ impl BoundServer {
             services,
         } = self;
         let chat = services.chat();
-        let app = chat_route::mount(health::router(Arc::clone(&state)), Arc::clone(&chat));
+        let app = guarded_app(chat_route::mount(
+            health::router(Arc::clone(&state)),
+            Arc::clone(&chat),
+        ));
         state.set_accepting(true);
         let on_shutdown = Arc::clone(&state);
         let draining = Arc::new(Notify::new());
         let started = Arc::clone(&draining);
-        // Every accepted connection enforces the write-stall deadline (#21).
-        let listener = StallListener::new(listener, chat.limits().stream_write_stall());
+        // Every accepted connection enforces the write-stall deadline (#21) and the
+        // request-head guard (#25).
+        let listener = guarded_listener(listener, chat.limits());
         let server = axum::serve(listener, app)
             .with_graceful_shutdown(async move {
                 shutdown.await;
@@ -245,6 +251,25 @@ impl BoundServer {
         drop(services);
         result
     }
+}
+
+/// The listener every served connection goes through: the write-stall deadline (#21) and
+/// the request-head guard (#25, ADR 0019). Tests that serve a router themselves use this
+/// too, so they exercise the production connection handling.
+pub(crate) fn guarded_listener(
+    listener: TcpListener,
+    limits: &RequestLimits,
+) -> impl axum::serve::Listener<Addr = SocketAddr> {
+    HeadGuardListener::new(
+        StallListener::new(listener, limits.stream_write_stall()),
+        limits.body_deadline(),
+    )
+}
+
+/// The router every served connection uses: `app` with every response marked
+/// `Connection: close`, so a connection carries exactly one request (ADR 0019).
+pub(crate) fn guarded_app(app: axum::Router) -> axum::Router {
+    app.layer(axum::middleware::map_response(close_after_response))
 }
 
 /// Installed termination-signal handlers (SIGINT and SIGTERM on Unix, Ctrl-C elsewhere).

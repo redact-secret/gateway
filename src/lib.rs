@@ -15,6 +15,7 @@ pub mod chat_route;
 pub mod cli;
 pub mod config;
 pub mod core_bridge;
+mod head_guard;
 pub mod health;
 pub mod protocol;
 pub mod server;
