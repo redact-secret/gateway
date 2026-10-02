@@ -1,6 +1,6 @@
 # Contract: resource limits
 
-Status: categories approved. **Per-request body, parse, and receipt limits have numeric values (#18) that are provisional pending quiet-host measurement.** Capacity counts (receipt, memory, inspection, upstream, stream) still have no defaults and come from configuration. Deadlines for upstream, idle, and total stream lifetime remain planned (#20, #21). Mechanism: [ADR 0003](../decisions/0003-resource-admission-and-lifetime.md); measurement gate: [ADR 0008](../decisions/0008-performance-measurement-gate.md); decision record: [ADR 0014](../decisions/0014-chat-completions-admission.md).
+Status: categories approved. **Per-request body, parse, and receipt limits have numeric values (#18) that are provisional pending quiet-host measurement.** Capacity counts (receipt, memory, inspection, upstream, stream) still have no defaults and come from configuration. **Upstream connect, response-header, and total deadlines, response header and body byte bounds, and the shutdown drain deadline have provisional values (#20, below).** Idle and total stream lifetime deadlines remain planned (#21). Mechanism: [ADR 0003](../decisions/0003-resource-admission-and-lifetime.md); measurement gate: [ADR 0008](../decisions/0008-performance-measurement-gate.md); decision record: [ADR 0014](../decisions/0014-chat-completions-admission.md).
 
 Every category below is finite, configurable through the validated static configuration, and tested near and across its boundary. A finite per-request limit is never enough alone: there is also an aggregate budget.
 
@@ -42,6 +42,21 @@ Configured under optional `resources.limits` ([configuration](../configuration.m
 | `admission_queue` | 16 | 1,024 | Most requests waiting at once for capacity. A full queue fails immediately, so waiters are bounded in number and time. `0` means no queue. |
 | `body_deadline_ms` | 10,000 | 300,000 | Time to receive the whole body after capacity is reserved. A 1 MiB body takes milliseconds on loopback; ten seconds tolerates a slow client while bounding how long a stalled one holds its reservation. |
 
+## Upstream deadlines and response bounds (#20; provisional pending quiet-host measurement)
+
+Same configuration object and the same status as the table above: finite, validated against ceilings, justified, **not measured**. Mechanism and rationale: [ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md).
+
+| Field | Provisional value | Ceiling | Rationale |
+| --- | --- | --- | --- |
+| `upstream_connect_ms` | 5,000 | 60,000 | TCP plus TLS to a public provider; long enough for a slow path, short enough to free the permit. Fixed on the client at startup. |
+| `upstream_header_ms` | 120,000 | 3,600,000 (and at most `upstream_total_ms`) | A non-streamed completion is answered only when generation ends; reasoning-heavy requests can take minutes. A deadline, not a latency goal. |
+| `upstream_total_ms` | 300,000 | 3,600,000 | Send to the last buffered response byte. |
+| `max_response_header_bytes` | 32,768 | 262,144 | Provider headers are small (hundreds of bytes); 32 KiB is far above any legitimate set. |
+| `max_response_body_bytes` | 4,194,304 (4 MiB) | 67,108,864 | An ordinary chat completion is tens of KiB; 4 MiB leaves room for large `n` or long outputs. Buffered memory is bounded by `upstream` permits times this value. |
+| `shutdown_drain_ms` | 10,000 | 600,000 | Time in-flight requests may finish after a termination signal before they are cancelled. `0` cancels immediately. |
+
+The buffered response is not part of the request `MemoryReservation` (its size is unknown until read). It is bounded instead by the `UpstreamPermit` it holds until the body is written or abandoned: at most `resources.capacity.upstream * max_response_body_bytes` bytes are buffered at once. The HTTP parser caps response header fields at 64 and has its own buffer ceiling; `max_response_header_bytes` is enforced after parsing.
+
 Total decoded string bytes are bounded by `max_body_bytes` (decoded text cannot exceed the wire bytes it came from).
 
 ## Memory accounting and composition with the global budget
@@ -64,9 +79,10 @@ Parsing runs on the request task (no `spawn_blocking`), bounded by `max_body_byt
 ## Known gaps
 
 - Connection count is not yet limited before headers are parsed, and there is no header-read timeout, so a connection that never finishes its headers holds a socket but no reservation. Header and idle-connection bounds belong with transport hardening (#25, Alpha 2 #10).
-- Upstream, idle, and stream-lifetime limits have no values yet.
+- Idle and stream-lifetime limits have no values yet (#21). Upstream deadlines and response bounds are provisional (#20).
+- Idle connection pooling to the provider is off, so every request pays a connection setup; revisit with measurement (ADR 0017).
 - The request-wide finding bound (`content.max_findings`, default 1024, ceiling 50,000) and the inspection pool sizing (workers `min(inspection permits, CPUs, 16)`, queue `min(inspection permits, 1024)`) are provisional (#19), not measured on a quiet host (ADR 0008). The transformed-output bound is `min(max_body_bytes, bytes covered by the request's reservation)`; the reservation already budgets one output copy.
 
 ## Status
 
-Request body, parse, memory-composition, admission wait/queue, and body-deadline limits are implemented in #18 with the provisional values above and boundary tests (`tests/chat_admission.rs`, unit tests in `admission.rs`, `protocol/json.rs`, `chat_route.rs`). Everything else in the table is planned.
+Request body, parse, memory-composition, admission wait/queue, and body-deadline limits are implemented in #18 with the provisional values above and boundary tests (`tests/chat_admission.rs`, unit tests in `admission.rs`, `protocol/json.rs`, `chat_route.rs`). Upstream in-flight capacity, response bounds, upstream deadlines, and the shutdown deadline are implemented in #20 with the provisional values above and tests in `src/transport/tests/forward_tests.rs`. Stream capacity, idle, and stream-lifetime limits are planned (#21).

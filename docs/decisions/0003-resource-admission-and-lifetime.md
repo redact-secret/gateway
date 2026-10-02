@@ -1,6 +1,6 @@
 # ADR 0003: Resource admission and lifetime
 
-Status: Accepted (design); numeric settings deferred to measurement. Implementation status: five permit owners scaffolded in #2 (`try_*` only, no numbers). Bounded waiting (queue plus admission wait), the body deadline, and receipt wiring on `POST /v1/chat/completions` implemented in #18 ([ADR 0014](0014-chat-completions-admission.md)); numbers are provisional pending measurement. Upstream and stream wiring remain #20/#21; capacity tests #6. Covers issue #3 section B. Categories: [resource-limits contract](../contracts/resource-limits.md).
+Status: Accepted (design); numeric settings deferred to measurement. Implementation status: five permit owners scaffolded in #2 (`try_*` only, no numbers). Bounded waiting (queue plus admission wait), the body deadline, and receipt wiring on `POST /v1/chat/completions` implemented in #18 ([ADR 0014](0014-chat-completions-admission.md)); numbers are provisional pending measurement. The upstream permit is wired in #20 (`try_upstream` after inspection, held through the buffered response body; [ADR 0017](0017-json-forwarding-deadlines-and-cancellation.md)); stream wiring remains #21; capacity tests #6. Covers issue #3 section B. Categories: [resource-limits contract](../contracts/resource-limits.md).
 
 ## Context
 

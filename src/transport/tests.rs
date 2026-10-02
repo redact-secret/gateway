@@ -28,7 +28,7 @@ use tokio::net::TcpListener;
 use super::destination::{Destination, Origin, RouteBinding};
 use super::resolver::{AddressPolicy, AddressSource, PolicyResolver};
 use super::*;
-use crate::admission::{Admission, CapacityPlan};
+use crate::admission::{Admission, CapacityPlan, RequestLimits};
 use crate::boundary;
 use crate::config::{Provider, RouteId, UpstreamAuthority};
 use crate::core_bridge::CompleteInspection;
@@ -48,6 +48,7 @@ use crate::protocol::ValidatedRequest;
 #[path = "../../tests/support/fake_upstream.rs"]
 mod fake_upstream;
 
+mod forward_tests;
 #[path = "../../tests/support/leak.rs"]
 #[allow(dead_code)]
 mod leak;
@@ -65,18 +66,39 @@ fn route() -> RouteId {
 
 /// Client over plain loopback HTTP (the one place `https_only` is lowered, test-only).
 fn http_upstream(addr: SocketAddr) -> Upstream {
+    http_upstream_with(addr, RequestLimits::provisional())
+}
+
+/// As [`http_upstream`] with explicit deadlines and bounds. The client carries no overall
+/// timeout of its own: the deadlines under test are the transport's.
+fn http_upstream_with(addr: SocketAddr, limits: RequestLimits) -> Upstream {
     let origin = Origin::for_test_http(addr);
     let dest = Destination::for_test(origin, PATH).expect("destination");
     let resolver = PolicyResolver::new(vec![], Arc::new(NoSource), AddressPolicy::PublicOrLoopback);
     let client = hardened_builder(resolver)
         .https_only(false)
-        .timeout(Duration::from_secs(5))
+        .connect_timeout(limits.upstream_connect())
         .build()
         .expect("client");
     Upstream {
         client,
         routes: vec![RouteBinding::for_test(route(), dest)].into_boxed_slice(),
+        limits,
+        metrics: None,
     }
+}
+
+thread_local! {
+    static CLIENT_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Count clients built on this thread (every client goes through [`hardened_builder`]).
+pub(super) fn note_client_build() {
+    CLIENT_BUILDS.with(|c| c.set(c.get().saturating_add(1)));
+}
+
+fn client_builds() -> usize {
+    CLIENT_BUILDS.with(std::cell::Cell::get)
 }
 
 struct NoSource;
@@ -240,7 +262,21 @@ fn tls_upstream(
     Upstream {
         client: b.build().expect("client"),
         routes: vec![RouteBinding::for_test(route(), dest)].into_boxed_slice(),
+        limits: RequestLimits::provisional(),
+        metrics: None,
     }
+}
+
+/// An untrusted-certificate client for the TLS fake, resolving to loopback (used by the
+/// forwarding tests, which must not name the address-policy seam themselves).
+fn untrusted_tls_upstream(fake: &TlsFake) -> Upstream {
+    tls_upstream(
+        fake,
+        None,
+        AddressPolicy::PublicOrLoopback,
+        loopback(),
+        Arc::new(AtomicUsize::new(0)),
+    )
 }
 
 fn loopback() -> Vec<IpAddr> {
@@ -254,7 +290,7 @@ async fn send(up: &Upstream) -> Result<reqwest::Response, reqwest::Error> {
 // ------------------------------------------------------------------- tests
 
 #[tokio::test]
-async fn forward_is_not_implemented_and_sends_nothing() {
+async fn forward_to_an_unknown_route_fails_closed_before_any_send() {
     let one = NonZeroU32::new(1).expect("nonzero");
     let admission = Admission::new(&CapacityPlan::new(one, one, one, one, one));
     let v = ValidatedRequest::for_test(
@@ -268,10 +304,14 @@ async fn forward_is_not_implemented_and_sends_nothing() {
     )
     .expect("approved");
     let upstream = Upstream::new(None).expect("client");
+    let headers = forward_tests::vetted_for_forward("sk-SYNTHETIC-REVOKED-ZZZZ-9999-NOT-A-KEY");
+    let permit = admission.try_upstream().expect("upstream");
     assert_eq!(
-        upstream.forward(s).await.unwrap_err(),
-        TransportError::NotImplemented
+        upstream.forward(s, headers, permit).await.unwrap_err(),
+        TransportError::UnknownRoute
     );
+    // The permit came back with the dropped error path.
+    assert!(admission.try_upstream().is_ok());
 }
 
 #[test]
@@ -574,6 +614,8 @@ async fn proxy_env_child() {
     let up = Upstream {
         client,
         routes: vec![RouteBinding::for_test(route(), dest)].into_boxed_slice(),
+        limits: RequestLimits::provisional(),
+        metrics: None,
     };
     let resp = send(&up).await.expect("direct request");
     assert_eq!(resp.status().as_u16(), 200);

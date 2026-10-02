@@ -985,6 +985,7 @@ name = "redact-secret-gateway"
 version = "0.1.0-alpha.0"
 dependencies = [
  "axum",
+ "http-body",
  "rcgen",
  "redact-secret",
  "reqwest",

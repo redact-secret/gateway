@@ -25,7 +25,7 @@ use crate::core_bridge::{
 };
 use crate::protocol::ValidatedRequest;
 use crate::protocol::chat::SerializeError;
-use crate::telemetry::SafeCode;
+use crate::telemetry::{Metrics, SafeCode, Stage};
 
 /// Most inspection worker threads, whatever the configured inspection capacity.
 const MAX_WORKERS: usize = 16;
@@ -80,6 +80,7 @@ pub struct Inspection {
     spec: Arc<InspectorSpec>,
     admission: Arc<Admission>,
     max_output: usize,
+    metrics: Option<Arc<Metrics>>,
 }
 
 impl Inspection {
@@ -111,7 +112,15 @@ impl Inspection {
             spec: Arc::new(spec),
             admission,
             max_output: max_input,
+            metrics: None,
         })
+    }
+
+    /// Record the serialization stage timing (measured on the worker) into `metrics`.
+    #[must_use]
+    pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     /// Number of inspection worker threads (each owns one core registry).
@@ -149,8 +158,9 @@ impl Inspection {
             .map_err(|_| BoundaryError::Core(CoreBridgeError::Overload))?;
         let spec = Arc::clone(&self.spec);
         let max_output = self.max_output;
+        let metrics = self.metrics.clone();
         let handle = self.pool.submit_job(permit, move |inspector| {
-            inspect_request(inspector, &spec, max_output, validated)
+            inspect_request(inspector, &spec, max_output, validated, metrics.as_deref())
         })?;
         let (validated, inspection) = handle.await??;
         approve(validated, inspection, route)
@@ -165,6 +175,7 @@ fn inspect_request(
     spec: &InspectorSpec,
     max_output: usize,
     mut validated: ValidatedRequest,
+    metrics: Option<&Metrics>,
 ) -> Result<(ValidatedRequest, CompleteInspection), BoundaryError> {
     // `model` is a validated identifier that is never rewritten; any finding rejects.
     inspector.reject_if_findings(validated.chat().model())?;
@@ -188,6 +199,7 @@ fn inspect_request(
         return Err(CoreBridgeError::Incomplete.into());
     }
     let bound = max_output.min(reserved_bytes(&validated));
+    let serializing = std::time::Instant::now();
     let output = validated
         .chat()
         .serialize_bounded(bound)
@@ -195,6 +207,9 @@ fn inspect_request(
             SerializeError::Limit => BoundaryError::OutputLimit,
             SerializeError::Invalid => BoundaryError::Serialization,
         })?;
+    if let Some(m) = metrics {
+        m.record(Stage::Serialization, serializing.elapsed());
+    }
     let inspection = scope.finish(output)?;
     Ok((validated, inspection))
 }

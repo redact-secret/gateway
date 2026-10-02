@@ -1,6 +1,6 @@
 # ADR 0002: Request states and forwarding authority
 
-Status: Accepted (design). Implementation status: types and transport signature implemented in #2 (scaffold; no route). Runtime no-forward tests remain #6/#19/#20. Covers issue #3 section A. Normative detail: [request-state contract](../contracts/request-state.md).
+Status: Accepted (design). Implementation status: types and transport signature implemented in #2 (scaffold; no route). Runtime no-forward tests: #6/#19, and for the wired forwarding path #20 (`src/transport/tests/forward_tests.rs`; `Upstream::forward` now also takes the request-local `VettedHeaders` and an `UpstreamPermit`, but still no body type other than `SanitizedRequest`). Covers issue #3 section A. Normative detail: [request-state contract](../contracts/request-state.md).
 
 ## Context
 

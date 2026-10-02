@@ -88,6 +88,8 @@ Configure upstream origins and routes statically. Never derive a destination fro
 
 Relay qualified upstream JSON and SSE responses; do not claim response redaction. Bound response headers, buffering, total bytes where applicable, stream lifetime, and idle time. Avoid accumulating an entire SSE stream. Propagate downstream disconnects to the upstream operation, bound slow consumers, and terminate stalled streams.
 
+Implemented (#20, [ADR 0017](docs/decisions/0017-json-forwarding-deadlines-and-cancellation.md)): ordinary JSON responses are buffered under hard header and body bounds and finite connect, response-header, and total deadlines, then relayed with the provider's status, allowlisted headers, and unredacted body; the buffer lives under an `UpstreamPermit`. A downstream disconnect drops the request future, which cancels the upstream exchange and releases every permit and buffer, and shutdown drains for a bounded time before cancelling the rest. Bytes already sent to a provider cannot be retracted. `stream: true` is rejected locally (`501`) until SSE relay (#21); SDK qualification is #22.
+
 Gateway adds no automatic upstream retries in 0.1.0. SDK retries remain SDK behavior and must be qualified/documented. Do not claim exactly-once delivery. After response headers or stream bytes have been sent, a later error cannot be converted into a new HTTP status; terminate according to the documented stream error contract without falsely reporting normal completion.
 
 ## Limits, errors, and telemetry

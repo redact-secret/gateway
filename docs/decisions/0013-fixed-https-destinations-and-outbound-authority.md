@@ -1,6 +1,6 @@
 # ADR 0013: Fixed HTTPS destinations and outbound authority
 
-Status: Accepted (design); implemented for the destination, client, and address layer (#23). Request-body forwarding is **planned** (#20). Refines [ADR 0009](0009-credential-and-upstream-trust-model.md); implements its "Upstream" section.
+Status: Accepted (design); implemented for the destination, client, and address layer (#23). Request-body forwarding is implemented in #20 ([ADR 0017](0017-json-forwarding-deadlines-and-cancellation.md)), with idle pooling disabled so a request is never replayed on a reused connection. Refines [ADR 0009](0009-credential-and-upstream-trust-model.md); implements its "Upstream" section.
 
 ## Context
 

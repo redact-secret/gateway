@@ -1,6 +1,6 @@
 # ADR 0016: Header allowlists and request-local provider credentials
 
-Status: Accepted. Implementation status: implemented (inbound vetting, credential type, outbound wire headers, response-header allowlist); sending and relaying are planned (#20, #21). Date: 2026-10-02. Implements the #3 design contract for issue #24 on top of [ADR 0009](0009-credential-and-upstream-trust-model.md), [ADR 0013](0013-fixed-https-destinations-and-outbound-authority.md), and [ADR 0014](0014-chat-completions-admission.md).
+Status: Accepted. Implementation status: implemented (inbound vetting, credential type, outbound wire headers, response-header allowlist); sending and relaying of ordinary JSON responses are implemented in #20 ([ADR 0017](0017-json-forwarding-deadlines-and-cancellation.md)); SSE relay is planned (#21). Date: 2026-10-02. Implements the #3 design contract for issue #24 on top of [ADR 0009](0009-credential-and-upstream-trust-model.md), [ADR 0013](0013-fixed-https-destinations-and-outbound-authority.md), and [ADR 0014](0014-chat-completions-admission.md).
 
 ## Context
 

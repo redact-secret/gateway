@@ -1,6 +1,6 @@
 # ADR 0004: Cancellation and synchronous core work
 
-Status: Accepted (design); worker strategy deferred to #5 measurements. Implementation status: implemented for inspection in #19 (dedicated worker pool whose jobs own the `InspectionPermit` and the request's `MemoryReservation` until real completion; cancelled results discarded; [ADR 0015](0015-core-inspection-and-request-transformation.md)); the pre-upstream cancellation check and the shutdown drain deadline are planned with #20. Covers issue #3 section C.
+Status: Accepted (design); worker strategy deferred to #5 measurements. Implementation status: implemented for inspection in #19 (dedicated worker pool whose jobs own the `InspectionPermit` and the request's `MemoryReservation` until real completion; cancelled results discarded; [ADR 0015](0015-core-inspection-and-request-transformation.md)); the pre-upstream cancellation check (a dropped request future can never reach `forward`), downstream-disconnect cancellation of the upstream exchange, and the shutdown drain deadline are implemented in #20 ([ADR 0017](0017-json-forwarding-deadlines-and-cancellation.md)); bytes already sent to a provider cannot be retracted. Covers issue #3 section C.
 
 ## Context
 

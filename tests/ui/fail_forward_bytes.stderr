@@ -1,7 +1,7 @@
 error[E0308]: mismatched types
- --> tests/ui/fail_forward_bytes.rs:4:30
+ --> tests/ui/fail_forward_bytes.rs:6:30
   |
-4 |     let _ = upstream.forward(body).await;
+6 |     let _ = upstream.forward(body, headers, permit).await;
   |                      ------- ^^^^ expected `SanitizedRequest`, found `Vec<u8>`
   |                      |
   |                      arguments to this method are incorrect
