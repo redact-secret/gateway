@@ -24,6 +24,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0008](0008-performance-measurement-gate.md) | Performance measurement gate (G) | Accepted (design); all numbers deferred | #5, #6 |
 | [0009](0009-credential-and-upstream-trust-model.md) | Credential and upstream trust model | Accepted (design) | #4, #23-#25 |
 | [0010](0010-release-prerequisites-license-and-reporting.md) | License and private security reporting | **Open: needs maintainer** | maintainer |
+| [0011](0011-dependency-and-toolchain-selection.md) | Toolchain, dependency, and core pin selection | Accepted (design); implemented (scaffold) | #2, #4, #5, #6, #7 |
 
 ## Contracts
 

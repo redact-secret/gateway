@@ -1,6 +1,6 @@
 # ADR 0002: Request states and forwarding authority
 
-Status: Accepted (design). Implementation status: planned. Covers issue #3 section A. Normative detail: [request-state contract](../contracts/request-state.md).
+Status: Accepted (design). Implementation status: types and transport signature implemented in #2 (scaffold; no route). Runtime no-forward tests remain #6/#19/#20. Covers issue #3 section A. Normative detail: [request-state contract](../contracts/request-state.md).
 
 ## Context
 

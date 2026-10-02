@@ -1,6 +1,6 @@
 # ADR 0003: Resource admission and lifetime
 
-Status: Accepted (design); numeric settings deferred to measurement. Implementation status: planned. Covers issue #3 section B. Categories: [resource-limits contract](../contracts/resource-limits.md).
+Status: Accepted (design); numeric settings deferred to measurement. Implementation status: five permit owners scaffolded in #2 (`try_*` only, no numbers). Waiting, deadlines, and wiring remain #18; capacity tests #6. Covers issue #3 section B. Categories: [resource-limits contract](../contracts/resource-limits.md).
 
 ## Context
 

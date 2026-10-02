@@ -78,7 +78,20 @@ Gateway releases have an independent version. Each release records its exact cor
 
 ## Development
 
-Scaffolding will establish reproducible commands, a pinned toolchain, and dependency versions. Until then, there is no installation or run command advertised as working. Tokio, Axum, and Reqwest are the preferred transport candidates, subject to the initial ADR and prototype evidence.
+The Rust scaffold exists (issue #2): a private binary crate with the module skeleton, a pinned toolchain (`rust-toolchain.toml`, Rust 1.98.1, MSRV 1.88), a committed `Cargo.lock`, and an exact core pin (`redact-secret =0.1.0-beta.12`). Selected versions and features are in [ADR 0011](docs/decisions/0011-dependency-and-toolchain-selection.md). The executable only reports its version. It is not a working proxy: there is no configuration, no listener, and no forwarding route.
+
+Commands that work today (install Rust through `rustup`; the toolchain file selects the compiler):
+
+```bash
+cargo build --locked
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked          # unit, API-boundary (trybuild), dependency-policy, and version smoke tests
+cargo run --locked -- --version
+cargo deny check             # requires cargo-deny; policy in deny.toml
+```
+
+Planned, not implemented yet: configuration validation, serving, health endpoints (#4), the core probe (#5), the fake-upstream harness and CI (#6), and release builds and images (#7).
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md), [CONVENTIONS.md](CONVENTIONS.md), [CONTRIBUTION.md](CONTRIBUTION.md), and [SECURITY.md](SECURITY.md) before implementation.
 

@@ -18,7 +18,17 @@ Do not paste real prompts, API keys, identifying personal data, provider error p
 
 ## Development setup
 
-The scaffolding tasks will provide a pinned Rust toolchain, Cargo workspace/binary manifest, lockfile, dependency selection ADR, reproducible commands, and CI. No finished local setup is claimed before those tasks land. Validate the commands against the actual repository before documenting them as runnable.
+The pinned Rust toolchain (`rust-toolchain.toml`), crate manifest, lockfile, and dependency ADR ([ADR 0011](docs/decisions/0011-dependency-and-toolchain-selection.md)) exist. Run these before every PR; all use the committed lockfile:
+
+```bash
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+cargo build --locked
+cargo deny check     # needs cargo-deny
+```
+
+CI does not exist yet (#6). Do not claim a check passed without running it. `cargo test` includes `trybuild` compile-fail tests whose expected diagnostics live in `tests/ui/*.stderr`; after an intentional change, regenerate with `TRYBUILD=overwrite cargo test --locked --test api_boundary` and review the diff. Production code must not panic on untrusted input: unwrap, expect, panic, and indexing are denied by lint outside tests, and unsafe code is forbidden.
 
 Normal tests use a fake upstream and synthetic inputs. Optional live provider tests require a separate explicit procedure and must never become an implicit requirement for contributors or ordinary CI.
 

@@ -1,0 +1,16 @@
+error: cannot construct `SanitizedRequest` with struct literal syntax due to private fields
+ --> tests/ui/fail_construct_sanitized_literal.rs:5:5
+  |
+5 |     SanitizedRequest {
+  |     ^^^^^^^^^^^^^^^^
+6 |         body: Vec::new(),
+  |         ---------------- private field
+  |
+  = note: ...and other private fields `route` and `_memory` that were not provided
+help: you might have meant to use the `new` associated function
+  |
+5 -     SanitizedRequest {
+6 -         body: Vec::new(),
+7 -     }
+5 +     SanitizedRequest::new(_, _, _)
+  |

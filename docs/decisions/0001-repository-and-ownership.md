@@ -1,6 +1,6 @@
 # ADR 0001: Repository, ownership, and independent versioning
 
-Status: Accepted (design). Implementation status: planned (no code exists).
+Status: Accepted (design). Implementation status: partially implemented by #2 (private binary crate, committed `Cargo.lock`, exact core pin; see [ADR 0011](0011-dependency-and-toolchain-selection.md)). Core capability verification is still #5.
 
 ## Context
 
@@ -50,7 +50,7 @@ Dependency-graph review shows core has no reverse dependency. A repository revie
 
 ## Deferred measured choices
 
-None. Transport stack versions are chosen in the #2 dependency ADR.
+None. Transport stack versions were chosen in [ADR 0011](0011-dependency-and-toolchain-selection.md).
 
 ## Cross-links and open acceptance
 

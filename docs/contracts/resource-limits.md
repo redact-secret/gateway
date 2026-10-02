@@ -29,4 +29,4 @@ Every category below is finite, configurable through the validated static config
 
 ## Status
 
-Planned. This file deliberately contains no numbers.
+Owners scaffolded in #2 (`admission`); no numbers exist. This file deliberately contains no numbers.
