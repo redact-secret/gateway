@@ -56,6 +56,8 @@ SDK retry column: **verified in #22** with the pinned SDKs (npm `openai` 7.27.0,
 | `Content-Type` not exactly `application/json` | 415 | `unsupported_input` | no |
 | `Content-Encoding` present or a transfer coding other than `chunked` | 415 | `unsupported_input` | no |
 | Malformed or conflicting `Content-Length` / empty body | 400 | `malformed_input` | no |
+| `Content-Length` together with `Transfer-Encoding` in the first request head (written by the connection-level head guard before the HTTP layer, #43; same body and `Connection: close`) | 400 | `malformed_input` | no |
+| Request head over 64 KiB without ending (written by the head guard, #43) | 431 | `limit_exceeded` | no |
 | Invalid JSON, invalid UTF-8, duplicate key, aborted body | 400 | `malformed_input` | no |
 | Well-formed but outside the supported subset (unknown or unsupported field, wrong type, out-of-range value) | 422 | `unsupported_input` | no |
 | Declared or actual body over the limit, or a depth/node/string/count budget exceeded | 413 | `limit_exceeded` | no |
@@ -79,7 +81,7 @@ After admission, inspection and approval (#19) add these rejections, all local, 
 
 Rationale for the mappings: a caller cannot fix `5xx`/`408` by changing the request, so those are the retryable ones (transient capacity, slow client); everything the caller must change is a non-retried `4xx`. `413` is used for every limit rather than `400` so a caller can tell "too big" from "wrong". `422` separates a request that parses but is not in the supported subset from one that does not parse at all.
 
-Rejections made by the HTTP layer before the handler runs (for example a `Content-Length` that is not a valid integer) are bare `400` responses without this body; they are still local and still send nothing upstream.
+The two head-guard rows are written by `src/head_guard.rs` as fixed bytes (the same body and headers as above, `Content-Length` set, no request-derived byte) and are best effort on delivery: a peer that is still sending when the connection closes may see a reset instead. A head not finished within the head deadline is closed without a response. Rejections made by the HTTP layer before the handler runs (for example a `Content-Length` that is not a valid integer) are bare `400` responses without this body; they are still local and still send nothing upstream.
 
 ## Forwarding and relayed responses (#20)
 

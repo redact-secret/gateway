@@ -7,10 +7,13 @@
 //!
 //! 1. The first request head on a connection is held back (bounded by [`MAX_HEAD_BYTES`])
 //!    until its blank line arrives and is scanned. A head that carries both a
-//!    `Content-Length` and a `Transfer-Encoding` field is **ambiguous**: the connection is
-//!    failed with an IO error and the HTTP parser never sees it, so no handler runs and
-//!    nothing is read from the body. A head that is not finished within the head deadline,
-//!    or that exceeds the byte bound, fails the connection the same way.
+//!    `Content-Length` and a `Transfer-Encoding` field is **ambiguous**: the guard writes a
+//!    fixed, local `400 malformed_input` ([`AMBIGUOUS_FRAMING_RESPONSE`], `Connection:
+//!    close`), shuts the write side down, and fails the read with an IO error, so the HTTP
+//!    parser never sees the head, no handler runs, and nothing is read from the body. A
+//!    head that is not finished within the head deadline, or that exceeds the byte bound,
+//!    fails the connection silently when late (no response is written to a peer that is
+//!    stalling) and gets `431 limit_exceeded` when over the byte bound.
 //! 2. Only the first head is inspected. That is sufficient because the server marks every
 //!    response `Connection: close` ([`close_after_response`]), so a connection carries one
 //!    request: bytes after that request (a pipelined or smuggled second message) are never
@@ -39,6 +42,29 @@ use tokio::time::{Sleep, sleep};
 pub(crate) const MAX_HEAD_BYTES: usize = 64 * 1024;
 
 const READ_CHUNK: usize = 4096;
+
+/// The complete response written for a head that is still unfinished beyond
+/// [`MAX_HEAD_BYTES`]: `431 limit_exceeded`, as for headers over the route's byte limits.
+pub(crate) const HEAD_TOO_LARGE_RESPONSE: &[u8] =
+    b"HTTP/1.1 431 Request Header Fields Too Large\r\n\
+Content-Type: application/json\r\n\
+Cache-Control: no-store\r\n\
+Connection: close\r\n\
+Content-Length: 35\r\n\
+\r\n\
+{\"error\":{\"code\":\"limit_exceeded\"}}";
+
+/// The complete response written for an ambiguous head (#43, ADR 0019 follow-up): the
+/// fixed `malformed_input` body of the error contract, with no request-derived byte. The
+/// pinned HTTP server cannot produce it (it discards the length before any hook runs; see
+/// ADR 0021), so the guard that already holds the head writes it.
+pub(crate) const AMBIGUOUS_FRAMING_RESPONSE: &[u8] = b"HTTP/1.1 400 Bad Request\r\n\
+Content-Type: application/json\r\n\
+Cache-Control: no-store\r\n\
+Connection: close\r\n\
+Content-Length: 36\r\n\
+\r\n\
+{\"error\":{\"code\":\"malformed_input\"}}";
 
 /// What the scan concluded about the bytes held so far.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,8 +174,23 @@ enum Phase {
     },
     /// The head was accepted; hand the held bytes to the reader first.
     Release { held: Vec<u8>, from: usize },
+    /// The head was ambiguous: write the fixed refusal, close the write side, then fail the
+    /// read. The head timer keeps running, so a peer that stops reading cannot hold this.
+    Reject {
+        response: &'static [u8],
+        sent: usize,
+        step: RejectStep,
+        timer: Pin<Box<Sleep>>,
+    },
     /// Everything after the first head passes through untouched.
     Pass,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RejectStep {
+    Write,
+    Flush,
+    Shutdown,
 }
 
 /// An IO object that vets the first request head before the HTTP server reads it.
@@ -175,7 +216,20 @@ fn refuse(kind: io::ErrorKind, why: &'static str) -> Poll<io::Result<()>> {
     Poll::Ready(Err(io::Error::new(kind, why)))
 }
 
-impl<T: AsyncRead + Unpin> AsyncRead for HeadGuardIo<T> {
+/// Leave the head phase for the refusal phase, dropping the held bytes and keeping the
+/// head timer running.
+fn reject(phase: &mut Phase, response: &'static [u8]) {
+    if let Phase::Head { timer, .. } = std::mem::replace(phase, Phase::Pass) {
+        *phase = Phase::Reject {
+            response,
+            sent: 0,
+            step: RejectStep::Write,
+            timer,
+        };
+    }
+}
+
+impl<T: AsyncRead + AsyncWrite + Unpin> AsyncRead for HeadGuardIo<T> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -195,6 +249,51 @@ impl<T: AsyncRead + Unpin> AsyncRead for HeadGuardIo<T> {
                     }
                     return Poll::Ready(Ok(()));
                 }
+                Phase::Reject {
+                    response,
+                    sent,
+                    step,
+                    timer,
+                } => {
+                    let polled = match step {
+                        RejectStep::Write => {
+                            let rest = response.get(*sent..).unwrap_or_default();
+                            match Pin::new(&mut this.inner).poll_write(cx, rest) {
+                                Poll::Ready(Ok(0)) => {
+                                    return refuse(io::ErrorKind::WriteZero, "refusal not written");
+                                }
+                                Poll::Ready(Ok(n)) => {
+                                    *sent = sent.saturating_add(n);
+                                    if *sent >= response.len() {
+                                        *step = RejectStep::Flush;
+                                    }
+                                    continue;
+                                }
+                                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                                Poll::Pending => Poll::Pending,
+                            }
+                        }
+                        RejectStep::Flush => match Pin::new(&mut this.inner).poll_flush(cx) {
+                            Poll::Ready(Ok(())) => {
+                                *step = RejectStep::Shutdown;
+                                continue;
+                            }
+                            Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                            Poll::Pending => Poll::Pending,
+                        },
+                        RejectStep::Shutdown => match Pin::new(&mut this.inner).poll_shutdown(cx) {
+                            // Best effort: the connection is failed either way.
+                            Poll::Ready(_) => {
+                                return refuse(io::ErrorKind::InvalidData, "request head refused");
+                            }
+                            Poll::Pending => Poll::Pending,
+                        },
+                    };
+                    if timer.as_mut().poll(cx).is_ready() {
+                        return refuse(io::ErrorKind::TimedOut, "request head deadline");
+                    }
+                    return polled;
+                }
                 Phase::Head { held, timer } => {
                     let mut chunk = [0_u8; READ_CHUNK];
                     let mut read = ReadBuf::new(&mut chunk);
@@ -213,7 +312,9 @@ impl<T: AsyncRead + Unpin> AsyncRead for HeadGuardIo<T> {
                     held.extend_from_slice(filled);
                     match inspect_head(held) {
                         HeadVerdict::Ambiguous => {
-                            return refuse(io::ErrorKind::InvalidData, "ambiguous request framing");
+                            // The held bytes are dropped here; the parser never sees them.
+                            reject(&mut this.phase, AMBIGUOUS_FRAMING_RESPONSE);
+                            continue;
                         }
                         HeadVerdict::Clean => {}
                         // A truncated head cannot be parsed as a request; hand it over so
@@ -221,10 +322,7 @@ impl<T: AsyncRead + Unpin> AsyncRead for HeadGuardIo<T> {
                         HeadVerdict::Incomplete if eof => {}
                         HeadVerdict::Incomplete => {
                             if held.len() > MAX_HEAD_BYTES {
-                                return refuse(
-                                    io::ErrorKind::InvalidData,
-                                    "request head too large",
-                                );
+                                reject(&mut this.phase, HEAD_TOO_LARGE_RESPONSE);
                             }
                             continue;
                         }
@@ -318,12 +416,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_head_split_into_single_bytes_is_still_judged_whole() {
-        let (near, mut far) = duplex(64 * 1024);
+        let (near, far) = duplex(64 * 1024);
         let mut io = HeadGuardIo::new(near, Duration::from_secs(30));
         let head = b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 4\r\n\r\n";
+        let (mut far_read, mut far_write) = tokio::io::split(far);
         tokio::spawn(async move {
             for byte in head {
-                far.write_all(&[*byte]).await.unwrap();
+                far_write.write_all(&[*byte]).await.unwrap();
                 tokio::task::yield_now().await;
             }
             // Keep the pipe open: the guard must refuse on its own.
@@ -332,6 +431,78 @@ mod tests {
         let mut got = [0_u8; 8];
         let error = io.read(&mut got).await.unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        // The peer got the fixed refusal and then the write side was closed, while its own
+        // write side is still open.
+        let mut answer = Vec::new();
+        far_read.read_to_end(&mut answer).await.unwrap();
+        assert_eq!(answer, AMBIGUOUS_FRAMING_RESPONSE);
+    }
+
+    /// The refusals are complete, well-formed responses whose declared length is the body.
+    #[test]
+    fn refusal_responses_are_well_formed_and_fixed() {
+        for (response, status, code) in [
+            (AMBIGUOUS_FRAMING_RESPONSE, "400", "malformed_input"),
+            (HEAD_TOO_LARGE_RESPONSE, "431", "limit_exceeded"),
+        ] {
+            let text = std::str::from_utf8(response).unwrap();
+            let (head, body) = text.split_once("\r\n\r\n").unwrap();
+            assert!(head.starts_with(&format!("HTTP/1.1 {status} ")));
+            assert_eq!(body, format!(r#"{{"error":{{"code":"{code}"}}}}"#));
+            let declared = head
+                .lines()
+                .find_map(|l| l.strip_prefix("Content-Length: "))
+                .unwrap();
+            assert_eq!(declared.parse::<usize>().unwrap(), body.len());
+            for field in [
+                "Connection: close",
+                "Content-Type: application/json",
+                "Cache-Control: no-store",
+            ] {
+                assert!(head.lines().any(|l| l == field), "{field}");
+            }
+        }
+    }
+
+    /// An ambiguous head is refused even when pipelined bytes follow it: nothing after the
+    /// head is released to the reader, and the refusal is repeated on every later read.
+    #[tokio::test]
+    async fn an_ambiguous_head_releases_nothing_to_the_reader() {
+        let (near, mut far) = duplex(64 * 1024);
+        let mut io = HeadGuardIo::new(near, Duration::from_secs(30));
+        far.write_all(
+            b"POST / HTTP/1.1\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n\
+              GET /healthz HTTP/1.1\r\n\r\n",
+        )
+        .await
+        .unwrap();
+        let mut got = [0_u8; 256];
+        for _ in 0..3 {
+            let error = io.read(&mut got).await.unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        }
+        assert!(got.iter().all(|b| *b == 0), "no byte was handed over");
+        drop(io);
+        let mut answer = Vec::new();
+        far.read_to_end(&mut answer).await.unwrap();
+        assert_eq!(answer, AMBIGUOUS_FRAMING_RESPONSE, "exactly one refusal");
+    }
+
+    /// A peer that does not read its refusal cannot hold the connection past the head
+    /// deadline: the write is pending (tiny pipe) and the absolute timer ends it.
+    #[tokio::test]
+    async fn a_peer_that_never_reads_the_refusal_is_cut_at_the_head_deadline() {
+        let (near, mut far) = duplex(8);
+        let mut io = HeadGuardIo::new(near, Duration::from_millis(200));
+        let head = b"POST / HTTP/1.1\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n";
+        // Only 8 bytes fit in the pipe at a time, so feed the head from a task.
+        let feeder = tokio::spawn(async move {
+            let _ = far.write_all(head).await;
+            std::future::pending::<()>().await;
+        });
+        let error = io.read(&mut [0_u8; 8]).await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        feeder.abort();
     }
 
     #[tokio::test]
@@ -371,6 +542,10 @@ mod tests {
         let mut got = [0_u8; 8];
         let error = io.read(&mut got).await.unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        drop(io);
+        let mut answer = Vec::new();
+        far.read_to_end(&mut answer).await.unwrap();
+        assert_eq!(answer, HEAD_TOO_LARGE_RESPONSE);
     }
 
     #[tokio::test]

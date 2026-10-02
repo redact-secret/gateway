@@ -29,6 +29,9 @@ use super::forward_tests::{Caps, GOOD, KEY, Rig, TOKEN, alive_tasks, chat_body};
 use super::leak::Markers;
 use super::*;
 use crate::chat_route;
+use crate::head_guard::{
+    AMBIGUOUS_FRAMING_RESPONSE, HEAD_TOO_LARGE_RESPONSE, HeadVerdict, MAX_HEAD_BYTES, inspect_head,
+};
 use crate::transport::headers::WIRE_HEADER_NAMES;
 
 const HOSTILE: &str = "SYNTH-HOSTILE-ROUTE-6F3A";
@@ -730,7 +733,9 @@ async fn ambiguous_and_malformed_framing_never_delivers_upstream_bytes() {
     let limits = limits_with(|l| l.body_deadline_ms = 1000);
     let rig = Rig::with(Behavior::ok_json(), limits, Caps::ROOMY).await;
     let (addr, server) = serve(&rig).await;
-    let mut closed_without_response = 0_usize;
+    let mut closed_without_response: Vec<&str> = Vec::new();
+    let mut answered_by_guard = 0_usize;
+    let mut too_large = 0_usize;
     let cases = rejected_framing_cases();
     assert!(
         cases.len() > 45,
@@ -743,9 +748,23 @@ async fn ambiguous_and_malformed_framing_never_delivers_upstream_bytes() {
         match wire.status() {
             None => {
                 assert!(wire.bytes.is_empty(), "{label}: only a clean close");
-                closed_without_response += 1;
+                closed_without_response.push(label);
             }
-            Some(status) => assert!((400..500).contains(&status), "{label}: status {status}"),
+            Some(status) => {
+                assert!((400..500).contains(&status), "{label}: status {status}");
+                assert!(wire.has_header("connection"), "{label}: Connection: close");
+            }
+        }
+        // A head the guard judges ambiguous is answered with exactly the fixed local
+        // refusal of the error contract (#43), never by the parser or the route.
+        if inspect_head(&bytes) == HeadVerdict::Ambiguous {
+            assert_eq!(wire.bytes, AMBIGUOUS_FRAMING_RESPONSE, "{label}");
+            answered_by_guard += 1;
+        }
+        // A head longer than the guard's hold bound gets the fixed `431`, and only then.
+        if wire.bytes == HEAD_TOO_LARGE_RESPONSE {
+            assert!(bytes.len() > MAX_HEAD_BYTES, "{label}");
+            too_large += 1;
         }
         // Zero connections and zero bytes at the provider, for every refused request.
         rig.fake.assert_nothing_sent();
@@ -753,8 +772,16 @@ async fn ambiguous_and_malformed_framing_never_delivers_upstream_bytes() {
             .with("key", KEY)
             .assert_clean(label, &wire.bytes);
     }
-    // The connection-level cases above are closed by the head guard rather than answered.
-    assert!(closed_without_response >= 5, "{closed_without_response}");
+    // The connection-level cases above are answered by the head guard, not left silent.
+    assert!(answered_by_guard >= 5, "{answered_by_guard}");
+    assert!(
+        too_large >= 1,
+        "the table must include a head over the hold bound"
+    );
+    assert!(
+        closed_without_response.is_empty(),
+        "closed without any answer: {closed_without_response:?}"
+    );
     rig.settle().await;
     // Control: the server is still healthy and forwards a clean request exactly once.
     let wire = exchange(addr, &valid_with("", GOOD)).await;
