@@ -2,9 +2,10 @@
 # Smoke-test the candidate OCI image by running it with Docker (Linux amd64 runner).
 # usage: smoke-image.sh <image> <expected-binary-sha256> <evidence-dir>
 # Checks: the binary inside the image is byte-identical to the candidate binary, the
-# image runs as a non-root user, the container serves the skeleton health endpoints
-# through a loopback-only published port, rejects the proxy route, and exits cleanly
-# on SIGTERM. Runs with a read-only root filesystem, no capabilities, no new privileges.
+# image runs as a non-root user, the image's own config validates, the container serves the
+# health endpoints through a loopback-only published port, rejects the documented proxy-route
+# probes locally (never forwarding; see probe-endpoints.sh), and exits cleanly on SIGTERM. Runs
+# with a read-only root filesystem, no capabilities, no new privileges.
 set -eu
 image="$1"
 want_sha="$2"
@@ -21,8 +22,9 @@ cid="$(docker create "$image")"
 docker cp "$cid:/usr/local/bin/redact-secret-gateway" "$out/binary-from-image"
 docker rm "$cid" >/dev/null
 got_sha="$(sha256_of "$out/binary-from-image")"
-rm -f "$out/binary-from-image"
 echo "binary sha256 in image: $got_sha" | tee "$out/image-smoke.txt"
+sh "$here/check-no-qualification-seam.sh" "$out/binary-from-image" | tee -a "$out/image-smoke.txt"
+rm -f "$out/binary-from-image"
 test "$got_sha" = "$want_sha"
 
 # 2. Non-root by image configuration.
@@ -31,6 +33,10 @@ echo "image Config.User: $user" | tee -a "$out/image-smoke.txt"
 case "$user" in
   "" | 0 | root | 0:* | root:*) echo "image runs as root" >&2; exit 1 ;;
 esac
+
+# 2b. The image's own static config validates with the image's own binary.
+docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges "$image" \
+  validate-config /etc/redact-secret-gateway/config.json | tee -a "$out/image-smoke.txt"
 
 # 3. Run: published to host loopback only, hardened runtime flags.
 docker run -d --name "$name" \
@@ -53,7 +59,7 @@ uid="$(awk '/^Uid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo unknown)
 echo "container process uid: $uid" | tee -a "$out/image-smoke.txt"
 test "$uid" != 0
 
-sh "$here/probe-skeleton.sh" "http://127.0.0.1:8787" "$out" | tee -a "$out/image-smoke.txt"
+sh "$here/probe-endpoints.sh" "http://127.0.0.1:8787" "$out" | tee -a "$out/image-smoke.txt"
 
 # 5. Graceful stop: docker stop sends SIGTERM first; the exit code must be 0.
 docker stop --time 10 "$name" >/dev/null

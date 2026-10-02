@@ -1,0 +1,742 @@
+{
+  "kind": "alpha1-synthetic-stage-timing",
+  "tool": "qualification/perf/run.mjs (measurement tool; no performance claim)",
+  "quick_mode": false,
+  "build": "qualification binary 0.1.0-alpha.0 (core redact-secret 0.1.0-beta.12)",
+  "build_profile_note": "see `profile` below; the qualification build is not the shipped artifact",
+  "profile": "release",
+  "source_commit": "dba409f02b7597b5bcf2a263285b508a7283c000",
+  "host": {
+    "os": "darwin 25.5.0",
+    "arch": "arm64",
+    "cpus": 10,
+    "load_average_before": [
+      5.17,
+      6.2,
+      10.74
+    ],
+    "load_average_after": [
+      5.27,
+      6.17,
+      10.65
+    ],
+    "node": "v22.16.0"
+  },
+  "provisional": true,
+  "provisional_reason": "host not quiet: one-minute load average exceeded half the CPU count during the run; treat every figure as provisional",
+  "provider": "scripted fake provider on loopback (immediate JSON reply; 25 ms-paced events for streams); not model delay",
+  "units": "microseconds unless a key says otherwise; peak memory in KiB",
+  "config": "profile full; capacity receipt 16, memory_units 262144, upstream 16, stream 16; inspection as listed; all limits at their provisional defaults",
+  "sequential_stage_timings": [
+    {
+      "workload": "no_findings_4KiB",
+      "input_bytes": 4174,
+      "planted_secrets": 0,
+      "placeholders_in_forwarded_body": 0,
+      "secret_prefix_in_forwarded_body": false,
+      "requests": 200,
+      "failures": 0,
+      "status_counts": {
+        "200": 200
+      },
+      "inspection_capacity": 2,
+      "stage_us": {
+        "admission_wait": {
+          "n": 200,
+          "min": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 1,
+          "mean": 0
+        },
+        "parse": {
+          "n": 200,
+          "min": 1,
+          "p50": 2,
+          "p95": 5,
+          "p99": 10,
+          "max": 13,
+          "mean": 2.3
+        },
+        "inspection": {
+          "n": 200,
+          "min": 39,
+          "p50": 46,
+          "p95": 87,
+          "p99": 118,
+          "max": 164,
+          "mean": 51.9
+        },
+        "serialization": {
+          "n": 200,
+          "min": 1,
+          "p50": 1,
+          "p95": 2,
+          "p99": 3,
+          "max": 3,
+          "mean": 1.1
+        },
+        "upstream_first_response": {
+          "n": 200,
+          "min": 105,
+          "p50": 158,
+          "p95": 489,
+          "p99": 1009,
+          "max": 1350,
+          "mean": 207.3
+        },
+        "upstream_total": {
+          "n": 200,
+          "min": 107,
+          "p50": 160,
+          "p95": 491,
+          "p99": 1021,
+          "max": 1359,
+          "mean": 209.8
+        },
+        "core_inspection_excl_serialization": {
+          "n": 200,
+          "min": 38,
+          "p50": 45,
+          "p95": 86,
+          "p99": 115,
+          "max": 161,
+          "mean": 50.8
+        },
+        "gateway_total_excl_upstream_approx": {
+          "n": 200,
+          "min": 264.8,
+          "p50": 343,
+          "p95": 1215.7,
+          "p99": 2418.7,
+          "max": 2922.4,
+          "mean": 465
+        },
+        "client_end_to_end": {
+          "n": 200,
+          "min": 380.8,
+          "p50": 502.4,
+          "p95": 1718.6,
+          "p99": 2593.6,
+          "max": 3230.4,
+          "mean": 674.8
+        }
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 9632,
+        "process_vmhwm": null
+      }
+    },
+    {
+      "workload": "many_findings_16KiB",
+      "input_bytes": 16469,
+      "planted_secrets": 349,
+      "placeholders_in_forwarded_body": 349,
+      "secret_prefix_in_forwarded_body": false,
+      "requests": 100,
+      "failures": 0,
+      "status_counts": {
+        "200": 100
+      },
+      "inspection_capacity": 2,
+      "stage_us": {
+        "admission_wait": {
+          "n": 100,
+          "min": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0,
+          "mean": 0
+        },
+        "parse": {
+          "n": 100,
+          "min": 2,
+          "p50": 3,
+          "p95": 4,
+          "p99": 5,
+          "max": 5,
+          "mean": 2.8
+        },
+        "inspection": {
+          "n": 100,
+          "min": 316,
+          "p50": 330,
+          "p95": 349,
+          "p99": 375,
+          "max": 601,
+          "mean": 334.1
+        },
+        "serialization": {
+          "n": 100,
+          "min": 1,
+          "p50": 2,
+          "p95": 2,
+          "p99": 3,
+          "max": 8,
+          "mean": 2
+        },
+        "upstream_first_response": {
+          "n": 100,
+          "min": 112,
+          "p50": 150,
+          "p95": 234,
+          "p99": 335,
+          "max": 366,
+          "mean": 162.2
+        },
+        "upstream_total": {
+          "n": 100,
+          "min": 114,
+          "p50": 152,
+          "p95": 237,
+          "p99": 337,
+          "max": 370,
+          "mean": 164.1
+        },
+        "core_inspection_excl_serialization": {
+          "n": 100,
+          "min": 315,
+          "p50": 328,
+          "p95": 346,
+          "p99": 372,
+          "max": 599,
+          "mean": 332.2
+        },
+        "gateway_total_excl_upstream_approx": {
+          "n": 100,
+          "min": 536.5,
+          "p50": 598.7,
+          "p95": 765.2,
+          "p99": 2022.7,
+          "max": 2115.5,
+          "mean": 653.9
+        },
+        "client_end_to_end": {
+          "n": 100,
+          "min": 657.5,
+          "p50": 751.5,
+          "p95": 1002.2,
+          "p99": 2299.3,
+          "max": 2485.5,
+          "mean": 817.9
+        }
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 10464,
+        "process_vmhwm": null
+      }
+    },
+    {
+      "workload": "large_input_384KiB",
+      "input_bytes": 393308,
+      "planted_secrets": 0,
+      "placeholders_in_forwarded_body": 0,
+      "secret_prefix_in_forwarded_body": false,
+      "requests": 20,
+      "failures": 0,
+      "status_counts": {
+        "200": 20
+      },
+      "inspection_capacity": 2,
+      "stage_us": {
+        "admission_wait": {
+          "n": 20,
+          "min": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0,
+          "mean": 0
+        },
+        "parse": {
+          "n": 20,
+          "min": 37,
+          "p50": 38,
+          "p95": 41,
+          "p99": 42,
+          "max": 42,
+          "mean": 38.6
+        },
+        "inspection": {
+          "n": 20,
+          "min": 2810,
+          "p50": 2840,
+          "p95": 2876,
+          "p99": 2917,
+          "max": 2917,
+          "mean": 2844.3
+        },
+        "serialization": {
+          "n": 20,
+          "min": 103,
+          "p50": 105,
+          "p95": 113,
+          "p99": 114,
+          "max": 114,
+          "mean": 106.2
+        },
+        "upstream_first_response": {
+          "n": 20,
+          "min": 423,
+          "p50": 521,
+          "p95": 957,
+          "p99": 1483,
+          "max": 1483,
+          "mean": 601.1
+        },
+        "upstream_total": {
+          "n": 20,
+          "min": 425,
+          "p50": 524,
+          "p95": 961,
+          "p99": 1486,
+          "max": 1486,
+          "mean": 604.5
+        },
+        "core_inspection_excl_serialization": {
+          "n": 20,
+          "min": 2701,
+          "p50": 2735,
+          "p95": 2772,
+          "p99": 2812,
+          "max": 2812,
+          "mean": 2738.2
+        },
+        "gateway_total_excl_upstream_approx": {
+          "n": 20,
+          "min": 3270.2,
+          "p50": 3391.5,
+          "p95": 5820.2,
+          "p99": 6059,
+          "max": 6059,
+          "mean": 3752.7
+        },
+        "client_end_to_end": {
+          "n": 20,
+          "min": 3695.2,
+          "p50": 3902.5,
+          "p95": 6315.2,
+          "p99": 6763,
+          "max": 6763,
+          "mean": 4357.1
+        }
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 11120,
+        "process_vmhwm": null
+      }
+    }
+  ],
+  "concurrent_runs": [
+    {
+      "workload": "no_findings_4KiB_8_clients",
+      "input_bytes": 4174,
+      "clients": 8,
+      "requests": 200,
+      "failures": 60,
+      "status_counts": {
+        "200": 140,
+        "503": 60
+      },
+      "inspection_capacity": 1,
+      "wall_ms": 70,
+      "throughput_rps": 2855.4,
+      "client_end_to_end_us": {
+        "n": 200,
+        "min": 627.5,
+        "p50": 2285,
+        "p95": 5774.6,
+        "p99": 6583.7,
+        "max": 6855.3,
+        "mean": 2698.2
+      },
+      "stage_mean_us": {
+        "admission_wait": 0,
+        "parse": 3,
+        "inspection": 105,
+        "serialization": 2,
+        "upstream_first_response": 365,
+        "upstream_total": 369
+      },
+      "stage_max_us": {
+        "admission_wait": 8,
+        "parse": 38,
+        "inspection": 781,
+        "serialization": 10,
+        "upstream_first_response": 1068,
+        "upstream_total": 1076
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 9872,
+        "process_vmhwm": null
+      }
+    },
+    {
+      "workload": "many_findings_16KiB_8_clients",
+      "input_bytes": 16469,
+      "clients": 8,
+      "requests": 80,
+      "failures": 60,
+      "status_counts": {
+        "200": 20,
+        "503": 60
+      },
+      "inspection_capacity": 1,
+      "wall_ms": 17,
+      "throughput_rps": 4660.3,
+      "client_end_to_end_us": {
+        "n": 80,
+        "min": 846.3,
+        "p50": 1333.7,
+        "p95": 2677.4,
+        "p99": 3380.7,
+        "max": 3380.7,
+        "mean": 1592.9
+      },
+      "stage_mean_us": {
+        "admission_wait": 0,
+        "parse": 5,
+        "inspection": 480,
+        "serialization": 3,
+        "upstream_first_response": 293,
+        "upstream_total": 296
+      },
+      "stage_max_us": {
+        "admission_wait": 8,
+        "parse": 38,
+        "inspection": 781,
+        "serialization": 12,
+        "upstream_first_response": 1068,
+        "upstream_total": 1076
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 10768,
+        "process_vmhwm": null
+      }
+    },
+    {
+      "workload": "no_findings_4KiB_8_clients",
+      "input_bytes": 4174,
+      "clients": 8,
+      "requests": 200,
+      "failures": 31,
+      "status_counts": {
+        "200": 169,
+        "503": 31
+      },
+      "inspection_capacity": 2,
+      "wall_ms": 48,
+      "throughput_rps": 4183.4,
+      "client_end_to_end_us": {
+        "n": 200,
+        "min": 409.1,
+        "p50": 1615.7,
+        "p95": 3273,
+        "p99": 5705.3,
+        "max": 7058.2,
+        "mean": 1855.3
+      },
+      "stage_mean_us": {
+        "admission_wait": 0,
+        "parse": 3,
+        "inspection": 100,
+        "serialization": 1,
+        "upstream_first_response": 319,
+        "upstream_total": 321
+      },
+      "stage_max_us": {
+        "admission_wait": 0,
+        "parse": 83,
+        "inspection": 520,
+        "serialization": 9,
+        "upstream_first_response": 925,
+        "upstream_total": 931
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 10032,
+        "process_vmhwm": null
+      }
+    },
+    {
+      "workload": "many_findings_16KiB_8_clients",
+      "input_bytes": 16469,
+      "clients": 8,
+      "requests": 80,
+      "failures": 42,
+      "status_counts": {
+        "200": 38,
+        "503": 42
+      },
+      "inspection_capacity": 2,
+      "wall_ms": 16,
+      "throughput_rps": 4895.2,
+      "client_end_to_end_us": {
+        "n": 80,
+        "min": 636.1,
+        "p50": 1166.2,
+        "p95": 3222.9,
+        "p99": 3839.2,
+        "max": 3839.2,
+        "mean": 1482.1
+      },
+      "stage_mean_us": {
+        "admission_wait": 0,
+        "parse": 5,
+        "inspection": 481,
+        "serialization": 2,
+        "upstream_first_response": 444,
+        "upstream_total": 447
+      },
+      "stage_max_us": {
+        "admission_wait": 0,
+        "parse": 83,
+        "inspection": 791,
+        "serialization": 9,
+        "upstream_first_response": 1222,
+        "upstream_total": 1223
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 11360,
+        "process_vmhwm": null
+      }
+    },
+    {
+      "workload": "no_findings_4KiB_8_clients",
+      "input_bytes": 4174,
+      "clients": 8,
+      "requests": 200,
+      "failures": 4,
+      "status_counts": {
+        "200": 196,
+        "503": 4
+      },
+      "inspection_capacity": 4,
+      "wall_ms": 49,
+      "throughput_rps": 4076.6,
+      "client_end_to_end_us": {
+        "n": 200,
+        "min": 455.4,
+        "p50": 1806.5,
+        "p95": 2959.3,
+        "p99": 6308.7,
+        "max": 6353.5,
+        "mean": 1926.6
+      },
+      "stage_mean_us": {
+        "admission_wait": 0,
+        "parse": 2,
+        "inspection": 113,
+        "serialization": 2,
+        "upstream_first_response": 408,
+        "upstream_total": 410
+      },
+      "stage_max_us": {
+        "admission_wait": 0,
+        "parse": 10,
+        "inspection": 414,
+        "serialization": 12,
+        "upstream_first_response": 1400,
+        "upstream_total": 1403
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 10208,
+        "process_vmhwm": null
+      }
+    },
+    {
+      "workload": "many_findings_16KiB_8_clients",
+      "input_bytes": 16469,
+      "clients": 8,
+      "requests": 80,
+      "failures": 17,
+      "status_counts": {
+        "200": 63,
+        "503": 17
+      },
+      "inspection_capacity": 4,
+      "wall_ms": 20,
+      "throughput_rps": 3929.2,
+      "client_end_to_end_us": {
+        "n": 80,
+        "min": 460.1,
+        "p50": 1950.8,
+        "p95": 3198.4,
+        "p99": 4242.7,
+        "max": 4242.7,
+        "mean": 1900.3
+      },
+      "stage_mean_us": {
+        "admission_wait": 0,
+        "parse": 4,
+        "inspection": 577,
+        "serialization": 3,
+        "upstream_first_response": 454,
+        "upstream_total": 457
+      },
+      "stage_max_us": {
+        "admission_wait": 8,
+        "parse": 14,
+        "inspection": 1199,
+        "serialization": 16,
+        "upstream_first_response": 1544,
+        "upstream_total": 1548
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 11936,
+        "process_vmhwm": null
+      }
+    }
+  ],
+  "slow_sse": [
+    {
+      "workload": "slow_provider_fast_consumer",
+      "streams": 20,
+      "concurrent_streams": 1,
+      "reader_delay_ms": 0,
+      "provider_pacing_ms": 25,
+      "failures": 0,
+      "status_counts": {
+        "200": 20
+      },
+      "client_first_event_us": {
+        "n": 20,
+        "min": 891.5,
+        "p50": 1568.7,
+        "p95": 2138.6,
+        "p99": 2194.2,
+        "max": 2194.2,
+        "mean": 1513.3
+      },
+      "client_stream_total_us": {
+        "n": 20,
+        "min": 233781.4,
+        "p50": 235613.8,
+        "p95": 237373.1,
+        "p99": 238147.3,
+        "max": 238147.3,
+        "mean": 235689.4
+      },
+      "gateway_stage_mean_us": {
+        "stream_first_byte": 517,
+        "stream_total": 234419,
+        "stream_upstream_wait": 233919,
+        "stream_downstream_wait": 9
+      },
+      "stream_buffered_peak_bytes": 193,
+      "streams_ended": {
+        "abandoned": 0,
+        "buffer_exceeded": 0,
+        "completed": 20,
+        "idle_timeout": 0,
+        "lifetime_exceeded": 0,
+        "shutdown": 0,
+        "upstream_error": 0
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 11200,
+        "process_vmhwm": null
+      }
+    },
+    {
+      "workload": "slow_provider_slow_consumer",
+      "streams": 10,
+      "concurrent_streams": 1,
+      "reader_delay_ms": 20,
+      "provider_pacing_ms": 25,
+      "failures": 0,
+      "status_counts": {
+        "200": 10
+      },
+      "client_first_event_us": {
+        "n": 10,
+        "min": 932,
+        "p50": 1656.2,
+        "p95": 4023.8,
+        "p99": 4023.8,
+        "max": 4023.8,
+        "mean": 1885.7
+      },
+      "client_stream_total_us": {
+        "n": 10,
+        "min": 231746,
+        "p50": 234635.1,
+        "p95": 238954,
+        "p99": 238954,
+        "max": 238954,
+        "mean": 234798.1
+      },
+      "gateway_stage_mean_us": {
+        "stream_first_byte": 664,
+        "stream_total": 233370,
+        "stream_upstream_wait": 232711,
+        "stream_downstream_wait": 9
+      },
+      "stream_buffered_peak_bytes": 193,
+      "streams_ended": {
+        "abandoned": 0,
+        "buffer_exceeded": 0,
+        "completed": 30,
+        "idle_timeout": 0,
+        "lifetime_exceeded": 0,
+        "shutdown": 0,
+        "upstream_error": 0
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 11200,
+        "process_vmhwm": null
+      }
+    },
+    {
+      "workload": "slow_provider_8_concurrent_streams",
+      "streams": 40,
+      "concurrent_streams": 8,
+      "reader_delay_ms": 0,
+      "provider_pacing_ms": 25,
+      "failures": 2,
+      "status_counts": {
+        "200": 38,
+        "503": 2
+      },
+      "client_first_event_us": {
+        "n": 38,
+        "min": 507,
+        "p50": 2745.6,
+        "p95": 3588.4,
+        "p99": 3889.8,
+        "max": 3889.8,
+        "mean": 2381.8
+      },
+      "client_stream_total_us": {
+        "n": 38,
+        "min": 232551.2,
+        "p50": 234607.6,
+        "p95": 238129.5,
+        "p99": 238321.9,
+        "max": 238321.9,
+        "mean": 235330.3
+      },
+      "gateway_stage_mean_us": {
+        "stream_first_byte": 778,
+        "stream_total": 232844,
+        "stream_upstream_wait": 232077,
+        "stream_downstream_wait": 3
+      },
+      "stream_buffered_peak_bytes": 193,
+      "streams_ended": {
+        "abandoned": 0,
+        "buffer_exceeded": 0,
+        "completed": 68,
+        "idle_timeout": 0,
+        "lifetime_exceeded": 0,
+        "shutdown": 0,
+        "upstream_error": 0
+      },
+      "peak_rss_kb": {
+        "ps_sampled_max": 11680,
+        "process_vmhwm": null
+      }
+    }
+  ]
+}

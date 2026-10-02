@@ -1,6 +1,6 @@
-# ADR 0012: Release-candidate artifact build for the verified skeleton
+# ADR 0012: Release-candidate artifact build (verified skeleton; extended for Alpha 1 in #22)
 
-Status: Accepted (design); implemented (scaffold, issue #7). Nothing is published.
+Status: Accepted (design); implemented (scaffold, issue #7; extended to the Alpha 1 MVP candidate in issue #22, see the update at the end). Nothing is published.
 
 ## Context
 
@@ -55,3 +55,13 @@ The `Candidate artifacts` workflow runs on pull requests that touch build files 
 ## Deferred measured choices
 
 Resource budgets for the image, musl or static linking, and base-image alternatives, pending measurements (ADR 0008).
+
+## Update in #22: the Alpha 1 candidate
+
+The gateway is now a proxy (#18 to #21, #23 to #25), so the candidate is the Alpha 1 MVP, still unpublished and not distributable. What changed, without changing a decision above:
+
+- **Smoke checks on the exact bytes, on their own platform** (Linux x86_64 on `ubuntu-24.04`, macOS ARM64 on `macos-15`, the linux/amd64 image on `ubuntu-24.04` with Docker): the qualification-seam absence check (`scripts/check-no-qualification-seam.sh`, ADR 0020), `--version`, `validate-config` for the shipped example configs, startup on loopback, `/healthz` and `/readyz`, seven proxy-route probes that are all rejected locally and can never forward (no credential 401, `{}` 422, unknown field plus a synthetic token 422 with no echo, wrong content type 415, `GET` on the route 405, unknown route 404), graceful SIGTERM. The image additionally: byte-identical binary, non-root (uid 65532), the image's own config validates, read-only root, all capabilities dropped, host-loopback publication only. The Compose example is started against the candidate image and probed the same way.
+- **The image config now names the reviewed upstream** (`deployment.upstream.provider: openai`), profile `full`, and non-degenerate capacity numbers (`receipt 8`, `memory_units 65536`, `inspection 2`, `upstream 8`, `stream 8`: the numbers the SDK qualification ran with; provisional and unmeasured, ADR 0008). The earlier `1/1/1/1/1` skeleton numbers accepted no real request.
+- **Manifest version 2** records the proxy capability, the SDK pins (versions and lockfile sha256), the shipped config and Compose file checksums, per-platform `rustc`, the CI run URL, and distribution blockers that are true today (private-report test not recorded, registry and name unselected, no signing/SBOM/provenance, no quiet-host measurement, open follow-ups and core issues, publication not authorized). `distributable` stays `false`.
+- **The SDK suites run against the separate qualification build, never against these artifacts.** The artifacts' own network path is exercised by their unit tests and smoke checks, not by an SDK against a provider.
+- The artifact bundle is named `alpha1-candidate-<sha>`.

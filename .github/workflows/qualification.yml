@@ -1,0 +1,162 @@
+# SDK qualification against the NON-RELEASE qualification test build (issue #22, ADR 0020).
+#
+# This is a dedicated workflow with its own provenance. It builds `redact-secret-gateway-qualification`
+# (a separate generated crate: the shipped source plus qualification/seam.patch, never a cargo feature or
+# compiler cfg flag on the shipped package), starts a scripted fake provider on loopback, and runs the pinned
+# OpenAI Node.js/TypeScript and Python SDK suites and the README examples against it. The test
+# binary is NEVER uploaded as an artifact, never attached to a release, and never published; only
+# text evidence is uploaded. The release/candidate workflow (artifacts.yml) knows nothing about it.
+#
+# Credential and cost boundary: no secrets, no provider key, no network access beyond package
+# registries for pinned, hash-locked dependencies. Every payload and token is synthetic.
+name: Qualification (SDK, non-release test build)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/qualification.yml"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "qualification/**"
+      - "examples/node/**"
+      - "examples/python/**"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Deny everything by default; each job re-grants the minimum it needs.
+permissions: {}
+
+concurrency:
+  group: qualification-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "3"
+  RUST_BACKTRACE: "0"
+
+jobs:
+  sdk-suites:
+    name: Pinned SDK suites and README examples
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: Set up Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          package-manager-cache: false
+      - name: Build the qualification test binary (separate crate; never uploaded)
+        run: sh qualification/build.sh
+      - name: Install the pinned Node packages (lockfile integrity, no install scripts)
+        run: |
+          set -eu
+          for d in qualification/sdk/node examples/node; do
+            (cd "$d" && npm ci --ignore-scripts --no-audit --no-fund && npm audit signatures)
+          done
+      - name: Install the pinned Python packages (sha256-locked, no dependency resolution)
+        run: |
+          set -eu
+          for d in qualification/sdk/python examples/python; do
+            (cd "$d" && python -m venv .venv && .venv/bin/pip install --require-hashes --no-deps --disable-pip-version-check -r requirements.txt)
+          done
+      - name: Type-check the TypeScript tests and example
+        run: |
+          set -eu
+          (cd qualification/sdk/node && npm run typecheck)
+          (cd examples/node && npm run typecheck)
+      - name: Run the SDK suites and the examples (retry observations are recorded as evidence)
+        run: sh qualification/run-suites.sh --suites node,python,examples
+      - name: Record the pinned versions that ran
+        if: ${{ always() }}
+        run: |
+          set -eu
+          mkdir -p qualification/evidence
+          {
+            echo "node $(node --version)"
+            echo "python $(python --version)"
+            echo "npm $(npm --version)"
+            echo "undici $(node -p process.versions.undici)"
+            jq -r '"openai (npm) " + .dependencies.openai' qualification/sdk/node/package.json
+            qualification/sdk/python/.venv/bin/python -c "import openai; print('openai (PyPI)', openai.__version__)"
+          } > qualification/evidence/versions.txt
+          cat qualification/evidence/versions.txt
+      - name: Upload evidence (gateway stdout/stderr, retry and truncation observations; no binaries)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sdk-qualification-evidence-${{ github.sha }}
+          path: qualification/evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  measure:
+    name: Synthetic stage timing and peak memory (shared runner, provisional)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: Set up Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Build the qualification test binary with --release (separate crate; never uploaded)
+        run: sh qualification/build.sh --release
+      - name: Measure (a hosted runner is not a quiet host; figures are labelled provisional)
+        env:
+          GATEWAY_COMMIT: ${{ github.sha }}
+          QUAL_COMMAND: node qualification/perf/run.mjs
+        run: sh qualification/run-suites.sh --binary qualification/target/release/redact-secret-gateway-qualification --suites none
+      - name: Upload the synthetic measurement report (JSON; no payloads)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: perf-evidence-${{ github.sha }}
+          path: qualification/evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  # Stable aggregate: fails when any needed job failed, was cancelled, or was skipped.
+  qualification-passed:
+    name: Qualification passed
+    if: ${{ always() }}
+    needs: [sdk-suites, measure]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every job to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -eu
+          printf '%s' "$NEEDS_JSON" | grep -o '"result": *"[a-z_]*"' | sort | uniq -c
+          if printf '%s' "$NEEDS_JSON" | grep -E '"result": *"(failure|cancelled|skipped)"' >/dev/null; then
+            echo "one or more required jobs did not succeed" >&2
+            exit 1
+          fi

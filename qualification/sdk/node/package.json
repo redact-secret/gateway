@@ -1,0 +1,21 @@
+{
+  "name": "redact-secret-gateway-sdk-qualification",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Synthetic SDK qualification tests for the Alpha 1 gateway (ADR 0020). Not published.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter=spec test/*.test.ts"
+  },
+  "dependencies": {
+    "openai": "7.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "typescript": "5.9.3"
+  }
+}

@@ -4,18 +4,21 @@
     "listener": {
       "address": "0.0.0.0:8787",
       "allow_non_loopback": true
+    },
+    "upstream": {
+      "provider": "openai"
     }
   },
   "content": {
-    "profile": "common"
+    "profile": "full"
   },
   "resources": {
     "capacity": {
-      "receipt": 1,
-      "memory_units": 1,
-      "inspection": 1,
-      "upstream": 1,
-      "stream": 1
+      "receipt": 8,
+      "memory_units": 65536,
+      "inspection": 2,
+      "upstream": 8,
+      "stream": 8
     }
   }
 }

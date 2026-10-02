@@ -1,0 +1,123 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -8,6 +8,8 @@
+ //! Only `boundary` can construct [`boundary::SanitizedRequest`] and only `transport`
+ //! accepts it.
+ #![forbid(unsafe_code)]
++// Qualification build: seam items the shipped build does not compile are not all used.
++#![allow(dead_code)]
+ 
+ pub mod admission;
+ pub mod boundary;
+@@ -18,6 +20,7 @@
+ mod head_guard;
+ pub mod health;
+ pub mod protocol;
++pub mod qualification;
+ pub mod server;
+ pub mod telemetry;
+ pub mod transport;
+--- a/src/server.rs
++++ b/src/server.rs
+@@ -95,11 +95,18 @@
+     /// [`StartupError::Init`] when the transport client or core inspection cannot be built.
+     pub fn init(plan: &RuntimePlan) -> Result<Self, StartupError> {
+         let metrics = Arc::new(Metrics::new());
+-        let upstream = Arc::new(
+-            Upstream::from_plan(plan)
+-                .map_err(|_| StartupError::Init)?
+-                .with_metrics(Arc::clone(&metrics)),
+-        );
++        let upstream = Upstream::from_plan(plan).map_err(|_| StartupError::Init)?;
++        Self::init_with(plan, upstream, metrics)
++    }
++
++    /// Qualification build: the same initialization with a caller-built upstream and a
++    /// caller-held metrics handle.
++    pub(crate) fn init_with(
++        plan: &RuntimePlan,
++        upstream: Upstream,
++        metrics: Arc<Metrics>,
++    ) -> Result<Self, StartupError> {
++        let upstream = Arc::new(upstream.with_metrics(Arc::clone(&metrics)));
+         let admission = Arc::new(Admission::new(plan.resources().capacity()));
+         let inspection = Arc::new(
+             Inspection::start(
+--- a/src/transport/destination.rs
++++ b/src/transport/destination.rs
+@@ -84,7 +84,6 @@
+ enum Scheme {
+     Https,
+     /// Plain HTTP exists only in unit-test builds, for the loopback fake upstream.
+-    #[cfg(test)]
+     Http,
+ }
+ 
+@@ -92,7 +91,6 @@
+     const fn as_str(self) -> &'static str {
+         match self {
+             Self::Https => "https",
+-            #[cfg(test)]
+             Self::Http => "http",
+         }
+     }
+@@ -199,7 +197,6 @@
+ 
+     /// Unit-test-only origin for a loopback fake upstream, plain HTTP, any port.
+     /// Compiled out of every non-test build: no configuration path reaches it.
+-    #[cfg(test)]
+     pub(crate) fn for_test_http(addr: std::net::SocketAddr) -> Self {
+         Self {
+             scheme: Scheme::Http,
+@@ -210,7 +207,6 @@
+ 
+     /// Unit-test-only HTTPS origin on an arbitrary host and port (a local TLS fake).
+     /// Skips the reviewed-host allowlist; still HTTPS with full verification.
+-    #[cfg(test)]
+     pub(crate) fn for_test_https(host: &str, port: u16) -> Self {
+         Self {
+             scheme: Scheme::Https,
+@@ -317,7 +313,6 @@
+         &self.url
+     }
+ 
+-    #[cfg(test)]
+     pub(crate) fn for_test(origin: Origin, path: &'static str) -> Result<Self, OriginError> {
+         Self::new(origin, path, RouteMethod::Post)
+     }
+@@ -344,7 +339,6 @@
+         &self.destination
+     }
+ 
+-    #[cfg(test)]
+     pub(crate) const fn for_test(id: RouteId, destination: Destination) -> Self {
+         Self { id, destination }
+     }
+--- a/src/transport/resolver.rs
++++ b/src/transport/resolver.rs
+@@ -77,7 +77,6 @@
+     /// Public-provider deployment: [`is_public_destination`] only.
+     Public,
+     /// Unit tests only: additionally permit loopback so a local fake can stand in.
+-    #[cfg(test)]
+     PublicOrLoopback,
+ }
+ 
+@@ -85,7 +84,6 @@
+     const fn permits(self, ip: IpAddr) -> bool {
+         match self {
+             Self::Public => is_public_destination(ip),
+-            #[cfg(test)]
+             Self::PublicOrLoopback => is_public_destination(ip) || ip.is_loopback(),
+         }
+     }
+--- a/src/transport.rs
++++ b/src/transport.rs
+@@ -40,6 +40,7 @@
+ pub mod credential;
+ pub mod destination;
+ pub mod headers;
++mod qualification;
+ mod relay;
+ pub mod resolver;
+ pub mod stream;

@@ -1,0 +1,39 @@
+# Docker Compose example: one RedactSecret Gateway for one application (Alpha 1, unpublished).
+#
+# There is no registry image yet (the registry and name are not selected), so build the local
+# candidate image first. build-image.sh needs a Linux x86_64 binary; on other hosts take the
+# binary from the `skeleton-candidate-<sha>` bundle of the "Candidate artifacts" workflow run.
+#
+#   cargo build --locked --release
+#   sh scripts/build-image.sh target/release/redact-secret-gateway redact-secret-gateway:candidate
+#   docker compose -f examples/compose/compose.yaml up -d
+#   curl -s http://127.0.0.1:8787/readyz            # {"status":"ready"}
+#
+# Then point your SDK at http://127.0.0.1:8787/v1 (see examples/node and examples/python). Your
+# application supplies its own provider key per request; this file holds no key, env var, or
+# volume. The image's static config (container/config.container.json) fixes the provider
+# (api.openai.com) and its capacity numbers, which are provisional and unmeasured (ADR 0008). To
+# change it, validate your file with `redact-secret-gateway validate-config`, then mount it:
+#
+#   volumes:
+#     - ./my-config.json:/etc/redact-secret-gateway/config.json:ro
+#
+# Boundary: one application, one gateway. The port is published to host loopback only. Do not
+# change 127.0.0.1 to 0.0.0.0 or publish the port beyond the application that uses it: that is
+# outside the supported model (ADR 0009). Loopback is an address restriction, not
+# authentication. The container needs outbound HTTPS to api.openai.com; the gateway cannot stop
+# your application from bypassing it, so restrict direct egress separately.
+#
+# Verified how: `docker compose config` and a start/health/rejection check run in the "Candidate
+# artifacts" workflow against the exact candidate image (CI, linux/amd64).
+services:
+  gateway:
+    image: redact-secret-gateway:candidate # local name; registry/name to be selected
+    pull_policy: never
+    ports:
+      - "127.0.0.1:8787:8787"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"

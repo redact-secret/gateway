@@ -1,6 +1,6 @@
 # Alpha 1 threat-control map and attack-boundary evidence
 
-Status: evidence for issue #25 (Alpha 1, epic #11). It feeds the Alpha 1 qualification report (#22). Everything here is synthetic: revoked-looking keys, invented markers, loopback fake providers, no provider key, no network beyond loopback. It is not a claim of a third-party audit or penetration test, and it does not claim immunity to request smuggling.
+Status: evidence for issue #25 (Alpha 1, epic #11). It feeds the [Alpha 1 qualification report](alpha1-qualification-report.md) (#22). Everything here is synthetic: revoked-looking keys, invented markers, loopback fake providers, no provider key, no network beyond loopback. It is not a claim of a third-party audit or penetration test, and it does not claim immunity to request smuggling.
 
 ## What is and is not claimed
 
@@ -53,11 +53,11 @@ Status key: **Covered** = repeatable tests at the cited location. **Covered, gap
 | 8 | Resource exhaustion | `tests/permits_capacity.rs`, `tests/permits_cancellation.rs`, `tests/core_probe_scheduling.rs` (bounded pool, queue, panics, shutdown); `tests/chat_admission.rs` (oversize, trickled body, aggregate memory, queue bound, zero wait); `forward_tests.rs::overload_is_immediate_bounded_and_returns_all_capacity`; head deadline and hold bound: `src/head_guard.rs` tests, `attack_tests.rs::silent_partial_and_trickling_heads_are_cut_at_the_head_deadline`, `tests/attack_surface.rs`; flood: `attack_tests.rs::a_flood_of_abandoned_requests_returns_every_permit_and_task` | Covered, gap: no limit on concurrent connections (#40); header caps unmeasured (#41) |
 | 9 | Slow downstream and abandoned SSE streams | `stream_tests.rs::slow_consumer_is_backpressured_with_bounded_memory_then_cut_by_the_stall_deadline`, `::downstream_disconnect_cancels_the_upstream_stream_and_returns_everything`, `::shutdown_cancellation_ends_open_streams_and_closes_upstream`, `::graceful_shutdown_with_an_open_stream_is_bounded_by_the_drain_deadline`, `::stream_capacity_bounds_streams_upstream_occupancy_and_tasks`, `::open_streams_do_not_hold_inspection_memory_or_receipt_capacity`; `src/write_stall.rs` tests | Covered |
 | 10 | Credential confusion | `tests/header_credentials.rs::provider_credential_outcomes_are_explicit`, `::organization_and_project_are_validated_not_trusted`, `::unreviewed_and_local_headers_are_ignored_and_ambiguous_ones_rejected`; `wire_tests.rs::credential_reaches_only_the_fixed_provider_with_regenerated_headers`, `::concurrent_requests_with_different_keys_do_not_cross`; `attack_tests.rs::hostile_routing_headers_...` (stripped: `Cookie`, `X-Api-Key`, `api-key`, proxy and forwarding headers, `X-Gateway-Local-*`), `::credentials_do_not_survive_into_the_next_request_on_the_shared_client`; compile-fail `fail_credential_is_not_copyable_or_comparable.rs` | Covered (the local caller token is Beta 1, #12, not implemented; its reserved header is ignored and never forwarded) |
-| 11 | Duplicate billable calls | `forward_tests.rs::post_forward_failures_terminate_safely_with_one_attempt_and_no_fallback`, `::connect_failure_is_unavailable_and_not_retried`, `::tls_failure_is_a_distinct_safe_code_and_sends_no_request`; `attack_tests.rs::provider_redirects_...` (exactly one upstream request per client request) | Covered (gateway retries are disabled; SDK retry behavior and the no-exactly-once statement are #22) |
+| 11 | Duplicate billable calls | `forward_tests.rs::post_forward_failures_terminate_safely_with_one_attempt_and_no_fallback`, `::connect_failure_is_unavailable_and_not_retried`, `::tls_failure_is_a_distinct_safe_code_and_sends_no_request`; `attack_tests.rs::provider_redirects_...` (exactly one upstream request per client request) | Covered (gateway retries are disabled; SDK retry behavior is observed with the pinned SDKs and the no-exactly-once statement is in [errors-and-telemetry](../contracts/errors-and-telemetry.md), #22) |
 | 12 | Direct upstream bypass | Cannot be tested by the gateway: operator egress enforcement | Environment (#44) |
-| 13 | Vulnerable or substituted release artifact | `tests/dependency_policy.rs`, `cargo deny check` in CI; candidate artifact qualification, checksums, provenance | Delegated (#22, ADR 0012) |
+| 13 | Vulnerable or substituted release artifact | `tests/dependency_policy.rs`, `cargo deny check` in CI; candidate artifact qualification, checksums, provenance | Covered for the unpublished candidate (#22: exact-bytes smoke checks, checksums, manifest, seam-absence proof, lockfile integrity; signing, SBOM, provenance are not produced and are Beta 3), see [the qualification report](alpha1-qualification-report.md) |
 
-Coverage: 9 of 13 controls Covered, 2 Covered with a named gap (6 and 8), 1 Environment-only (12), 1 Delegated (13).
+Coverage: 9 of 13 controls Covered, 2 Covered with a named gap (6 and 8), 1 Environment-only (12), and row 13 now covered for the unpublished candidate by #22 (it was delegated to #22 when this map was written).
 
 ## Control map: #25 additional architecture checks
 
@@ -122,7 +122,7 @@ Tested HTTP stack assumptions: HTTP/1.1 only on both legs; hyper 1.11.1 behavior
 
 ## Residual risks and unresolved blockers (input to #22)
 
-Unresolved release blockers carried from SECURITY.md and ADR 0010, unchanged by this work: (a) the private vulnerability reporting flow has not been verified end to end with a test report; (b) SDK (Node.js/TypeScript, Python) qualification against a gateway wired to a fake provider is #22. Neither is a finding of this suite.
+Unresolved release blockers carried from SECURITY.md and ADR 0010, unchanged by this work: (a) the private vulnerability reporting flow has not been verified end to end with a test report; (b) SDK (Node.js/TypeScript, Python) qualification against a gateway wired to a fake provider, which #22 has since done through the ADR 0020 test build (see the qualification report). Neither is a finding of this suite.
 
 Residual risks, none a release blocker for the Alpha 1 minimum slice provided the operator requirements above are met:
 
@@ -136,6 +136,6 @@ Residual risks, none a release blocker for the Alpha 1 minimum slice provided th
 | Provider responses are unredacted | By design (SECURITY.md); applications must not assume they are safe to log or store | none |
 | Recall is not claimed | Detection quality belongs to the pinned core and its evidence | none |
 | Bytes already sent cannot be retracted | A downstream cancel after the request was sent cannot recall it | none |
-| No exactly-once delivery | SDK retries can duplicate billable calls | #22 |
+| No exactly-once delivery | SDK retries can duplicate billable calls; observed with the pinned SDKs and documented (SDK retry guidance) | none |
 
 Open acceptance criteria of #25 after this change: all five boxes are addressed by the evidence above, with the environment-specific rows carried as documented operator requirements (#44) rather than gateway-testable controls. Whether that satisfies "each supported threat-model control maps to a repeatable test or documented environment-specific evidence" for the unqualified rows 12 and 13 is for the reviewer to confirm; they are mapped, not tested here.
