@@ -1,6 +1,6 @@
 # ADR 0015: Core inspection and validated request transformation
 
-Status: Accepted. Implementation status: implemented for inspection, policy decisions, serialization, and `boundary::approve` (#19); the endpoint still ends in a local `501 not_implemented` and forwards nothing (forwarding is #20). Date: 2026-10-02. Implements the #3 design contracts for issue #19: [ADR 0002](0002-request-states-and-forwarding-authority.md), [ADR 0004](0004-cancellation-and-synchronous-core-work.md), [ADR 0007](0007-parsing-copying-and-plaintext-lifetime.md). Evidence: [core bridge probe](../probes/core-bridge-probe.md) and the tests listed below.
+Status: Accepted. Implementation status: implemented for inspection, policy decisions, serialization, and `boundary::approve` (#19); the approved request is forwarded by #20 ([ADR 0017](0017-json-forwarding-deadlines-and-cancellation.md)); `stream: true` is rejected before inspection until #21. Date: 2026-10-02. Implements the #3 design contracts for issue #19: [ADR 0002](0002-request-states-and-forwarding-authority.md), [ADR 0004](0004-cancellation-and-synchronous-core-work.md), [ADR 0007](0007-parsing-copying-and-plaintext-lifetime.md). Evidence: [core bridge probe](../probes/core-bridge-probe.md) and the tests listed below.
 
 ## Context
 

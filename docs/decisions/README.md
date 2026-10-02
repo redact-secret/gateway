@@ -26,10 +26,11 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0010](0010-release-prerequisites-license-and-reporting.md) | License and private security reporting | **Partially decided** (MIT; test-report verification open) | maintainer |
 | [0011](0011-dependency-and-toolchain-selection.md) | Toolchain, dependency, and core pin selection | Accepted (design); implemented (scaffold) | #2, #4, #5, #6, #7 |
 | [0012](0012-release-candidate-artifact-build.md) | Release-candidate artifact build for the skeleton | Accepted (design); implemented (scaffold) | #7 |
-| [0013](0013-fixed-https-destinations-and-outbound-authority.md) | Fixed HTTPS destinations and outbound authority | Accepted (design); implemented (destination, client, address policy); body forwarding planned | #23 |
-| [0014](0014-chat-completions-admission.md) | Chat Completions request admission and provisional limits | Accepted; implemented (admission, strict budgeted parse, field matrix); forwarding planned | #18 |
-| [0015](0015-core-inspection-and-request-transformation.md) | Core inspection and validated request transformation | Accepted; implemented (inspection, Block/Warn policy, fresh bounded serialization, approval); forwarding planned | #19 |
-| [0016](0016-header-allowlists-and-request-local-credentials.md) | Header allowlists and request-local provider credentials | Accepted; implemented (inbound vetting, credential type, wire headers); sending/relay planned | #24 |
+| [0013](0013-fixed-https-destinations-and-outbound-authority.md) | Fixed HTTPS destinations and outbound authority | Accepted (design); implemented (destination, client, address policy); body forwarding implemented in #20 (ADR 0017) | #23 |
+| [0014](0014-chat-completions-admission.md) | Chat Completions request admission and provisional limits | Accepted; implemented (admission, strict budgeted parse, field matrix); forwarding implemented in #20 (ADR 0017) | #18 |
+| [0015](0015-core-inspection-and-request-transformation.md) | Core inspection and validated request transformation | Accepted; implemented (inspection, Block/Warn policy, fresh bounded serialization, approval); forwarding implemented in #20 (ADR 0017) | #19 |
+| [0016](0016-header-allowlists-and-request-local-credentials.md) | Header allowlists and request-local provider credentials | Accepted; implemented (inbound vetting, credential type, wire headers, JSON response relay); SSE relay planned | #24 |
+| [0017](0017-json-forwarding-deadlines-and-cancellation.md) | Ordinary JSON forwarding, deadlines, response bounds, and cancellation | Accepted; implemented (JSON relay, deadlines, bounds, cancellation, drain); SSE planned (#21); SDK qualification planned (#22); numbers provisional | #20 |
 
 ## Contracts
 

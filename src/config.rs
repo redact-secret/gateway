@@ -450,11 +450,25 @@ pub fn load_from_path(path: &Path) -> Result<RuntimePlan, ConfigError> {
     parse(&bytes)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Configuration parses on this thread; lets tests prove none happens per request.
+    static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Number of [`parse`] calls on this thread (unit tests only).
+#[cfg(test)]
+pub(crate) fn parses_on_this_thread() -> usize {
+    PARSES.with(std::cell::Cell::get)
+}
+
 /// Parse and validate configuration bytes into the immutable plan.
 ///
 /// # Errors
 /// [`ConfigError`] for any syntax, schema, or value problem.
 pub fn parse(bytes: &[u8]) -> Result<RuntimePlan, ConfigError> {
+    #[cfg(test)]
+    PARSES.with(|c| c.set(c.get().saturating_add(1)));
     let doc = json::parse_strict(bytes)
         .map_err(|_| ConfigError::new(ConfigErrorKind::Malformed, "file"))?;
     let root = Obj::new(&doc, "root")?;
@@ -629,6 +643,8 @@ fn parse_resources(obj: &Obj<'_>) -> Result<ResourcePolicy, ConfigError> {
 
 /// Ceiling that keeps every body-derived product computable in `u32`/`usize`.
 const MAX_BODY_CEILING: u32 = 16 * 1024 * 1024;
+/// Ceiling for the buffered provider response body (#20).
+const MAX_RESPONSE_CEILING: u32 = 64 * 1024 * 1024;
 
 /// Optional `resources.limits`. Absent fields keep the provisional value
 /// ([`RequestLimits::provisional`]); present fields must be within their ceilings.
@@ -642,6 +658,12 @@ fn parse_limits(obj: &Obj<'_>) -> Result<RequestLimits, ConfigError> {
         "admission_wait_ms",
         "admission_queue",
         "body_deadline_ms",
+        "upstream_connect_ms",
+        "upstream_header_ms",
+        "upstream_total_ms",
+        "max_response_header_bytes",
+        "max_response_body_bytes",
+        "shutdown_drain_ms",
     ])?;
     let mut limits = RequestLimits::provisional();
     let read = |key: &str, loc: &'static str, lo: u32, hi: u32, slot: &mut u32| {
@@ -706,6 +728,56 @@ fn parse_limits(obj: &Obj<'_>) -> Result<RequestLimits, ConfigError> {
         300_000,
         &mut limits.body_deadline_ms,
     )?;
+    read(
+        "upstream_connect_ms",
+        "resources.limits.upstream_connect_ms",
+        1,
+        60_000,
+        &mut limits.upstream_connect_ms,
+    )?;
+    read(
+        "upstream_header_ms",
+        "resources.limits.upstream_header_ms",
+        1,
+        3_600_000,
+        &mut limits.upstream_header_ms,
+    )?;
+    read(
+        "upstream_total_ms",
+        "resources.limits.upstream_total_ms",
+        1,
+        3_600_000,
+        &mut limits.upstream_total_ms,
+    )?;
+    read(
+        "max_response_header_bytes",
+        "resources.limits.max_response_header_bytes",
+        1,
+        262_144,
+        &mut limits.max_response_header_bytes,
+    )?;
+    read(
+        "max_response_body_bytes",
+        "resources.limits.max_response_body_bytes",
+        1,
+        MAX_RESPONSE_CEILING,
+        &mut limits.max_response_body_bytes,
+    )?;
+    read(
+        "shutdown_drain_ms",
+        "resources.limits.shutdown_drain_ms",
+        0,
+        600_000,
+        &mut limits.shutdown_drain_ms,
+    )?;
+    // The response-header deadline is part of the total: a header deadline beyond the total
+    // could never fire.
+    if limits.upstream_header_ms > limits.upstream_total_ms {
+        return Err(ConfigError::new(
+            ConfigErrorKind::InvalidValue,
+            "resources.limits.upstream_header_ms",
+        ));
+    }
     // A string cannot exceed the body it came from, so `max_string_bytes` above
     // `max_body_bytes` is harmless and needs no cross-field rule.
     Ok(limits)
@@ -910,6 +982,16 @@ mod tests {
             .expect("valid limits");
         assert_eq!(plan.resources().limits().max_body_bytes, 2048);
         assert_eq!(plan.resources().limits().admission_wait_ms, 0);
+        let plan = parse(
+            with(r#"{"upstream_header_ms": 1000, "upstream_total_ms": 1000, "shutdown_drain_ms": 0}"#)
+                .as_bytes(),
+        )
+        .expect("equal header and total deadlines are allowed");
+        assert_eq!(plan.resources().limits().shutdown_drain_ms, 0);
+        assert_eq!(
+            plan.resources().limits().max_response_body_bytes,
+            RequestLimits::provisional().max_response_body_bytes
+        );
         assert_eq!(
             plan.resources().limits().max_depth,
             RequestLimits::provisional().max_depth
@@ -924,6 +1006,14 @@ mod tests {
             r#"{"body_deadline_ms": 0}"#,
             r#"{"admission_wait_ms": 60001}"#,
             r#"{"admission_queue": -1}"#,
+            r#"{"upstream_connect_ms": 0}"#,
+            r#"{"upstream_connect_ms": 60001}"#,
+            r#"{"upstream_total_ms": 3600001}"#,
+            r#"{"max_response_header_bytes": 0}"#,
+            r#"{"max_response_body_bytes": 67108865}"#,
+            r#"{"shutdown_drain_ms": 600001}"#,
+            // The header deadline is part of the total.
+            r#"{"upstream_header_ms": 2000, "upstream_total_ms": 1000}"#,
             r#"{"max_depth": "8"}"#,
             r#"{"SYNTH_KEY": 1}"#,
             "[]",

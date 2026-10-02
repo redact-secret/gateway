@@ -6,20 +6,26 @@
 //! (the upstream client holder) are built once here, not per request.
 
 use std::fmt;
-use std::future::Future;
+use std::future::{Future, IntoFuture};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::net::TcpListener;
+use tokio::sync::Notify;
 
 use crate::admission::Admission;
 use crate::boundary::Inspection;
 use crate::chat_route::{self, ChatRoute};
 use crate::config::{ConfigError, RouteId, RuntimePlan};
 use crate::health::{self, HealthState};
-use crate::telemetry::SafeCode;
+use crate::telemetry::{Metrics, SafeCode};
 use crate::transport::Upstream;
 use crate::transport::destination;
+
+/// How long [`BoundServer::serve`] waits for connections to close after cancelling
+/// in-flight requests at the drain deadline.
+const CANCEL_GRACE: Duration = Duration::from_secs(1);
 
 /// Safe startup failure. Fixed stage only; no paths, addresses, or OS error text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,10 +77,10 @@ impl From<ConfigError> for StartupError {
 /// them. Holds no credentials (ADR 0009).
 #[derive(Debug)]
 pub struct Services {
-    #[expect(dead_code, reason = "used by forwarding in #19/#23")]
-    upstream: Upstream,
-    admission: Arc<Admission>,
-    chat: Arc<ChatRoute>,
+    pub(crate) admission: Arc<Admission>,
+    pub(crate) chat: Arc<ChatRoute>,
+    /// How long shutdown drains in-flight requests before cancelling them (ADR 0017).
+    pub(crate) drain: Duration,
 }
 
 impl Services {
@@ -85,7 +91,12 @@ impl Services {
     /// # Errors
     /// [`StartupError::Init`] when the transport client or core inspection cannot be built.
     pub fn init(plan: &RuntimePlan) -> Result<Self, StartupError> {
-        let upstream = Upstream::from_plan(plan).map_err(|_| StartupError::Init)?;
+        let metrics = Arc::new(Metrics::new());
+        let upstream = Arc::new(
+            Upstream::from_plan(plan)
+                .map_err(|_| StartupError::Init)?
+                .with_metrics(Arc::clone(&metrics)),
+        );
         let admission = Arc::new(Admission::new(plan.resources().capacity()));
         let inspection = Arc::new(
             Inspection::start(
@@ -94,7 +105,8 @@ impl Services {
                 plan.resources().limits(),
                 plan.resources().capacity(),
             )
-            .map_err(|_| StartupError::Init)?,
+            .map_err(|_| StartupError::Init)?
+            .with_metrics(Arc::clone(&metrics)),
         );
         // The route id is the reviewed one from the static table, never from a request.
         let chat = Arc::new(
@@ -103,12 +115,14 @@ impl Services {
                 *plan.resources().limits(),
                 RouteId::new(destination::OPENAI_CHAT_COMPLETIONS_ROUTE),
             )
-            .with_inspection(inspection),
+            .with_inspection(inspection)
+            .with_upstream(upstream)
+            .with_metrics(metrics),
         );
         Ok(Self {
-            upstream,
             admission,
             chat,
+            drain: plan.resources().limits().shutdown_drain(),
         })
     }
 
@@ -177,8 +191,12 @@ impl BoundServer {
     }
 
     /// Serve until `shutdown` completes, then stop accepting, report not ready, and drain
-    /// in-flight connections. No numeric drain deadline is invented here (ADR 0004 and
-    /// ADR 0008 own it).
+    /// in-flight connections for at most `resources.limits.shutdown_drain_ms`. When the
+    /// drain deadline passes, every in-flight request future is cancelled (it answers a
+    /// local `503 not_ready`, releases its permits and buffers, and any upstream exchange is
+    /// aborted) and `serve` waits only a short fixed grace for connections to close before
+    /// returning (ADR 0004, ADR 0017). Bytes already transmitted to a provider cannot be
+    /// retracted.
     ///
     /// # Errors
     /// [`StartupError::Serve`] if the server stops abnormally.
@@ -191,16 +209,35 @@ impl BoundServer {
             state,
             services,
         } = self;
-        let app = chat_route::mount(health::router(Arc::clone(&state)), services.chat());
+        let chat = services.chat();
+        let app = chat_route::mount(health::router(Arc::clone(&state)), Arc::clone(&chat));
         state.set_accepting(true);
         let on_shutdown = Arc::clone(&state);
-        let result = axum::serve(listener, app)
+        let draining = Arc::new(Notify::new());
+        let started = Arc::clone(&draining);
+        let server = axum::serve(listener, app)
             .with_graceful_shutdown(async move {
                 shutdown.await;
                 on_shutdown.set_accepting(false);
+                started.notify_one();
             })
-            .await
-            .map_err(|_| StartupError::Serve);
+            .into_future();
+        tokio::pin!(server);
+        let result = tokio::select! {
+            result = &mut server => result,
+            () = async {
+                draining.notified().await;
+                tokio::time::sleep(services.drain).await;
+            } => {
+                chat.cancel_in_flight();
+                // Cancelled requests answer and close promptly; do not wait on idle or
+                // stuck peers beyond the grace.
+                tokio::time::timeout(CANCEL_GRACE, &mut server)
+                    .await
+                    .unwrap_or(Ok(()))
+            }
+        }
+        .map_err(|_| StartupError::Serve);
         state.set_accepting(false);
         drop(services);
         result

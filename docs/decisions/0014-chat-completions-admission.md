@@ -1,6 +1,6 @@
 # ADR 0014: Chat Completions request admission and provisional limits
 
-Status: Accepted. Implementation status: implemented for admission, strict budgeted parsing, and field classification (#18); the endpoint still ends in a local `501 not_implemented` and forwards nothing. Date: 2026-10-02. Implements the #3 design contracts for issue #18: [ADR 0002](0002-request-states-and-forwarding-authority.md), [ADR 0003](0003-resource-admission-and-lifetime.md), [ADR 0005](0005-protocol-expansion-and-central-enforcement.md), [ADR 0007](0007-parsing-copying-and-plaintext-lifetime.md).
+Status: Accepted. Implementation status: implemented for admission, strict budgeted parsing, and field classification (#18); forwarding of the approved request is implemented in #20 ([ADR 0017](0017-json-forwarding-deadlines-and-cancellation.md)); `stream: true` ends in a local `501 not_implemented` until #21. Date: 2026-10-02. Implements the #3 design contracts for issue #18: [ADR 0002](0002-request-states-and-forwarding-authority.md), [ADR 0003](0003-resource-admission-and-lifetime.md), [ADR 0005](0005-protocol-expansion-and-central-enforcement.md), [ADR 0007](0007-parsing-copying-and-plaintext-lifetime.md).
 
 ## Context
 

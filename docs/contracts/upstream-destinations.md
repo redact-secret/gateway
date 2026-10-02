@@ -1,6 +1,6 @@
 # Contract: upstream destinations and outbound authority
 
-Status: implemented for destination selection, client construction, and address policy (#23). Body forwarding is planned (#20). Rationale: [ADR 0013](../decisions/0013-fixed-https-destinations-and-outbound-authority.md), [ADR 0009](../decisions/0009-credential-and-upstream-trust-model.md).
+Status: implemented for destination selection, client construction, and address policy (#23). Body forwarding is implemented (#20, [ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md)): one send per request through `Upstream::forward`, no idle pooling, deadlines and response bounds from `resources.limits`. Rationale: [ADR 0013](../decisions/0013-fixed-https-destinations-and-outbound-authority.md), [ADR 0009](../decisions/0009-credential-and-upstream-trust-model.md).
 
 ## Rules
 

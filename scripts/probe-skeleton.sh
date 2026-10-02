@@ -1,7 +1,9 @@
 #!/bin/sh
 # Probe a RUNNING skeleton gateway over HTTP: /healthz and /readyz return 200 and the
-# proxy route is rejected locally (an empty JSON body is 422 `unsupported_input`). The skeleton is not a
-# proxy; nothing is forwarded. Sends only a synthetic empty JSON object.
+# proxy route is rejected locally (an empty JSON body is 422 `unsupported_input`). Sends only a
+# synthetic empty JSON object, which fails validation before inspection, and the skeleton
+# configs name no upstream, so no request can ever be forwarded (#20): this probe must never
+# reach a provider. Do not add a body here that passes validation.
 #
 # usage: probe-skeleton.sh <base-url> <scratch-dir>
 set -eu

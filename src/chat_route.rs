@@ -15,10 +15,23 @@
 //!    inspected through the pinned core and approved into a `SanitizedRequest`
 //!    ([`Inspection::inspect_and_approve`], #19); any failure is a fixed local rejection.
 //!
-//! An approved request still ends in a local `not_implemented` rejection: forwarding (#20)
-//! does not exist, so no byte of any request is ever sent upstream. This module holds no HTTP client. It imports
-//! only the pure inbound header vetting function of the transport module (#24), whose
-//! request-local credential result is carried on [`Admitted`].
+//! 6. an approved request is forwarded (#20, ADR 0017) through the central transport only:
+//!    after inspection has completed and released its permit, an [`UpstreamPermit`] is
+//!    acquired independently (`try`, so a full upstream class is an immediate `overload`),
+//!    and [`Upstream::forward`] sends the sealed body once. The provider's bounded JSON
+//!    response (any status) is relayed with allowlisted headers and an unredacted body;
+//!    every Gateway-side failure is a fixed safe code ([`Reject::Transport`]).
+//!
+//! `stream: true` is rejected locally with `501 not_implemented` before inspection until SSE
+//! relay lands (#21): nothing is forwarded and no stream is half-relayed as JSON. A route
+//! with no configured upstream also ends in `501 not_implemented`. This module holds no
+//! HTTP client and builds no request; it hands the sealed request, the request-local
+//! credential carried on [`Admitted`] (#24), and the permit to the transport.
+//!
+//! The handler future owns the whole request. When the caller disconnects, hyper drops it,
+//! which cancels any pending wait, inspection await, or upstream exchange and releases
+//! every permit and buffer through RAII. Nothing is spawned here. On shutdown,
+//! [`ChatRoute::cancel_in_flight`] ends the same futures after the drain deadline.
 //!
 //! Every rejection closes the connection (`Connection: close`): a body that was not read
 //! must not be parsed as the next request. Responses are fixed strings and contain no
@@ -29,6 +42,7 @@ use std::fmt;
 use std::future::poll_fn;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::Router;
 use axum::body::{Body, HttpBody};
@@ -37,6 +51,7 @@ use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
+use tokio::sync::watch;
 
 use crate::admission::{Admission, AdmissionError, RequestLimits};
 use crate::boundary::{BoundaryError, Inspection};
@@ -44,8 +59,9 @@ use crate::config::RouteId;
 use crate::core_bridge::CoreBridgeError;
 use crate::protocol::chat::ChatRequest;
 use crate::protocol::{self, Protocol, ProtocolError, ValidatedRequest};
-use crate::telemetry::SafeCode;
+use crate::telemetry::{Metrics, SafeCode, Stage};
 use crate::transport::headers::{HeaderReject, VettedHeaders, vet_inbound};
+use crate::transport::{TransportError, Upstream, UpstreamResponse};
 
 /// The one exact route served by this module.
 pub const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
@@ -76,8 +92,15 @@ pub enum Reject {
     Unsupported,
     /// A parse budget or count limit was exceeded.
     LimitExceeded,
-    /// Admitted and validated, but forwarding does not exist yet.
+    /// Not served by this build or deployment: `stream: true` until SSE relay (#21), or no
+    /// upstream is configured for the route.
     NotImplemented,
+    /// A Gateway-side forwarding failure (#20). The provider's own error responses are
+    /// relayed as responses and never take this path.
+    Transport(TransportError),
+    /// The Gateway is shutting down and its drain deadline passed; in-flight work was
+    /// cancelled.
+    ShuttingDown,
     /// Inspection or approval failed (fail closed; see [`BoundaryError`]).
     Inspection(BoundaryError),
     /// No usable provider `Authorization` header (#24).
@@ -109,6 +132,14 @@ impl Reject {
             Self::Overload => (StatusCode::SERVICE_UNAVAILABLE, SafeCode::Overload),
             Self::Unsupported => (StatusCode::UNPROCESSABLE_ENTITY, SafeCode::UnsupportedInput),
             Self::NotImplemented => (StatusCode::NOT_IMPLEMENTED, SafeCode::NotImplemented),
+            Self::ShuttingDown => (StatusCode::SERVICE_UNAVAILABLE, SafeCode::NotReady),
+            Self::Transport(error) => match error {
+                TransportError::Timeout => (StatusCode::GATEWAY_TIMEOUT, SafeCode::UpstreamTimeout),
+                TransportError::UnknownRoute => {
+                    (StatusCode::NOT_IMPLEMENTED, SafeCode::NotImplemented)
+                }
+                other => (StatusCode::BAD_GATEWAY, other.code()),
+            },
             Self::Inspection(error) => match error.code() {
                 SafeCode::UnsupportedInput => {
                     (StatusCode::UNPROCESSABLE_ENTITY, SafeCode::UnsupportedInput)
@@ -235,8 +266,8 @@ impl fmt::Debug for Admitted {
     }
 }
 
-/// The Chat Completions admission route. Built once at startup from the validated plan;
-/// holds no request state and no credentials.
+/// The Chat Completions route. Built once at startup from the validated plan; holds no
+/// request state and no credentials.
 #[derive(Debug)]
 pub struct ChatRoute {
     admission: Arc<Admission>,
@@ -244,6 +275,10 @@ pub struct ChatRoute {
     max_body: usize,
     route: RouteId,
     inspection: Option<Arc<Inspection>>,
+    upstream: Option<Arc<Upstream>>,
+    metrics: Arc<Metrics>,
+    /// Flipped once by [`Self::cancel_in_flight`]; every request future selects on it.
+    cancel: watch::Sender<bool>,
 }
 
 impl ChatRoute {
@@ -259,6 +294,9 @@ impl ChatRoute {
             max_body,
             route,
             inspection: None,
+            upstream: None,
+            metrics: Arc::new(Metrics::new()),
+            cancel: watch::channel(false).0,
         }
     }
 
@@ -268,6 +306,33 @@ impl ChatRoute {
     pub fn with_inspection(mut self, inspection: Arc<Inspection>) -> Self {
         self.inspection = Some(inspection);
         self
+    }
+
+    /// Attach the startup-built transport. Without it (or when it has no route for this
+    /// endpoint) an approved request ends in `not_implemented` and nothing is sent.
+    #[must_use]
+    pub fn with_upstream(mut self, upstream: Arc<Upstream>) -> Self {
+        self.upstream = Some(upstream);
+        self
+    }
+
+    /// Share the stage-timing counters with the other startup-built services.
+    #[must_use]
+    pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
+    #[must_use]
+    pub fn metrics(&self) -> &Metrics {
+        &self.metrics
+    }
+
+    /// Cancel every in-flight request future (shutdown after the drain deadline). Each one
+    /// answers a local `503 not_ready` if it can, and releases its permits and buffers when
+    /// dropped. Bytes already written to the provider cannot be retracted.
+    pub fn cancel_in_flight(&self) {
+        self.cancel.send_replace(true);
     }
 
     /// The approved route id admitted requests are bound to.
@@ -293,29 +358,64 @@ impl ChatRoute {
         self.max_body
     }
 
-    /// Run admission and validation for one request and answer it. Always returns a local
-    /// response; nothing is forwarded.
+    /// Run the whole request and answer it: admission, validation, inspection, forwarding,
+    /// and relay. The returned future owns every permit and buffer the request holds;
+    /// dropping it (caller disconnect) or [`Self::cancel_in_flight`] ends them all.
     pub async fn handle(&self, request: Request) -> Response {
-        match self.admit(request).await {
-            Ok(admitted) => self.inspect(admitted).await.into_response(),
-            Err(reject) => reject.into_response(),
+        let mut cancel = self.cancel.subscribe();
+        let work = async {
+            match self.admit(request).await {
+                Ok(admitted) => self.process(admitted).await,
+                Err(reject) => reject.into_response(),
+            }
+        };
+        tokio::select! {
+            biased;
+            () = async {
+                if cancel.wait_for(|cancelled| *cancelled).await.is_err() {
+                    std::future::pending::<()>().await;
+                }
+            } => Reject::ShuttingDown.into_response(),
+            response = work => response,
         }
     }
 
-    /// Inspect and approve an admitted request. Success would be handed to forwarding (#20);
-    /// until then the approved value is dropped here, releasing its reservation, and the
-    /// answer is a local `not_implemented`. Every failure is a fixed local rejection.
-    async fn inspect(&self, admitted: Admitted) -> Reject {
+    /// Inspect, approve, forward, and relay an admitted request. Every Gateway-side
+    /// failure is a fixed safe rejection; a provider answer is relayed as received.
+    async fn process(&self, mut admitted: Admitted) -> Response {
+        // SSE relay is #21: a streaming request is never forwarded as a JSON relay.
+        if admitted.chat().stream() == Some(true) {
+            return Reject::NotImplemented.into_response();
+        }
         let Some(inspection) = &self.inspection else {
-            return Reject::NotImplemented;
+            return Reject::NotImplemented.into_response();
         };
+        let headers = admitted.take_headers();
         let (validated, route) = admitted.into_parts();
-        match inspection.inspect_and_approve(validated, route).await {
-            Ok(sanitized) => {
-                drop(sanitized);
-                Reject::NotImplemented
-            }
-            Err(error) => Reject::Inspection(error),
+        let started = Instant::now();
+        let sanitized = match inspection.inspect_and_approve(validated, route).await {
+            Ok(sanitized) => sanitized,
+            Err(error) => return Reject::Inspection(error).into_response(),
+        };
+        self.metrics.record(Stage::Inspection, started.elapsed());
+        // Inspection capacity is already released: the worker job ended before the result
+        // reached this await. Upstream capacity is a separate class, acquired now.
+        let Some(upstream) = &self.upstream else {
+            return Reject::NotImplemented.into_response();
+        };
+        if upstream.destination(sanitized.route()).is_err() {
+            return Reject::NotImplemented.into_response();
+        }
+        let Some(headers) = headers else {
+            return Reject::Header.into_response();
+        };
+        let permit = match self.admission.try_upstream() {
+            Ok(permit) => permit,
+            Err(_) => return Reject::Overload.into_response(),
+        };
+        match upstream.forward(sanitized, headers, permit).await {
+            Ok(response) => relay(response),
+            Err(error) => Reject::Transport(error).into_response(),
         }
     }
 
@@ -332,7 +432,9 @@ impl ChatRoute {
         // Reserve before the first body byte is touched.
         // A reservation that can never fit (zero effective cap) is `TooLarge`, a busy
         // budget is `Overload`.
+        let waited = Instant::now();
         let ticket = self.admission.begin_body_receipt(cap, &self.limits).await?;
+        self.metrics.record(Stage::AdmissionWait, waited.elapsed());
         let bytes = tokio::time::timeout(
             self.limits.body_deadline(),
             collect(body, ticket.body_cap(), declared),
@@ -340,8 +442,10 @@ impl ChatRoute {
         .await
         .map_err(|_| Reject::Deadline)??;
         let received = ticket.complete(bytes).map_err(|_| Reject::TooLarge)?;
+        let parsed = Instant::now();
         let validated =
             protocol::validate_with(received, Protocol::ChatCompletionsText, &self.limits)?;
+        self.metrics.record(Stage::Parse, parsed.elapsed());
         Ok(Admitted {
             validated,
             route: self.route.clone(),
@@ -389,6 +493,18 @@ impl ChatRoute {
             }
         }
     }
+}
+
+/// The provider's response as the caller's response: status and allowlisted headers as
+/// received, the body unredacted. The framing headers are regenerated by the HTTP server
+/// from the exact body length. The body keeps the upstream permit until it is written or
+/// abandoned.
+fn relay(response: UpstreamResponse) -> Response {
+    let (status, headers, body) = response.into_parts();
+    let mut out = Response::new(Body::new(body));
+    *out.status_mut() = status;
+    *out.headers_mut() = headers;
+    out
 }
 
 /// Exactly one `Content-Type`: `application/json`, optionally with `charset=utf-8`.
@@ -539,6 +655,13 @@ mod tests {
             Reject::Unsupported,
             Reject::LimitExceeded,
             Reject::NotImplemented,
+            Reject::ShuttingDown,
+            Reject::Transport(TransportError::Timeout),
+            Reject::Transport(TransportError::Connect),
+            Reject::Transport(TransportError::Tls),
+            Reject::Transport(TransportError::InvalidResponse),
+            Reject::Transport(TransportError::ResponseTooLarge),
+            Reject::Transport(TransportError::UnknownRoute),
             Reject::Inspection(BoundaryError::OutputLimit),
             Reject::Inspection(BoundaryError::Serialization),
             Reject::Inspection(BoundaryError::Core(CoreBridgeError::Blocked)),

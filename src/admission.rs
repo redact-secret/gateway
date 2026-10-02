@@ -107,6 +107,19 @@ pub struct RequestLimits {
     pub admission_queue: u32,
     /// Total time allowed to receive the body once capacity is reserved.
     pub body_deadline_ms: u32,
+    /// Longest time to establish the TCP connection and TLS session to the provider (#20).
+    pub upstream_connect_ms: u32,
+    /// Longest time from initiating the upstream send to the provider's response headers.
+    /// A non-streamed completion is answered only when generation ends, so this is long.
+    pub upstream_header_ms: u32,
+    /// Longest time from initiating the upstream send to the last buffered response byte.
+    pub upstream_total_ms: u32,
+    /// Largest provider response header block accepted (names plus values), in bytes.
+    pub max_response_header_bytes: u32,
+    /// Largest provider response body buffered for relay, in bytes.
+    pub max_response_body_bytes: u32,
+    /// Longest graceful drain after a shutdown signal before in-flight work is cancelled.
+    pub shutdown_drain_ms: u32,
 }
 
 impl RequestLimits {
@@ -122,6 +135,12 @@ impl RequestLimits {
             admission_wait_ms: 250,
             admission_queue: 16,
             body_deadline_ms: 10_000,
+            upstream_connect_ms: 5_000,
+            upstream_header_ms: 120_000,
+            upstream_total_ms: 300_000,
+            max_response_header_bytes: 32_768,
+            max_response_body_bytes: 4_194_304,
+            shutdown_drain_ms: 10_000,
         }
     }
 
@@ -169,6 +188,26 @@ impl RequestLimits {
     #[must_use]
     pub fn body_deadline(&self) -> Duration {
         Duration::from_millis(u64::from(self.body_deadline_ms))
+    }
+
+    #[must_use]
+    pub fn upstream_connect(&self) -> Duration {
+        Duration::from_millis(u64::from(self.upstream_connect_ms))
+    }
+
+    #[must_use]
+    pub fn upstream_header(&self) -> Duration {
+        Duration::from_millis(u64::from(self.upstream_header_ms))
+    }
+
+    #[must_use]
+    pub fn upstream_total(&self) -> Duration {
+        Duration::from_millis(u64::from(self.upstream_total_ms))
+    }
+
+    #[must_use]
+    pub fn shutdown_drain(&self) -> Duration {
+        Duration::from_millis(u64::from(self.shutdown_drain_ms))
     }
 }
 
