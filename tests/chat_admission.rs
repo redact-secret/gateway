@@ -402,16 +402,23 @@ async fn malformed_framing_is_rejected() {
             .await;
         assert!(r.status == 400, "{lengths}: {}", r.status);
     }
-    // Both Content-Length and Transfer-Encoding.
-    let r = gw
-        .send(
-            format!("{head}Content-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n12345\r\n0\r\n\r\n")
-                .as_bytes(),
-        )
+    // Both Content-Length and Transfer-Encoding: the HTTP parser alone would resolve this in
+    // favour of chunked framing (RFC 9112), invisibly to the route. The connection-level
+    // head guard (#25, ADR 0019) fails the connection before the parser sees it: no
+    // response, nothing admitted. (Detailed matrix: src/transport/tests/attack_tests.rs.)
+    let mut stream = gw
+        .open(&format!(
+            "{head}Content-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n12345\r\n0\r\n\r\n"
+        ))
         .await;
-    // hyper resolves the conflict in favour of chunked framing (RFC 9112); either way
-    // the request is never admitted as a valid body (`12345` is not a chat request).
-    assert!(r.status == 400 || r.status == 422, "{}", r.status);
+    let mut out = Vec::new();
+    let _ = tokio::time::timeout(Duration::from_secs(8), stream.read_to_end(&mut out))
+        .await
+        .expect("the connection is closed, not left open");
+    assert!(
+        out.is_empty(),
+        "no response is produced for an ambiguous head"
+    );
     // No body and no framing at all: nothing to receive.
     let r = gw.send(format!("{head}\r\n").as_bytes()).await;
     expect(&r, 400, "malformed_input");

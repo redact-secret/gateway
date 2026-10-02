@@ -1,0 +1,23 @@
+warning: unreachable expression
+ --> tests/ui/fail_construct_validated_request.rs:8:18
+  |
+7 |         protocol: todo!(),
+  |                   ------- any code following this expression is unreachable
+8 |         request: todo!(),
+  |                  ^^^^^^^ unreachable expression
+  |
+  = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+error[E0451]: fields `protocol`, `request`, `memory` and `_receipt` of struct `ValidatedRequest` are private
+  --> tests/ui/fail_construct_validated_request.rs:7:9
+   |
+ 6 |     ValidatedRequest {
+   |     ---------------- in this type
+ 7 |         protocol: todo!(),
+   |         ^^^^^^^^ private field
+ 8 |         request: todo!(),
+   |         ^^^^^^^ private field
+ 9 |         memory: todo!(),
+   |         ^^^^^^ private field
+10 |         _receipt: todo!(),
+   |         ^^^^^^^^ private field

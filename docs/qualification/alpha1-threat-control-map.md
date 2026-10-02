@@ -1,0 +1,141 @@
+# Alpha 1 threat-control map and attack-boundary evidence
+
+Status: evidence for issue #25 (Alpha 1, epic #11). It feeds the Alpha 1 qualification report (#22). Everything here is synthetic: revoked-looking keys, invented markers, loopback fake providers, no provider key, no network beyond loopback. It is not a claim of a third-party audit or penetration test, and it does not claim immunity to request smuggling.
+
+## What is and is not claimed
+
+- **Rejection proof.** For the forms below, a rejected request causes zero connections or zero request bytes at the fake provider, and an accepted request reaches only the configured destination with only gateway-built headers and the sanitized body. That is a property of the request path and is proven by the listed tests.
+- **No detector-recall claim.** Whether the pinned core detects a given secret is the core's job and is measured elsewhere. The suite plants one exact synthetic token the core is known to detect (`ghp_SYNTHETICREVOKED...`) and asserts it never reaches the provider; it deliberately does not generate obfuscated variants, because asserting those would be a recall claim.
+- **Provider responses are not redacted** (SECURITY.md, ADR 0017/0018). The suite asserts that contract: a synthetic token in a provider JSON answer, a provider error body, and an SSE event is relayed verbatim, and never appears in gateway diagnostics.
+- A typed API reduces accidental misuse; it does not replace the runtime tests below and does not prove all secrets are detected.
+
+## Tested stack, core, and configuration pins
+
+| Component | Pin (Cargo.lock at this commit) |
+| --- | --- |
+| Core | `redact-secret =0.1.0-beta.12` (`core_bridge::PINNED_CORE_VERSION`) |
+| HTTP server | `axum 0.8.9`, `axum-core 0.5.6`, `hyper 1.11.1`, `hyper-util 0.1.21`, `http 1.5.0`, `httparse 1.10.1`, `tower 0.5.3`, `tower-http 0.6.11` (HTTP/1 only; no `h2` in the graph) |
+| Provider client | `reqwest 0.13.5` (`rustls` feature only; `hyper-rustls 0.27.10`), `rustls 0.23.45`, `rustls-webpki 0.103.15`, `rustls-platform-verifier 0.7.1`, provider `aws-lc-rs 1.18.1` |
+| Runtime | `tokio 1.53.1` |
+| Test-only TLS fakes | `rcgen =0.14.10`, `tokio-rustls =0.26.6` (dev-dependencies, exact pins) |
+| Toolchain | Rust `1.98.1` (`rust-toolchain.toml`) |
+| Configuration | `schema_version` 1; provider profile `openai`; the suite's configs carry no upstream (black-box tests) or the test-only loopback destination (in-crate tests) |
+
+Regenerate the table from `Cargo.lock` for the candidate commit; #22 records the exact release-candidate pins. Host used for the informative figures below: macOS arm64 (`Darwin`), debug profile.
+
+## How to run
+
+`cargo test --locked` runs everything offline. The suite adds:
+
+| File | What it is |
+| --- | --- |
+| `src/transport/tests/attack_tests.rs` | In-crate adversarial suite: production connection handling (`server::guarded_listener`, `server::guarded_app`) in front of the real route, real pinned-core inspection, and the central transport pointed at loopback fakes through the `cfg(test)` destination constructors (#23). It must live in `src/` because no feature, flag, or environment exposes a fake upstream (`tests/destination_policy.rs`). |
+| `tests/attack_surface.rs` | Black-box: the real built binary with a hostile environment (proxy, base-URL, trust-store variables) and no upstream, attacked over raw sockets. |
+| `tests/diagnostic_surface.rs` | Every error type is `Copy` (compile-time) and renders only a fixed safe alphabet; every gateway response body is the fixed envelope. |
+| `src/head_guard.rs` tests | The connection-level head guard (ADR 0019). |
+| `tests/ui/*` (`tests/api_boundary.rs`) | Compile-fail cases for forged forwarding, forged or copied permits, copyable credentials, serializable diagnostics. |
+
+The mutation runs use a committed seed (`SEED` in `attack_tests.rs`) and fixed case counts (80 heads, 120 bodies); they finish in about a second each. No property-testing dependency was added: a small deterministic generator covers the invariants with no new supply-chain surface (`cargo deny` is unchanged).
+
+## Control map: SECURITY.md threat table
+
+Status key: **Covered** = repeatable tests at the cited location. **Covered, gap** = tests exist and a named gap remains. **Environment** = needs surrounding configuration, documented, not testable by the gateway alone. **Delegated** = evidence belongs to another issue.
+
+| # | Threat and control | Evidence (file::test) | Status |
+| --- | --- | --- | --- |
+| 1 | Partial disclosure before a later scan failure: the whole bounded request is received and inspected before any upstream byte | `tests/no_forward_skeleton.rs::rejected_requests_send_zero_upstream_bytes_and_release_capacity`; `tests/chat_admission.rs::unsupported_payloads_are_rejected_with_zero_upstream_bytes`, `::malformed_json_is_rejected_with_zero_upstream_bytes`, `::every_rejection_is_marker_free_and_upstream_stays_empty`; `src/transport/tests/forward_tests.rs::every_pre_forward_failure_delivers_zero_bytes_upstream`, `::a_cancelled_waiter_never_starts_an_upstream_request`; `stream_tests.rs::stream_true_never_bypasses_admission_or_inspection_and_rejections_send_nothing`; `attack_tests.rs::ambiguous_and_malformed_framing_never_delivers_upstream_bytes`, `::hostile_request_targets_and_methods_never_reach_a_provider`, `::mutated_heads_never_break_the_forwarding_invariants`, `::mutated_bodies_never_deliver_the_exact_synthetic_secret_or_ambiguous_structure`; compile-fail `tests/ui/fail_forward_*`, `fail_construct_sanitized_*` | Covered |
+| 2 | Truncation, finding exhaustion, detector failure: incomplete results reject | `tests/inspection_transform.rs::finding_limit_rejects_with_no_partial_result`, `::request_wide_input_limit_rejects_even_when_each_text_fits`, `::transformed_output_over_its_bound_is_rejected_not_truncated`; `tests/inspection_route.rs::finding_limit_rejects_the_whole_request`; `tests/core_probe_semantics.rs::core_limit_errors_never_return_partial_output`, `::every_reachable_failure_is_an_err_and_maps_to_a_gateway_failure`, `::unknown_core_codes_fail_closed_by_construction` | Covered (rejection semantics; recall not claimed) |
+| 3 | Unknown fields and structural covert channels | `tests/chat_admission.rs::unsupported_payloads_are_rejected_with_zero_upstream_bytes`; `src/protocol/chat.rs` unit tests (one case per matrix row); `tests/inspection_transform.rs::model_is_never_rewritten_and_any_finding_in_it_rejects`; `attack_tests.rs::mutated_bodies_...` (unknown field, unknown nested key, secret in a key, secret in `model`) | Covered |
+| 4 | JSON ambiguity and escaping bypass, including alternative parser paths | `tests/parser_conformance.rs` (baseline parser, budgeted request parser, and the receipt path all run the one shared table: duplicate keys incl. escaped keys, unknown fields, UTF-8, escapes; `the_harness_detects_a_non_conforming_parser`); `tests/chat_admission.rs::escapes_and_unicode_are_decoded_before_inspection`; `tests/inspection_transform.rs::escaped_input_is_decoded_before_inspection_and_stays_valid_json`; `attack_tests.rs::mutated_bodies_...` (secret with `\uXXXX` escapes, duplicate keys with escaped spelling, trailing bytes) | Covered |
+| 5 | SSRF, redirects, destination and credential destination changes | Destination and routing: `tests/destination_policy.rs::*`; `src/transport/tests.rs::routes_resolve_only_by_exact_route_id`, `::caller_headers_cannot_change_destination_and_no_default_credential`, `::profile_variation_cannot_change_destination_or_tls`; request targets, methods, `CONNECT`, upgrades, WebSocket, h2c: `attack_tests.rs::hostile_request_targets_and_methods_never_reach_a_provider`, `::upgrade_websocket_and_h2c_attempts_never_switch_protocols_or_forward`, `::hostile_routing_headers_cannot_change_what_the_provider_receives` (JSON and SSE); redirects 301/302/303/307/308 not followed on the JSON and SSE paths with one upstream request each: `attack_tests.rs::provider_redirects_are_returned_not_followed_on_json_and_sse_paths`, `tests.rs::redirects_are_never_followed`; TLS: `tests.rs::tls_positive_control_then_invalid_tls_rejects` (valid control, wrong host, self-signed, unknown CA, expired); addresses: `tests.rs::disallowed_addresses_reject_before_any_connection`, `::validation_and_connection_share_one_resolution`, `resolver.rs::disallowed_addresses_are_rejected` (loopback, private, link-local, metadata `169.254.169.254` and `fd00:ec2::254`, IPv4-mapped/compatible and NAT64 IPv6, ULA, multicast, documentation), `::answers_are_validated_whole_and_pinned`, `::rebinding_second_answer_is_checked_independently`; proxy environment: `tests.rs::inherited_proxy_environment_does_not_reroute` (child process), `tests/attack_surface.rs::real_binary_resists_routing_framing_and_slow_head_attacks` (real binary with proxy and base-URL variables) | Covered; resolver and trust store are Environment (below) |
+| 6 | Header and request smuggling ambiguity | Gateway side: `tests/header_credentials.rs::ambiguous_framing_and_header_forms_are_rejected`; `tests/chat_admission.rs::malformed_framing_is_rejected`, `::compression_and_transfer_codings_are_rejected`; `attack_tests.rs::ambiguous_and_malformed_framing_never_delivers_upstream_bytes` (more than 45 hostile forms: CL+TE both orders and spellings, conflicting/listed/signed/hex/overflow CL, TE variants, obsolete folding, bare CR/LF/NUL injection, space before colon, oversized head, many headers, oversized target, bad chunk sizes, unterminated chunks, short body, bad `Expect`, `Connection` nominating framing headers), `::framing_forms_the_gateway_admits_are_forwarded_exactly_once_and_inert` (identical duplicate CL, OWS, mixed-case TE, chunk extensions and trailers, bytes after the body, pipelining, upper-case names), `::expect_continue_is_answered_locally_and_never_forwarded`, `::one_request_per_connection_even_when_the_client_asks_for_keep_alive`; outbound framing regenerated: `src/transport/tests/wire_tests.rs::caller_host_and_lengths_cannot_control_forwarding`; guard: `src/head_guard.rs` tests | Covered, gap: the guard is a structural scan of two fields, not a general parser; deployment-chain conformance is Environment (#44) |
+| 7 | Secret exposure in logs, errors, telemetry, health | `tests/diagnostic_surface.rs` (all error types: `Copy`, fixed alphabet; fixed response envelope); `tests/ui/fail_serialize_error_types.rs`; `forward_tests.rs::diagnostics_errors_and_debug_output_do_not_leak_payload_or_credential`, `::upstream_response_debug_never_prints_the_provider_body`; `stream_tests.rs::no_stream_content_or_keys_appear_in_diagnostics`; `wire_tests.rs::credential_bearing_objects_do_not_leak_through_debug_or_error`; `tests/header_credentials.rs::credentials_never_appear_in_any_gateway_output` (incl. health); `tests/config_cli.rs::invalid_configs_exit_nonzero_with_safe_diagnostics`; `tests/no_forward_skeleton.rs::binary_output_never_echoes_arguments_or_environment`; `attack_surface.rs` (binary stdout and stderr after the whole run); every raw response in `attack_tests.rs` is scanned for the key and markers. The gateway emits no request logs, so there is no log path to scan beyond stdout/stderr and Debug/Display of objects | Covered |
+| 8 | Resource exhaustion | `tests/permits_capacity.rs`, `tests/permits_cancellation.rs`, `tests/core_probe_scheduling.rs` (bounded pool, queue, panics, shutdown); `tests/chat_admission.rs` (oversize, trickled body, aggregate memory, queue bound, zero wait); `forward_tests.rs::overload_is_immediate_bounded_and_returns_all_capacity`; head deadline and hold bound: `src/head_guard.rs` tests, `attack_tests.rs::silent_partial_and_trickling_heads_are_cut_at_the_head_deadline`, `tests/attack_surface.rs`; flood: `attack_tests.rs::a_flood_of_abandoned_requests_returns_every_permit_and_task` | Covered, gap: no limit on concurrent connections (#40); header caps unmeasured (#41) |
+| 9 | Slow downstream and abandoned SSE streams | `stream_tests.rs::slow_consumer_is_backpressured_with_bounded_memory_then_cut_by_the_stall_deadline`, `::downstream_disconnect_cancels_the_upstream_stream_and_returns_everything`, `::shutdown_cancellation_ends_open_streams_and_closes_upstream`, `::graceful_shutdown_with_an_open_stream_is_bounded_by_the_drain_deadline`, `::stream_capacity_bounds_streams_upstream_occupancy_and_tasks`, `::open_streams_do_not_hold_inspection_memory_or_receipt_capacity`; `src/write_stall.rs` tests | Covered |
+| 10 | Credential confusion | `tests/header_credentials.rs::provider_credential_outcomes_are_explicit`, `::organization_and_project_are_validated_not_trusted`, `::unreviewed_and_local_headers_are_ignored_and_ambiguous_ones_rejected`; `wire_tests.rs::credential_reaches_only_the_fixed_provider_with_regenerated_headers`, `::concurrent_requests_with_different_keys_do_not_cross`; `attack_tests.rs::hostile_routing_headers_...` (stripped: `Cookie`, `X-Api-Key`, `api-key`, proxy and forwarding headers, `X-Gateway-Local-*`), `::credentials_do_not_survive_into_the_next_request_on_the_shared_client`; compile-fail `fail_credential_is_not_copyable_or_comparable.rs` | Covered (the local caller token is Beta 1, #12, not implemented; its reserved header is ignored and never forwarded) |
+| 11 | Duplicate billable calls | `forward_tests.rs::post_forward_failures_terminate_safely_with_one_attempt_and_no_fallback`, `::connect_failure_is_unavailable_and_not_retried`, `::tls_failure_is_a_distinct_safe_code_and_sends_no_request`; `attack_tests.rs::provider_redirects_...` (exactly one upstream request per client request) | Covered (gateway retries are disabled; SDK retry behavior and the no-exactly-once statement are #22) |
+| 12 | Direct upstream bypass | Cannot be tested by the gateway: operator egress enforcement | Environment (#44) |
+| 13 | Vulnerable or substituted release artifact | `tests/dependency_policy.rs`, `cargo deny check` in CI; candidate artifact qualification, checksums, provenance | Delegated (#22, ADR 0012) |
+
+Coverage: 9 of 13 controls Covered, 2 Covered with a named gap (6 and 8), 1 Environment-only (12), 1 Delegated (13).
+
+## Control map: #25 additional architecture checks
+
+| Check | Evidence | Status |
+| --- | --- | --- |
+| Forged or unvalidated forwarding at the internal API boundary | `tests/api_boundary.rs` with `tests/ui/fail_forward_{received,validated,bytes,json_value,stream_bytes,stream_validated}.rs`, `fail_construct_{sanitized_*,validated_request,complete_inspection,permit}.rs`, `fail_mutate_sanitized_*`, `fail_clone_permit.rs`, `fail_sanitized_{clone,default}.rs`, `fail_approve_raw_output.rs`; positive controls `pass_forward_accepts_sanitized.rs`, `pass_forward_stream_accepts_sanitized.rs` (the failures are caused by the type rules, not a broken harness) | Covered |
+| Cancellation floods with non-interruptible scan jobs | `tests/permits_cancellation.rs::repeated_cancellations_stay_within_inspection_and_memory_bounds` and `tests/core_probe_scheduling.rs::repeated_cancelled_requests_cannot_exceed_concurrency_or_reservations`, `::dropping_the_awaiter_does_not_return_capacity_while_the_job_runs` (controllable non-interruptible job); `tests/inspection_transform.rs::repeated_cancelled_requests_stay_within_capacity_and_all_capacity_returns`; `attack_tests.rs::a_flood_of_abandoned_requests_returns_every_permit_and_task` (real stack, 50 abandoned connections) | Covered |
+| Premature permit return | `tests/permits_cancellation.rs::dropping_the_http_waiter_does_not_release_running_job_permits`, `::early_release_check_detects_permits_tied_to_the_waiter` (negative control), `::a_cancelled_result_never_becomes_an_upstream_request`; `tests/inspection_transform.rs::dropping_the_awaiting_future_does_not_release_capacity_early` | Covered |
+| Long SSE occupancy versus inspection capacity | `stream_tests.rs::open_streams_do_not_hold_inspection_memory_or_receipt_capacity`, `::stream_capacity_bounds_streams_upstream_occupancy_and_tasks`; `tests/permits_capacity.rs::stream_occupancy_does_not_hold_a_completed_inspection_slot` | Covered |
+| Content-policy selection cannot alter deployment authority | `tests.rs::profile_variation_cannot_change_destination_or_tls`; `wire_tests.rs::profile_and_deployment_state_do_not_alter_header_policy`; no content or resource field can reach destination or client construction (`destination_policy.rs`, configuration rejects unknown fields) | Covered |
+| Cross-request key contamination in reused clients | `wire_tests.rs::concurrent_requests_with_different_keys_do_not_cross`; `forward_tests.rs::concurrent_requests_with_different_keys_do_not_cross`; `attack_tests.rs::credentials_do_not_survive_into_the_next_request_on_the_shared_client` (sequential reuse: key and organization of request A absent from C, the 401 request sends nothing) | Covered |
+| Diagnostic and error object paths (Debug/Display/Serialize) | `tests/diagnostic_surface.rs`, `tests/ui/fail_serialize_error_types.rs`, plus rows 7 above. No error type implements `Serialize` or owns a string | Covered |
+| Optimized parsing paths run the identical duplicate-key, unknown-field, no-forward suite | `tests/parser_conformance.rs` (shared table, three paths); `attack_tests.rs::mutated_bodies_...` runs the production path end to end | Covered (a new parser must be added to `parser_conformance.rs`, CONTRIBUTION.md) |
+| Real permit and job counts and peak memory, without payloads | Informative run below (counts and process memory only) | Reported |
+
+## Destination-override and request-form matrix (observed outcomes)
+
+All through the served stack, all with zero connections at the fake provider and at a second "attacker" fake. Statuses are from the pinned stack above.
+
+| Form | Outcome |
+| --- | --- |
+| Absolute-form target (`http://host/...`, `https://api.openai.com/...`, with userinfo) | `400 unsupported_input` |
+| `//path`, `///path`, trailing `/`, `//` suffix, upper/mixed-case path, `%00`, `%63` (encoded letter), `%2f`, `%2e%2e`, `/../`, `/./`, `/%2e/`, `;param`, backslash, encoded CRLF | `404` (exact, case-sensitive, undecoded path match) |
+| Query string, including an empty `?` | `400 unsupported_input` |
+| Fragment in the target | The URI parser drops it; the request is the exact route and the fragment goes nowhere (admitted, forwarded to the fixed destination, tested) |
+| Empty target | `400` |
+| `*`, authority-form (`host:443`) with `POST` | `404` |
+| `GET`, `HEAD`, `PUT`, `DELETE`, `PATCH`, `OPTIONS`, `TRACE`, unknown method, lower-case `post` | `405` with `Allow: POST` |
+| `CONNECT` (authority-form, origin-form, absolute-form) | `404` or `405`; never a tunnel |
+| `Upgrade: websocket`, `Upgrade: h2c` with `HTTP2-Settings`, `Upgrade: TLS/1.2`, `Connection: Upgrade` | `400 unsupported_input`; no `101`, no `Upgrade` header in any response |
+| Hostile `Host`, `Forwarded`, `X-Forwarded-*`, `X-Original-URL`, `X-Rewrite-URL`, method-override headers, `Via`, `Proxy-*`, `Cookie`, `Referer`, `Origin`, `X-Api-Key`, `api-key`, `OpenAI-Beta`, `X-Stainless-*`, `TE`, `Trailer`, `Keep-Alive`, `Accept*`, `User-Agent`, `X-Request-Id`, `X-Gateway-Local-*` | Request served; none reaches the provider; outbound `Host` is the reviewed destination; the outbound header set equals the gateway-built set (JSON and SSE) |
+| Redirects 301/302/303/307/308 to a second fake, an unreviewed host, a relative path, or the same fake | Status relayed to the caller; `Location` and `Set-Cookie` dropped; one upstream request; second fake receives nothing (JSON and SSE paths) |
+
+## Informative measurements (not limits, not performance claims)
+
+One run of `attack_tests.rs::a_flood_of_abandoned_requests_returns_every_permit_and_task` (macOS arm64, debug profile, capacity receipt 4 / inspection 2 / upstream 2 / stream 1; 40 requests abandoned right after sending and 10 abandoned mid-body): upstream send attempts 2, fake-provider calls 2, every capacity class back to baseline, task count back to baseline, then a clean request succeeds. Process resident memory sampled with `ps` before and after was about 13.6 MiB and 16.7 MiB; these are point-in-time samples of the whole test process, not a peak, and not a bound. Gateway capacity bounds, not these numbers, are the guarantee (resource-limits contract). Rerun with `cargo test --locked --lib a_flood_of_abandoned -- --nocapture` (prints `flood-report:`, counts only, no payloads or scoring internals).
+
+## Findings in this review
+
+Fixed in this change (ADR 0019):
+
+1. **`Content-Length` + `Transfer-Encoding` was invisible to the handler** (recorded by #24). The HTTP layer discarded the length and framed the body as chunked. A connection-level head guard now fails such a connection before the parser sees it (no handler, no body read, no response). The provider side was never affected (outbound framing is regenerated). Regression tests: `attack_tests.rs` framing cases, `tests/header_credentials.rs`, `tests/chat_admission.rs`, `tests/attack_surface.rs`, `src/head_guard.rs`.
+2. **No read-side bound before the handler** (recorded by #21). A silent, partial-head, or byte-trickling peer held a socket indefinitely. The head now has an absolute deadline (`body_deadline_ms`), with a 64 KiB hold bound. Regression tests: `attack_tests.rs::silent_partial_and_trickling_heads_...`, `src/head_guard.rs`, `tests/attack_surface.rs`.
+3. One request per connection: every response carries `Connection: close`, so a pipelined or smuggled second message is never parsed as a request (tested with explicit keep-alive).
+
+No credential leak, destination override, redirect-follow, or upstream-body-on-rejection was found. No release-blocking vulnerability was found by this suite.
+
+Observed and documented, not changed: a fragment in the request target is dropped by the URI parser and the request is served as the exact route; identical duplicate `Content-Length` values collapse to one and are admitted (still enforced against the body); a guard-rejected request produces a closed connection, not a `400`.
+
+## Cases that need surrounding configuration (operator requirements)
+
+| Case | Requirement | Tracked |
+| --- | --- | --- |
+| Direct upstream bypass by the application or another process | Default-deny egress, allowing the provider only through an approved path; block metadata endpoints at the network layer too | #44 |
+| DNS integrity | The host resolver and path must return the provider's real addresses; a poisoned answer to a different public address is stopped only by TLS hostname verification and can still deny service. The gateway validates every answer (public addresses only) and pins connections to the validated set | ADR 0013, #44 |
+| Trust store and TLS-intercepting proxies | Platform trust roots are trusted; a transparent intercepting proxy needs its CA in the store and is then trusted. No certificate or SPKI pinning | ADR 0013 |
+| An intermediary in front of the gateway | Not part of the supported model (loopback, one application). If present it must reject ambiguous framing (both length and transfer-coding, obsolete folding, bare line feeds, invalid names), must not share connections between users, and must not rewrite `Host` to carry a destination. The gateway ignores `Host` and forwarded headers for routing | ADR 0019, #44 |
+| Caller authentication | Loopback is an address restriction, not authentication; same-host processes can call the gateway with their own credentials. The local caller token is Beta 1 | SECURITY.md, #12 |
+| Plaintext in memory, crash dumps, host inspection | No secure erasure is promised | SECURITY.md, ADR 0007 |
+
+Tested HTTP stack assumptions: HTTP/1.1 only on both legs; hyper 1.11.1 behavior for the forms in the matrix above (statuses, parser leniency such as dropped fragments and collapsed identical duplicate lengths); `Connection: close` honored by the server after a response; request-target parsing by `http 1.5.0`. A different server library or version needs this suite rerun; it is the compatibility test.
+
+## Residual risks and unresolved blockers (input to #22)
+
+Unresolved release blockers carried from SECURITY.md and ADR 0010, unchanged by this work: (a) the private vulnerability reporting flow has not been verified end to end with a test report; (b) SDK (Node.js/TypeScript, Python) qualification against a gateway wired to a fake provider is #22. Neither is a finding of this suite.
+
+Residual risks, none a release blocker for the Alpha 1 minimum slice provided the operator requirements above are met:
+
+| Risk | Detail | Issue |
+| --- | --- | --- |
+| Unbounded connection count | Idle or slow sockets cost a descriptor and a task each until the head deadline; no capacity is reserved for them | #40 |
+| Header and hold caps unmeasured | 16 KiB / 8 KiB / 64 KiB are conservative choices | #41 |
+| Every request pays connection setup | `Connection: close` locally and no provider pooling | #42 |
+| Guard is a structural scan | Not a general parser; a guard-rejected client sees a closed connection, not a `400` | #43 |
+| Environment-specific controls untested | Egress, resolver, trust store, intermediaries | #44 |
+| Provider responses are unredacted | By design (SECURITY.md); applications must not assume they are safe to log or store | none |
+| Recall is not claimed | Detection quality belongs to the pinned core and its evidence | none |
+| Bytes already sent cannot be retracted | A downstream cancel after the request was sent cannot recall it | none |
+| No exactly-once delivery | SDK retries can duplicate billable calls | #22 |
+
+Open acceptance criteria of #25 after this change: all five boxes are addressed by the evidence above, with the environment-specific rows carried as documented operator requirements (#44) rather than gateway-testable controls. Whether that satisfies "each supported threat-model control maps to a repeatable test or documented environment-specific evidence" for the unqualified rows 12 and 13 is for the reviewer to confirm; they are mapped, not tested here.

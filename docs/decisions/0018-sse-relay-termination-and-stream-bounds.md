@@ -30,7 +30,7 @@ Status: Accepted. Implementation status: implemented for `stream: true` on the a
 - A truncated stream is visible to the caller only as a closed connection. That is deliberate: any in-band signal would be a fabricated provider event.
 - Latency of the first byte is the provider's. A non-SSE answer to a streaming request is buffered and relayed like #20.
 - A fresh provider connection per request (ADR 0017) applies to streams too.
-- The write-stall deadline cuts slow-loris style readers of any response on any connection; legitimate local consumers read fast. It does not bound read-side stalls (headers, body); those remain a known gap (resource-limits).
+- The write-stall deadline cuts slow-loris style readers of any response on any connection; legitimate local consumers read fast. It does not bound read-side stalls; the request head is bounded since #25 ([ADR 0019](0019-request-head-guard-and-one-request-per-connection.md)) and the body by `body_deadline_ms` (#18), while the connection count remains unbounded (resource-limits, #10).
 - Peak relay buffer is measured as the single provider chunk in flight to the server. The server's own buffering and kernel socket buffers are not counted; tests therefore also check that a provider writing as fast as it can stops making progress while the consumer is stalled.
 - All numbers are provisional.
 

@@ -1,0 +1,41 @@
+error[E0308]: mismatched types
+ --> tests/ui/fail_clone_permit.rs:6:5
+  |
+5 | fn copy_upstream(p: &UpstreamPermit) -> UpstreamPermit {
+  |                                         -------------- expected `UpstreamPermit` because of return type
+6 |     p.clone()
+  |     ^^^^^^^^^ expected `UpstreamPermit`, found `&UpstreamPermit`
+  |
+note: `UpstreamPermit` does not implement `Clone`, so `&UpstreamPermit` was cloned instead
+ --> tests/ui/fail_clone_permit.rs:6:5
+  |
+6 |     p.clone()
+  |     ^
+
+error[E0308]: mismatched types
+  --> tests/ui/fail_clone_permit.rs:10:5
+   |
+ 9 | fn copy_inspection(p: &InspectionPermit) -> InspectionPermit {
+   |                                             ---------------- expected `InspectionPermit` because of return type
+10 |     p.clone()
+   |     ^^^^^^^^^ expected `InspectionPermit`, found `&InspectionPermit`
+   |
+note: `InspectionPermit` does not implement `Clone`, so `&InspectionPermit` was cloned instead
+  --> tests/ui/fail_clone_permit.rs:10:5
+   |
+10 |     p.clone()
+   |     ^
+
+error[E0308]: mismatched types
+  --> tests/ui/fail_clone_permit.rs:14:5
+   |
+13 | fn copy_stream(p: &StreamPermit) -> StreamPermit {
+   |                                     ------------ expected `StreamPermit` because of return type
+14 |     p.clone()
+   |     ^^^^^^^^^ expected `StreamPermit`, found `&StreamPermit`
+   |
+note: `StreamPermit` does not implement `Clone`, so `&StreamPermit` was cloned instead
+  --> tests/ui/fail_clone_permit.rs:14:5
+   |
+14 |     p.clone()
+   |     ^

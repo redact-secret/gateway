@@ -48,6 +48,7 @@ use crate::protocol::ValidatedRequest;
 #[path = "../../tests/support/fake_upstream.rs"]
 mod fake_upstream;
 
+mod attack_tests;
 mod forward_tests;
 #[path = "../../tests/support/leak.rs"]
 #[allow(dead_code)]
@@ -152,6 +153,16 @@ fn new_ca(name: &str) -> Ca {
 fn leaf_signed_by(ca: &Ca, host: &str) -> (Vec<u8>, Vec<u8>) {
     let key = rcgen::KeyPair::generate().expect("leaf key");
     let params = rcgen::CertificateParams::new(vec![host.to_owned()]).expect("params");
+    let cert = params.signed_by(&key, &ca.issuer).expect("leaf");
+    (cert.der().to_vec(), key.serialize_der())
+}
+
+/// A leaf for `host` from a trusted CA whose validity ended long ago.
+fn leaf_expired(ca: &Ca, host: &str) -> (Vec<u8>, Vec<u8>) {
+    let key = rcgen::KeyPair::generate().expect("leaf key");
+    let mut params = rcgen::CertificateParams::new(vec![host.to_owned()]).expect("params");
+    params.not_before = rcgen::date_time_ymd(2000, 1, 1);
+    params.not_after = rcgen::date_time_ymd(2001, 1, 1);
     let cert = params.signed_by(&key, &ca.issuer).expect("leaf");
     (cert.der().to_vec(), key.serialize_der())
 }
@@ -524,6 +535,19 @@ async fn tls_positive_control_then_invalid_tls_rejects() {
     );
     assert!(send(&up).await.is_err(), "unknown CA must reject");
     assert_eq!(unknown_ca.served(), 0);
+
+    // Right name, trusted chain, but the certificate expired long ago (#25).
+    let (c, k) = leaf_expired(&trusted, TEST_HOST);
+    let expired = TlsFake::start(c, k).await;
+    let up = tls_upstream(
+        &expired,
+        Some(&trusted),
+        AddressPolicy::PublicOrLoopback,
+        loopback(),
+        Arc::clone(&lookups),
+    );
+    assert!(send(&up).await.is_err(), "expired certificate must reject");
+    assert_eq!(expired.served(), 0);
 }
 
 #[tokio::test]

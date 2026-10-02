@@ -25,4 +25,12 @@ fn unvalidated_types_cannot_reach_forwarding() {
     cases.compile_fail("tests/ui/fail_mutate_sanitized_slice.rs");
     cases.compile_fail("tests/ui/fail_construct_complete_inspection.rs");
     cases.compile_fail("tests/ui/fail_approve_raw_output.rs");
+    // #25: forged forwarding, forged or duplicated capacity proofs, copyable credentials,
+    // and serializable diagnostics.
+    cases.compile_fail("tests/ui/fail_forward_stream_validated.rs");
+    cases.compile_fail("tests/ui/fail_construct_validated_request.rs");
+    cases.compile_fail("tests/ui/fail_construct_permit.rs");
+    cases.compile_fail("tests/ui/fail_clone_permit.rs");
+    cases.compile_fail("tests/ui/fail_credential_is_not_copyable_or_comparable.rs");
+    cases.compile_fail("tests/ui/fail_serialize_error_types.rs");
 }

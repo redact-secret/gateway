@@ -376,26 +376,27 @@ async fn ambiguous_framing_and_header_forms_are_rejected() {
     .concat();
     let (resp, raw) = gw.raw(&dup).await;
     assert_eq!(outcome(resp, &raw).0, 501);
-    // KNOWN LIMITATION, pinned so a change is noticed: hyper resolves `Content-Length` +
-    // `Transfer-Encoding: chunked` itself, discarding the length (RFC 9112 section 6.3
-    // allows this) before the handler runs, so the gateway cannot see the conflict and
-    // cannot reject it; the request is framed as chunked and its body bound still applies.
-    // Nothing from either header reaches the provider (outbound framing is regenerated from
-    // the sealed bytes), so this cannot desynchronize the provider connection. Operators
-    // who place a proxy in front must have it reject such requests (docs/contracts/
-    // headers-and-credentials.md). A length that is invalid is also discarded when it
-    // follows `Transfer-Encoding`.
-    for cl in [format!("{len}"), "not-a-number".to_owned()] {
+    // `Content-Length` together with `Transfer-Encoding`: the HTTP parser alone resolves
+    // this itself (RFC 9112 section 6.3), discarding the length before any handler runs, so
+    // the route could not see the conflict. The connection-level head guard (#25, ADR 0019)
+    // judges the first request head before the parser: the connection is failed, nothing is
+    // parsed, no response is written, and no handler runs. Both orders and an invalid length
+    // are covered.
+    for fields in [
+        format!("Transfer-Encoding: chunked\r\nContent-Length: {len}\r\n"),
+        format!("Content-Length: {len}\r\nTransfer-Encoding: chunked\r\n"),
+        "Transfer-Encoding: chunked\r\nContent-Length: not-a-number\r\n".to_owned(),
+    ] {
         let both = [
-            head(&format!(
-                "Transfer-Encoding: chunked\r\nContent-Length: {cl}\r\n"
-            ))
-            .as_bytes(),
+            head(&fields).as_bytes(),
             format!("{len:x}\r\n{GOOD}\r\n0\r\n\r\n").as_bytes(),
         ]
         .concat();
         let (resp, raw) = gw.raw(&both).await;
-        assert_eq!(outcome(resp, &raw).0, 501);
+        assert!(
+            resp.is_none() && raw.is_empty(),
+            "closed without a response"
+        );
     }
     // Control: the same head without the defect is admitted.
     let ok = [

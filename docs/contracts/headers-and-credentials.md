@@ -54,7 +54,7 @@ A caller token proving the caller may use the gateway is a separate concept. The
 
 ## Framing and malformed-header outcomes
 
-Observed behavior of the served stack (tests in `tests/header_credentials.rs`; the HTTP layer is hyper):
+Observed behavior of the served stack (tests in `tests/header_credentials.rs`, `tests/chat_admission.rs`, and the adversarial suite in `src/transport/tests/attack_tests.rs`; the HTTP layer is hyper behind the connection guard of ADR 0019):
 
 | Input | Outcome |
 | --- | --- |
@@ -63,9 +63,11 @@ Observed behavior of the served stack (tests in `tests/header_credentials.rs`; t
 | `Transfer-Encoding` other than exactly `chunked` (for example `gzip, chunked`) | `415 unsupported_input` |
 | Obsolete line folding, invalid header name, header without colon, control byte in a value | `400` (bare, from the HTTP layer) |
 | Header block over 16 KiB (one value over 8 KiB) or very many headers | `431` |
-| `Content-Length` together with `Transfer-Encoding: chunked` | **Not rejected.** The HTTP layer applies RFC 9112 section 6.3 itself: it discards the length (even an invalid one that follows `Transfer-Encoding`) and frames the body as chunked before the handler runs, so the gateway cannot observe the conflict. See limitation below |
+| `Content-Length` together with `Transfer-Encoding` (any value, either order, even an invalid length) | **Connection closed before the HTTP parser sees it, no response** (#25, [ADR 0019](../decisions/0019-request-head-guard-and-one-request-per-connection.md)). A byte-stream guard scans the first request head's field names; the parser alone would have discarded the length and framed the body as chunked, invisibly to the handler. No handler runs and no body is read |
+| Head not finished within `body_deadline_ms`, or longer than 64 KiB without ending | Connection closed, no response, nothing reserved (#25). The deadline is absolute from accept, so trickling bytes cannot extend it |
+| Bytes after the first request (pipelined or smuggled second message) | Never parsed as a request: every response carries `Connection: close`, so a connection serves one request (#25, ADR 0019) |
 
-**Limitation (`Content-Length` + `Transfer-Encoding`).** The issue asks for this combination to be rejected. The gateway's own check exists but is unreachable because hyper strips the length first; rejecting it needs a lower-level connection hook that is out of scope here. The provider connection is not affected: outbound framing is regenerated, so neither header can reach the provider. The remaining risk is request-boundary desynchronization between an operator's front proxy and the gateway; the deployment contract is that any proxy in front must reject requests with both headers. Pinned by a test so a change is noticed.
+**Residual (framing).** The guard checks two framing fields on the first head; it is not a proof against all request smuggling. The provider connection is unaffected either way (outbound framing is regenerated from the sealed bytes). A guard-rejected client sees a closed connection rather than a `400`. Any intermediary placed in front of the gateway must itself reject ambiguous or obfuscated framing (for example both `Content-Length` and `Transfer-Encoding`, obsolete line folding, bare line feeds, invalid header names) and must not reuse client connections for several users; the gateway's loopback scope assumes there is none. Tested HTTP stack: see the [control map](../qualification/alpha1-threat-control-map.md).
 
 ## Safe codes added
 
