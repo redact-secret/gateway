@@ -1,6 +1,7 @@
-# Skeleton candidate image (issue #7). Not published; registry/name to be selected.
-# This is NOT a sanitizing proxy: it serves /healthz and /readyz and rejects every
-# other route locally.
+# Alpha 1 candidate image (issues #7 and #22). Not published; registry/name to be selected.
+# It runs the gateway with container/config.container.json: health endpoints and the
+# POST /v1/chat/completions text-subset proxy to the fixed OpenAI route. Provider keys come
+# from the calling application per request; nothing secret is in the image.
 #
 # The build context is a staging directory created by scripts/build-image.sh that holds
 # only the already-built Linux x86_64 candidate binary and config.container.json. No

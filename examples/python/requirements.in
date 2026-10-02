@@ -1,0 +1,4 @@
+# Top-level pin for the Python example (ADR 0020). The fully pinned, hash-locked set is
+# requirements.txt (regenerate with the command in its header). The openai version must equal
+# the one in qualification/sdk/python/requirements.in; a test checks that.
+openai==3.24.0

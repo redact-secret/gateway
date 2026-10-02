@@ -2,8 +2,7 @@
   "schema_version": 1,
   "deployment": {
     "listener": {
-      "address": "0.0.0.0:8787",
-      "allow_non_loopback": true
+      "address": "127.0.0.1:8787"
     },
     "upstream": {
       "provider": "openai"
