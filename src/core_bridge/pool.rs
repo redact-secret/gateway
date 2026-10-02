@@ -42,7 +42,7 @@ pub type InspectOutcome = (RequestScope, Result<InspectedText, CoreBridgeError>)
 /// Capacity a running or queued job holds. Dropped only when the job really ends.
 struct Capacity {
     _permit: InspectionPermit,
-    _memory: MemoryReservation,
+    _memory: Option<MemoryReservation>,
 }
 
 /// Runs the job with `Some(inspector)`, or discards it with `None` (cancelled or shutdown).
@@ -116,7 +116,9 @@ pub struct InspectionPool {
     sender: Option<SyncSender<QueuedJob>>,
     shared: Arc<Shared>,
     workers: Vec<JoinHandle<()>>,
-    done: Receiver<()>,
+    /// Behind a mutex only so the pool is `Sync` (an async caller holds `&InspectionPool`
+    /// across an await); locked only by `shutdown`.
+    done: Mutex<Receiver<()>>,
     worker_count: usize,
 }
 
@@ -155,7 +157,7 @@ impl InspectionPool {
             sender: Some(sender),
             shared: Arc::clone(&shared),
             workers: Vec::new(),
-            done,
+            done: Mutex::new(done),
             worker_count: workers.get(),
         };
         for index in 0..workers.get() {
@@ -203,6 +205,50 @@ impl InspectionPool {
         T: Send + 'static,
         F: FnOnce(&Inspector) -> T + Send + 'static,
     {
+        self.submit_capacity(
+            Capacity {
+                _permit: permit,
+                _memory: Some(memory),
+            },
+            work,
+        )
+    }
+
+    /// Queue a job that owns its memory itself: the closure (and the value it returns)
+    /// carries the request's `MemoryReservation`, so the reservation is released only when
+    /// the closure finishes or is discarded, never when the awaiter is dropped. The
+    /// inspection permit is owned by the job exactly as in [`submit_with`](Self::submit_with).
+    ///
+    /// # Errors
+    /// [`CoreBridgeError::Overload`] when the queue is full or the pool is closing; the
+    /// permit and everything the closure owns are dropped (nothing started).
+    pub fn submit_job<T, F>(
+        &self,
+        permit: InspectionPermit,
+        work: F,
+    ) -> Result<JobHandle<T>, CoreBridgeError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Inspector) -> T + Send + 'static,
+    {
+        self.submit_capacity(
+            Capacity {
+                _permit: permit,
+                _memory: None,
+            },
+            work,
+        )
+    }
+
+    fn submit_capacity<T, F>(
+        &self,
+        capacity: Capacity,
+        work: F,
+    ) -> Result<JobHandle<T>, CoreBridgeError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Inspector) -> T + Send + 'static,
+    {
         let sender = self.sender.as_ref().ok_or(CoreBridgeError::Overload)?;
         if self.shared.closing.load(Ordering::SeqCst) {
             return Err(CoreBridgeError::Overload);
@@ -225,10 +271,7 @@ impl InspectionPool {
         });
         let job = QueuedJob {
             cancelled: Arc::clone(&cancelled),
-            capacity: Capacity {
-                _permit: permit,
-                _memory: memory,
-            },
+            capacity,
             work: erased,
         };
         match sender.try_send(job) {
@@ -272,14 +315,16 @@ impl InspectionPool {
         self.begin_close();
         let deadline = Instant::now().checked_add(timeout);
         let mut finished = 0_usize;
-        while finished < self.worker_count {
-            let remaining = deadline.map_or(Duration::ZERO, |d| {
-                d.saturating_duration_since(Instant::now())
-            });
-            if self.done.recv_timeout(remaining).is_err() {
-                break;
+        if let Ok(done) = self.done.lock() {
+            while finished < self.worker_count {
+                let remaining = deadline.map_or(Duration::ZERO, |d| {
+                    d.saturating_duration_since(Instant::now())
+                });
+                if done.recv_timeout(remaining).is_err() {
+                    break;
+                }
+                finished = finished.saturating_add(1);
             }
-            finished = finished.saturating_add(1);
         }
         let drained = finished >= self.worker_count;
         if drained {

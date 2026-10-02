@@ -189,19 +189,83 @@ impl DeploymentAuthority {
 #[derive(Debug)]
 pub struct ContentPolicy {
     profile: redact_secret::Profile,
+    pii: Vec<String>,
+    on_warn: OnWarn,
+    max_findings: u32,
 }
 
 impl ContentPolicy {
+    /// Profile only: no PII selection, `on_warn = reject`, provisional finding bound.
     #[must_use]
     pub const fn new(profile: redact_secret::Profile) -> Self {
-        Self { profile }
+        Self {
+            profile,
+            pii: Vec::new(),
+            on_warn: OnWarn::Reject,
+            max_findings: DEFAULT_MAX_FINDINGS,
+        }
+    }
+
+    /// Optional PII selectors (core syntax, for example `pii:family:global:email`).
+    #[must_use]
+    pub fn with_pii(mut self, pii: Vec<String>) -> Self {
+        self.pii = pii;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_on_warn(mut self, on_warn: OnWarn) -> Self {
+        self.on_warn = on_warn;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_max_findings(mut self, max_findings: u32) -> Self {
+        self.max_findings = max_findings;
+        self
     }
 
     #[must_use]
     pub const fn profile(&self) -> redact_secret::Profile {
         self.profile
     }
+
+    #[must_use]
+    pub fn pii(&self) -> &[String] {
+        &self.pii
+    }
+
+    #[must_use]
+    pub const fn on_warn(&self) -> OnWarn {
+        self.on_warn
+    }
+
+    /// Request-wide bound on findings; exceeding it rejects the request.
+    #[must_use]
+    pub const fn max_findings(&self) -> u32 {
+        self.max_findings
+    }
 }
+
+/// What to do when the core reports a `Warn` finding: the default policy leaves such text
+/// in place (medium confidence, for example `password=...`). Rejecting is the default
+/// (fail closed); forwarding is a deliberate operator choice (ADR 0015).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OnWarn {
+    /// Reject the request when any inspected text has a `Warn` finding.
+    #[default]
+    Reject,
+    /// Forward the text unchanged (the core leaves `Warn` findings in place).
+    Forward,
+}
+
+/// Most entries accepted in `content.pii`. Selectors are validated by the pinned core.
+pub const MAX_PII_SELECTORS: usize = 32;
+const MAX_PII_SELECTOR_BYTES: usize = 64;
+/// Provisional request-wide finding bound, pending ADR 0008 measurement.
+pub const DEFAULT_MAX_FINDINGS: u32 = 1024;
+/// Ceiling for `content.max_findings` (the core's own default bound).
+pub const MAX_FINDINGS_CEILING: u32 = 50_000;
 
 /// Resource policy: limits, deadlines, capacities.
 #[derive(Debug)]
@@ -473,13 +537,64 @@ fn parse_upstream(obj: &Obj<'_>) -> Result<UpstreamAuthority, ConfigError> {
 }
 
 fn parse_content(obj: &Obj<'_>) -> Result<ContentPolicy, ConfigError> {
-    obj.only(&["profile"])?;
+    obj.only(&["profile", "pii", "on_warn", "max_findings"])?;
     let name = obj
         .require("profile", "content.profile")?
         .as_str("content.profile")?;
     let profile = core_bridge::parse_profile(name)
         .map_err(|_| ConfigError::new(ConfigErrorKind::InvalidValue, "content.profile"))?;
-    Ok(ContentPolicy::new(profile))
+    let mut policy = ContentPolicy::new(profile);
+    if let Some(value) = obj.get("pii") {
+        let Json::Array(items) = value else {
+            return Err(ConfigError::new(
+                ConfigErrorKind::InvalidType,
+                "content.pii",
+            ));
+        };
+        if items.len() > MAX_PII_SELECTORS {
+            return Err(ConfigError::new(
+                ConfigErrorKind::InvalidValue,
+                "content.pii",
+            ));
+        }
+        let mut selectors = Vec::with_capacity(items.len());
+        for item in items {
+            let selector = item.as_str("content.pii")?;
+            if selector.is_empty() || selector.len() > MAX_PII_SELECTOR_BYTES {
+                return Err(ConfigError::new(
+                    ConfigErrorKind::InvalidValue,
+                    "content.pii",
+                ));
+            }
+            selectors.push(selector.to_owned());
+        }
+        // The pinned core's own parser decides what is supported (`pii:kr` is not).
+        let refs: Vec<&str> = selectors.iter().map(String::as_str).collect();
+        core_bridge::parse_pii(&refs)
+            .map_err(|_| ConfigError::new(ConfigErrorKind::InvalidValue, "content.pii"))?;
+        policy = policy.with_pii(selectors);
+    }
+    if let Some(value) = obj.get("on_warn") {
+        let on_warn = match value.as_str("content.on_warn")? {
+            "reject" => OnWarn::Reject,
+            "forward" => OnWarn::Forward,
+            _ => {
+                return Err(ConfigError::new(
+                    ConfigErrorKind::InvalidValue,
+                    "content.on_warn",
+                ));
+            }
+        };
+        policy = policy.with_on_warn(on_warn);
+    }
+    if let Some(value) = obj.get("max_findings") {
+        policy = policy.with_max_findings(value.as_u32_in(
+            "content.max_findings",
+            1,
+            MAX_FINDINGS_CEILING,
+        )?);
+    }
+    Ok(policy)
 }
 
 fn parse_resources(obj: &Obj<'_>) -> Result<ResourcePolicy, ConfigError> {
@@ -692,6 +807,53 @@ mod tests {
         let plan = parse(VALID.as_bytes()).expect("valid");
         assert!(plan.deployment().listener().addr().ip().is_loopback());
         assert!(!plan.deployment().listener().non_loopback_acknowledged());
+    }
+
+    fn with_content(content: &str) -> String {
+        VALID.replace(r#"{"profile": "common"}"#, content)
+    }
+
+    #[test]
+    fn content_policy_defaults_fail_closed() {
+        let plan = parse(VALID.as_bytes()).expect("valid");
+        assert_eq!(plan.content().on_warn(), OnWarn::Reject);
+        assert!(plan.content().pii().is_empty());
+        assert_eq!(plan.content().max_findings(), DEFAULT_MAX_FINDINGS);
+    }
+
+    #[test]
+    fn content_policy_fields_are_validated_strictly() {
+        let plan = parse(
+            with_content(
+                r#"{"profile":"full","pii":["pii:family:global:email"],"on_warn":"forward","max_findings":7}"#,
+            )
+            .as_bytes(),
+        )
+        .expect("valid");
+        assert_eq!(plan.content().on_warn(), OnWarn::Forward);
+        assert_eq!(plan.content().pii(), ["pii:family:global:email"]);
+        assert_eq!(plan.content().max_findings(), 7);
+        for bad in [
+            r#"{"profile":"full","on_warn":"allow"}"#,
+            r#"{"profile":"full","on_warn":true}"#,
+            r#"{"profile":"full","on_warn":"Reject"}"#,
+            r#"{"profile":"full","pii":"pii"}"#,
+            r#"{"profile":"full","pii":[1]}"#,
+            r#"{"profile":"full","pii":[""]}"#,
+            r#"{"profile":"full","pii":["pii:kr"]}"#,
+            r#"{"profile":"full","pii":["no-such-selector"]}"#,
+            r#"{"profile":"full","max_findings":0}"#,
+            r#"{"profile":"full","max_findings":50001}"#,
+            r#"{"profile":"full","max_findings":"7"}"#,
+            r#"{"profile":"full","unknown":1}"#,
+        ] {
+            assert!(parse(with_content(bad).as_bytes()).is_err(), "{bad}");
+        }
+        let many = format!(
+            r#"{{"profile":"full","pii":[{}]}}"#,
+            vec![r#""pii:family:global:email""#; MAX_PII_SELECTORS + 1].join(",")
+        );
+        assert!(parse(with_content(&many).as_bytes()).is_err());
     }
 
     #[test]

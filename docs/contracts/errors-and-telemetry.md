@@ -14,7 +14,7 @@ Status: approved categories; code spellings fixed in #4; HTTP status mappings fo
 | `transport_failure` | Upstream connect/TLS/transmission failure (skeleton: also listener bind/serve failure at startup) |
 | `invalid_config` | Startup only: static configuration failed validation. Never a request outcome. |
 | `not_ready` | Readiness is false: validated plan or required initialization is missing. |
-| `not_implemented` | A request passed admission and validation but forwarding does not exist yet (#18; removed when #19/#20 land). Never forwarded. |
+| `not_implemented` | A request passed admission, validation, inspection, and approval but forwarding does not exist yet (#18/#19; removed when #20 lands). Never forwarded. |
 
 Errors never echo payload fragments, credentials, or offending text. Provider response and error bodies are relayed under the response contract and may contain sensitive data. Document status mappings and SDK-retry implications. After response bytes start, errors cannot change the HTTP status; terminate per the stream error contract without fabricating completion events.
 
@@ -56,6 +56,15 @@ SDK retry column: the OpenAI Python and Node SDKs retry `408`, `409`, `429`, and
 | Body not received within `body_deadline_ms` | 408 | `limit_exceeded` | yes |
 | Receipt or memory capacity unavailable within `admission_wait_ms`, or wait queue full (`Retry-After: 1`) | 503 | `overload` | yes, after `Retry-After` |
 | Admitted and validated; forwarding not implemented yet | 501 | `not_implemented` | yes (5xx) |
+
+After admission, inspection and approval (#19) add these rejections, all local, with no upstream byte and the same fixed body:
+
+| Situation | Status | Code | SDK retries |
+| --- | --- | --- | --- |
+| `Block` finding; `Warn` finding while `content.on_warn` is `reject` (default); a finding in `model` | 422 | `unsupported_input` | no |
+| Request-wide text-byte or finding limit exceeded; transformed output over its bound | 413 | `limit_exceeded` | no |
+| Detector, policy, or placeholder failure; discarded or panicked inspection job | 500 | `incomplete_inspection` | yes (5xx) |
+| No inspection permit or queue slot (`Retry-After: 1`) | 503 | `overload` | yes, after `Retry-After` |
 
 Rationale for the mappings: a caller cannot fix `5xx`/`408` by changing the request, so those are the retryable ones (transient capacity, slow client); everything the caller must change is a non-retried `4xx`. `413` is used for every limit rather than `400` so a caller can tell "too big" from "wrong". `422` separates a request that parses but is not in the supported subset from one that does not parse at all.
 

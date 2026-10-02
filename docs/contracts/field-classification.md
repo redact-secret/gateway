@@ -30,6 +30,13 @@ Files, images, audio, URL content, stored conversation/file references, encrypte
 
 Alpha 1: Chat Completions text subset. Beta 1: Responses API text subset. Anything else needs its own ADR. The field-by-field table for the Chat Completions text subset is [chat-completions-request](chat-completions-request.md) (#18). Tool, metadata, and schema-text contracts remain Alpha 2.
 
+## Keys, structural strings, and `Warn`/`Block` (#19)
+
+- Object keys are not inspected as text: in the supported subset every key is a fixed schema name validated by the field matrix, and every free-form-keyed object (`metadata`, `logit_bias`, tool schemas) is rejected, so no user-controlled key text reaches upstream. A later contract that admits free-form keys must reject or inspect them in the same change.
+- The validated structural string `model` is checked by the core in detect-only mode: any finding rejects the request, and it is never rewritten.
+- A `Block` finding in inspected text rejects the request; a `Warn` finding rejects unless `content.on_warn` is `"forward"` ([ADR 0015](../decisions/0015-core-inspection-and-request-transformation.md)).
+- Pre-redacted input: a client-supplied `<SECRET_n>`-shaped string is ordinary text, not a finding. No client claim that input was scanned has any effect.
+
 ## Status
 
 Implemented for the Chat Completions text subset (#18): the matrix, the recursive unknown-field rejection, and the decoded-string and duplicate-key rules. Contracts for tool results, app-submitted tool arguments, metadata, and tool descriptions or schema text are planned (Alpha 2, #9).

@@ -65,6 +65,14 @@ impl CapacityPlan {
     }
 }
 
+impl CapacityPlan {
+    /// Number of inspection permits (CPU jobs queued plus running).
+    #[must_use]
+    pub const fn inspection_permits(&self) -> NonZeroU32 {
+        self.inspection
+    }
+}
+
 /// Bytes per memory unit. A request reservation is counted in these.
 pub const MEMORY_UNIT_BYTES: usize = 1024;
 

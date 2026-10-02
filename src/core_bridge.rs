@@ -37,6 +37,14 @@ pub fn parse_profile(name: &str) -> Result<Profile, CoreBridgeError> {
     Profile::from_name(name).ok_or(CoreBridgeError::UnsupportedProfile)
 }
 
+/// Parse PII selectors using the core's own parser (the pinned core has no `pii:kr`).
+///
+/// # Errors
+/// [`CoreBridgeError::UnsupportedProfile`] for any selector the pinned core rejects.
+pub fn parse_pii(selectors: &[&str]) -> Result<PiiSelection, CoreBridgeError> {
+    PiiSelection::parse(selectors).map_err(|e| map_core_error(&e))
+}
+
 /// Counts for one request inspection. Never content.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InspectionSummary {
@@ -49,6 +57,8 @@ pub struct InspectionSummary {
     /// Findings the default policy left in the text (`Warn`/`Allow`). Reported because
     /// "no redactions" is not "no findings" (core-completeness contract).
     pub unredacted_findings: usize,
+    /// Of those, findings whose action is `Warn` (not `Allow`).
+    pub warned_findings: usize,
 }
 
 /// Proof that core inspected the entire input and produced valid output. Only this module
@@ -103,6 +113,8 @@ pub enum CoreBridgeError {
     LimitExceeded,
     /// The policy decided `Block`: the core says the input must not proceed.
     Blocked,
+    /// A `Warn` finding was left in the text and the content policy is `on_warn = reject`.
+    Warned,
     /// Inspection queue full, or the pool is shutting down.
     Overload,
     /// Any other non-complete outcome: detector, policy or placeholder failure, discarded
@@ -115,9 +127,10 @@ impl CoreBridgeError {
     #[must_use]
     pub const fn code(self) -> SafeCode {
         match self {
-            Self::UnsupportedProfile | Self::InvalidConfiguration | Self::Blocked => {
-                SafeCode::UnsupportedInput
-            }
+            Self::UnsupportedProfile
+            | Self::InvalidConfiguration
+            | Self::Blocked
+            | Self::Warned => SafeCode::UnsupportedInput,
             Self::LimitExceeded => SafeCode::LimitExceeded,
             Self::Overload => SafeCode::Overload,
             Self::Incomplete => SafeCode::IncompleteInspection,
@@ -162,6 +175,7 @@ pub struct InspectorSpec {
     profile: Profile,
     pii: PiiSelection,
     limits: WholeInputLimits,
+    reject_warnings: bool,
 }
 
 impl InspectorSpec {
@@ -176,7 +190,24 @@ impl InspectorSpec {
         max_input_bytes: usize,
         max_findings: usize,
     ) -> Result<Self, CoreBridgeError> {
-        let profile = parse_profile(profile_name)?;
+        Self::for_profile(
+            parse_profile(profile_name)?,
+            pii_selectors,
+            max_input_bytes,
+            max_findings,
+        )
+    }
+
+    /// As [`new`](Self::new) for an already parsed profile.
+    ///
+    /// # Errors
+    /// As [`new`](Self::new).
+    pub fn for_profile(
+        profile: Profile,
+        pii_selectors: &[&str],
+        max_input_bytes: usize,
+        max_findings: usize,
+    ) -> Result<Self, CoreBridgeError> {
         let pii = PiiSelection::parse(pii_selectors).map_err(|e| map_core_error(&e))?;
         let limits =
             WholeInputLimits::new(max_input_bytes, max_findings).map_err(|e| map_core_error(&e))?;
@@ -184,7 +215,16 @@ impl InspectorSpec {
             profile,
             pii,
             limits,
+            reject_warnings: false,
         })
+    }
+
+    /// Treat any `Warn` finding as a hard failure ([`CoreBridgeError::Warned`]). Off by
+    /// default here; the content policy turns it on unless the operator chose `forward`.
+    #[must_use]
+    pub const fn with_warning_rejection(mut self, reject: bool) -> Self {
+        self.reject_warnings = reject;
+        self
     }
 
     /// The request-wide bounds this spec enforces.
@@ -296,6 +336,7 @@ impl fmt::Debug for InspectedText {
 pub struct Inspector {
     registry: DetectorRegistry,
     limits: WholeInputLimits,
+    reject_warnings: bool,
 }
 
 impl Inspector {
@@ -310,6 +351,7 @@ impl Inspector {
         Ok(Self {
             registry,
             limits: spec.limits,
+            reject_warnings: spec.reject_warnings,
         })
     }
 
@@ -339,6 +381,30 @@ impl Inspector {
             scope.poisoned = true;
         }
         outcome
+    }
+
+    /// Detect-only check for a validated structural identifier that must never be rewritten
+    /// (for example `model`): any finding of any action is [`CoreBridgeError::Blocked`].
+    /// Counts nothing against the request scope's numbering.
+    ///
+    /// # Errors
+    /// [`CoreBridgeError::Blocked`] when the core finds anything;
+    /// otherwise as [`inspect_text`](Self::inspect_text).
+    pub fn reject_if_findings(&self, text: &str) -> Result<(), CoreBridgeError> {
+        let formatter = RequestFormatter { offset: 0 };
+        let result = scan_and_redact_with_limits(
+            text,
+            &self.registry,
+            &DefaultPolicy,
+            &formatter,
+            &self.limits,
+        )
+        .map_err(|e| map_core_error(&e))?;
+        if result.findings().is_empty() {
+            Ok(())
+        } else {
+            Err(CoreBridgeError::Blocked)
+        }
     }
 
     fn inspect_inner(
@@ -372,6 +438,13 @@ impl Inspector {
         if findings.iter().any(|f| f.action() == Action::Block) {
             return Err(CoreBridgeError::Blocked);
         }
+        let warned = findings
+            .iter()
+            .filter(|f| f.action() == Action::Warn)
+            .count();
+        if warned > 0 && self.reject_warnings {
+            return Err(CoreBridgeError::Warned);
+        }
         let total_findings = scope
             .findings
             .checked_add(findings.len())
@@ -390,6 +463,7 @@ impl Inspector {
         scope.summary.redactions = scope.summary.redactions.saturating_add(redactions);
         scope.summary.unredacted_findings =
             scope.summary.unredacted_findings.saturating_add(unredacted);
+        scope.summary.warned_findings = scope.summary.warned_findings.saturating_add(warned);
         let (text, _findings) = result.into_parts();
         Ok(InspectedText { text })
     }
@@ -398,6 +472,51 @@ impl Inspector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn synthetic_token() -> String {
+        format!("ghp_SYNTHETICREVOKED{:020}", 1)
+    }
+
+    #[test]
+    fn warn_rejection_is_opt_in_on_the_spec_and_counted_otherwise() {
+        let text = "password=hunter2xyz";
+        let lenient = InspectorSpec::new("full", &[], 4096, 100).expect("spec");
+        let mut scope = RequestScope::new(&lenient);
+        let out = Inspector::new(&lenient)
+            .expect("inspector")
+            .inspect_text(&mut scope, text)
+            .expect("complete");
+        assert_eq!(out.as_str(), text);
+        assert_eq!(scope.summary().warned_findings, 1);
+
+        let strict = lenient.with_warning_rejection(true);
+        let mut scope = RequestScope::new(&strict);
+        let err = Inspector::new(&strict)
+            .expect("inspector")
+            .inspect_text(&mut scope, text)
+            .expect_err("warn rejects");
+        assert_eq!(err, CoreBridgeError::Warned);
+        assert!(scope.is_poisoned());
+        assert_eq!(
+            scope.finish(Vec::new()).expect_err("poisoned"),
+            CoreBridgeError::Incomplete
+        );
+    }
+
+    #[test]
+    fn detect_only_check_rejects_any_finding_and_never_rewrites() {
+        let spec = InspectorSpec::new("full", &[], 4096, 100).expect("spec");
+        let inspector = Inspector::new(&spec).expect("inspector");
+        assert_eq!(inspector.reject_if_findings("gpt-4o-mini"), Ok(()));
+        assert_eq!(
+            inspector.reject_if_findings(&synthetic_token()),
+            Err(CoreBridgeError::Blocked)
+        );
+        assert_eq!(
+            inspector.reject_if_findings("password=hunter2xyz"),
+            Err(CoreBridgeError::Blocked)
+        );
+    }
 
     #[test]
     fn profiles_use_core_parser() {

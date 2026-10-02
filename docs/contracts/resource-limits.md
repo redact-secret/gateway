@@ -10,7 +10,7 @@ Every category below is finite, configurable through the validated static config
 | Connections / concurrent body receipt | `ReceiptPermit` | |
 | JSON depth and node count | `MemoryReservation` | Parsed structure budget |
 | Decoded string bytes / inspected text | `MemoryReservation` | |
-| Findings | `boundary` | Over-limit means incomplete inspection (reject) |
+| Findings | `boundary` / `core_bridge` | Over-limit rejects (`limit_exceeded`); request-wide, summed across texts |
 | Transformed output size | `MemoryReservation` | |
 | Aggregate original/parsed/transformed memory | `MemoryReservation` | Held while buffers are live |
 | Inspection concurrency and wait queue | `InspectionPermit` | Held until real completion |
@@ -64,7 +64,8 @@ Parsing runs on the request task (no `spawn_blocking`), bounded by `max_body_byt
 ## Known gaps
 
 - Connection count is not yet limited before headers are parsed, and there is no header-read timeout, so a connection that never finishes its headers holds a socket but no reservation. Header and idle-connection bounds belong with transport hardening (#25, Alpha 2 #10).
-- Findings, transformed-output, upstream, idle, and stream-lifetime limits have no values yet.
+- Upstream, idle, and stream-lifetime limits have no values yet.
+- The request-wide finding bound (`content.max_findings`, default 1024, ceiling 50,000) and the inspection pool sizing (workers `min(inspection permits, CPUs, 16)`, queue `min(inspection permits, 1024)`) are provisional (#19), not measured on a quiet host (ADR 0008). The transformed-output bound is `min(max_body_bytes, bytes covered by the request's reservation)`; the reservation already budgets one output copy.
 
 ## Status
 

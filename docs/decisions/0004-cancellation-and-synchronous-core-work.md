@@ -1,6 +1,6 @@
 # ADR 0004: Cancellation and synchronous core work
 
-Status: Accepted (design); worker strategy deferred to #5 measurements. Implementation status: planned. Covers issue #3 section C.
+Status: Accepted (design); worker strategy deferred to #5 measurements. Implementation status: implemented for inspection in #19 (dedicated worker pool whose jobs own the `InspectionPermit` and the request's `MemoryReservation` until real completion; cancelled results discarded; [ADR 0015](0015-core-inspection-and-request-transformation.md)); the pre-upstream cancellation check and the shutdown drain deadline are planned with #20. Covers issue #3 section C.
 
 ## Context
 
