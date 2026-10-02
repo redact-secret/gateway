@@ -71,6 +71,13 @@ impl CapacityPlan {
     pub const fn inspection_permits(&self) -> NonZeroU32 {
         self.inspection
     }
+
+    /// Number of active-stream permits. With `stream_buffer_bytes` this bounds the memory
+    /// that streamed provider bytes can hold in the relay (#21).
+    #[must_use]
+    pub const fn stream_permits(&self) -> NonZeroU32 {
+        self.stream
+    }
 }
 
 /// Bytes per memory unit. A request reservation is counted in these.
@@ -120,6 +127,17 @@ pub struct RequestLimits {
     pub max_response_body_bytes: u32,
     /// Longest graceful drain after a shutdown signal before in-flight work is cancelled.
     pub shutdown_drain_ms: u32,
+    /// Longest wait for the next upstream chunk of an SSE stream (#21). Counted only while
+    /// the Gateway is waiting on the provider, never while the downstream is slow.
+    pub stream_idle_ms: u32,
+    /// Longest total life of one SSE stream, from the send to the end of the relay (#21).
+    pub stream_lifetime_ms: u32,
+    /// Longest a pending response write may make no progress before the connection is
+    /// closed (slow or absent consumer, #21). Applies to every response write.
+    pub stream_write_stall_ms: u32,
+    /// Most provider bytes one stream may hold in the relay at once, in bytes. A single
+    /// upstream chunk larger than this terminates the stream (#21).
+    pub stream_buffer_bytes: u32,
 }
 
 impl RequestLimits {
@@ -141,6 +159,10 @@ impl RequestLimits {
             max_response_header_bytes: 32_768,
             max_response_body_bytes: 4_194_304,
             shutdown_drain_ms: 10_000,
+            stream_idle_ms: 120_000,
+            stream_lifetime_ms: 900_000,
+            stream_write_stall_ms: 30_000,
+            stream_buffer_bytes: 1_048_576,
         }
     }
 
@@ -209,6 +231,21 @@ impl RequestLimits {
     pub fn shutdown_drain(&self) -> Duration {
         Duration::from_millis(u64::from(self.shutdown_drain_ms))
     }
+
+    #[must_use]
+    pub fn stream_idle(&self) -> Duration {
+        Duration::from_millis(u64::from(self.stream_idle_ms))
+    }
+
+    #[must_use]
+    pub fn stream_lifetime(&self) -> Duration {
+        Duration::from_millis(u64::from(self.stream_lifetime_ms))
+    }
+
+    #[must_use]
+    pub fn stream_write_stall(&self) -> Duration {
+        Duration::from_millis(u64::from(self.stream_write_stall_ms))
+    }
 }
 
 /// Typed admission failure. Carries no request content.
@@ -258,7 +295,8 @@ pub struct UpstreamPermit {
     _permit: OwnedSemaphorePermit,
 }
 
-/// Permit for one active response stream, held through stream cleanup.
+/// Permit for one active response stream, held through stream cleanup (#21: owned by the
+/// streaming response body from the response headers until the stream ends or is dropped).
 #[derive(Debug)]
 pub struct StreamPermit {
     _permit: OwnedSemaphorePermit,

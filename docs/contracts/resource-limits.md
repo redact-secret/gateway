@@ -1,6 +1,6 @@
 # Contract: resource limits
 
-Status: categories approved. **Per-request body, parse, and receipt limits have numeric values (#18) that are provisional pending quiet-host measurement.** Capacity counts (receipt, memory, inspection, upstream, stream) still have no defaults and come from configuration. **Upstream connect, response-header, and total deadlines, response header and body byte bounds, and the shutdown drain deadline have provisional values (#20, below).** Idle and total stream lifetime deadlines remain planned (#21). Mechanism: [ADR 0003](../decisions/0003-resource-admission-and-lifetime.md); measurement gate: [ADR 0008](../decisions/0008-performance-measurement-gate.md); decision record: [ADR 0014](../decisions/0014-chat-completions-admission.md).
+Status: categories approved. **Per-request body, parse, and receipt limits have numeric values (#18) that are provisional pending quiet-host measurement.** Capacity counts (receipt, memory, inspection, upstream, stream) still have no defaults and come from configuration. **Upstream connect, response-header, and total deadlines, response header and body byte bounds, and the shutdown drain deadline have provisional values (#20, below).** **Stream idle and lifetime deadlines, the write-stall deadline, and the per-stream relay buffer bound have provisional values (#21, below).** Mechanism: [ADR 0003](../decisions/0003-resource-admission-and-lifetime.md); measurement gate: [ADR 0008](../decisions/0008-performance-measurement-gate.md); decision record: [ADR 0014](../decisions/0014-chat-completions-admission.md).
 
 Every category below is finite, configurable through the validated static configuration, and tested near and across its boundary. A finite per-request limit is never enough alone: there is also an aggregate budget.
 
@@ -15,8 +15,8 @@ Every category below is finite, configurable through the validated static config
 | Aggregate original/parsed/transformed memory | `MemoryReservation` | Held while buffers are live |
 | Inspection concurrency and wait queue | `InspectionPermit` | Held until real completion |
 | Upstream in-flight requests | `UpstreamPermit` | |
-| Active response streams and buffers | `StreamPermit` | Held through stream cleanup |
-| Response header and buffer bounds, total bytes | `StreamPermit` | Do not accumulate an entire SSE stream |
+| Active response streams and buffers | `StreamPermit` | Owned by the response body from the headers until the stream ends or is dropped; the provider connection closes first (#21) |
+| Response header and buffer bounds, total bytes | `StreamPermit` | Do not accumulate an entire SSE stream: the relay holds at most one provider chunk (`stream_buffer_bytes`) |
 | Deadlines: admission, body receipt, upstream, idle, total/stream lifetime | `admission` / `transport` | |
 | Shutdown deadline | `admission` | ADR 0004 |
 
@@ -57,6 +57,19 @@ Same configuration object and the same status as the table above: finite, valida
 
 The buffered response is not part of the request `MemoryReservation` (its size is unknown until read). It is bounded instead by the `UpstreamPermit` it holds until the body is written or abandoned: at most `resources.capacity.upstream * max_response_body_bytes` bytes are buffered at once. The HTTP parser caps response header fields at 64 and has its own buffer ceiling; `max_response_header_bytes` is enforced after parsing.
 
+## Stream limits (#21; provisional pending quiet-host measurement)
+
+Same configuration object, same status: finite, validated against ceilings, justified, **not measured**. Mechanism and rationale: [ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md).
+
+| Field | Provisional value | Ceiling | Rationale |
+| --- | --- | --- | --- |
+| `stream_idle_ms` | 120,000 | 3,600,000 (and at most `stream_lifetime_ms`) | Longest wait for the next provider chunk, counted only while waiting on the provider. Reasoning models can be silent for a long time before the first token; the deadline detects a stalled provider, it is not a latency goal. |
+| `stream_lifetime_ms` | 900,000 (15 min) | 3,600,000 | Longest total stream life. Infinite streams are a non-goal; this also bounds a consumer that reads just fast enough to avoid the write stall. |
+| `stream_write_stall_ms` | 30,000 | 600,000 | Longest a pending response write may make no progress before the connection is closed. A local consumer that is alive reads in milliseconds; thirty seconds tolerates a paused one while bounding how long a dead one holds a stream permit and a provider connection. Applies to every accepted connection. |
+| `stream_buffer_bytes` | 1,048,576 (1 MiB) | 16,777,216 | Most provider bytes the relay holds at once (one provider chunk). Above the HTTP client library's maximum read buffer (about 400 KiB), so ordinary streams never reach it. |
+
+Aggregate relay memory is at most `resources.capacity.stream * stream_buffer_bytes`; startup validation rejects a combination above 4 GiB (`invalid_combination`). Stream occupancy is independent of the other classes: an open stream holds one `UpstreamPermit` and one `StreamPermit` and nothing else (the request's memory reservation ends at the response headers and the inspection permit at the end of inspection), so long-lived or slow streams cannot exhaust inspection, receipt, or memory capacity. The relay spawns no task: the tasks that exist per stream are the HTTP server's connection task and the HTTP client's connection task, bounded by the stream and upstream permits.
+
 Total decoded string bytes are bounded by `max_body_bytes` (decoded text cannot exceed the wire bytes it came from).
 
 ## Memory accounting and composition with the global budget
@@ -79,10 +92,11 @@ Parsing runs on the request task (no `spawn_blocking`), bounded by `max_body_byt
 ## Known gaps
 
 - Connection count is not yet limited before headers are parsed, and there is no header-read timeout, so a connection that never finishes its headers holds a socket but no reservation. Header and idle-connection bounds belong with transport hardening (#25, Alpha 2 #10).
-- Idle and stream-lifetime limits have no values yet (#21). Upstream deadlines and response bounds are provisional (#20).
+- Stream limits (#21) and upstream deadlines and response bounds (#20) are provisional.
+- The write-stall deadline bounds a response write that stops making progress; it does not bound read-side stalls (a request header or body that stops arriving), which remain the gap in the first bullet. The HTTP server's own write buffer per connection is bounded by the library and is not part of `stream_buffer_bytes`.
 - Idle connection pooling to the provider is off, so every request pays a connection setup; revisit with measurement (ADR 0017).
 - The request-wide finding bound (`content.max_findings`, default 1024, ceiling 50,000) and the inspection pool sizing (workers `min(inspection permits, CPUs, 16)`, queue `min(inspection permits, 1024)`) are provisional (#19), not measured on a quiet host (ADR 0008). The transformed-output bound is `min(max_body_bytes, bytes covered by the request's reservation)`; the reservation already budgets one output copy.
 
 ## Status
 
-Request body, parse, memory-composition, admission wait/queue, and body-deadline limits are implemented in #18 with the provisional values above and boundary tests (`tests/chat_admission.rs`, unit tests in `admission.rs`, `protocol/json.rs`, `chat_route.rs`). Upstream in-flight capacity, response bounds, upstream deadlines, and the shutdown deadline are implemented in #20 with the provisional values above and tests in `src/transport/tests/forward_tests.rs`. Stream capacity, idle, and stream-lifetime limits are planned (#21).
+Request body, parse, memory-composition, admission wait/queue, and body-deadline limits are implemented in #18 with the provisional values above and boundary tests (`tests/chat_admission.rs`, unit tests in `admission.rs`, `protocol/json.rs`, `chat_route.rs`). Upstream in-flight capacity, response bounds, upstream deadlines, and the shutdown deadline are implemented in #20 with the provisional values above and tests in `src/transport/tests/forward_tests.rs`. Stream capacity wiring and the stream limits are implemented in #21 with the provisional values above and tests in `src/transport/tests/stream_tests.rs` and `src/write_stall.rs`.

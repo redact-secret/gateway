@@ -12,7 +12,10 @@
 //! Failure modes ([`Behavior`]): ordinary JSON, slow responses, disconnect before any
 //! response, disconnect mid-body, malformed replies, and SSE delivered in arbitrary
 //! fragments (chunked or close-delimited) with per-fragment delays, with or without a
-//! clean finish. Behaviors can be queued per call.
+//! clean finish, and an endless chunked SSE stream for backpressure tests. Behaviors can be
+//! queued per call. For SSE the fake also records how many body bytes it managed to write
+//! and how many streams it saw the peer close (read EOF or a failed write), so tests can
+//! assert that the gateway cancelled the upstream exchange.
 //!
 //! Scope: this models the *upstream*. It does not implement any gateway behavior, and
 //! it does not decide what is correct for the gateway; tests do.
@@ -90,6 +93,10 @@ pub enum Behavior {
         framing: SseFraming,
         finish: bool,
     },
+    /// `200 text/event-stream` (chunked) that writes `chunk` every `interval` until the
+    /// peer closes. Never finishes by itself. A zero interval writes as fast as the
+    /// socket accepts, so it measures how much backpressure lets through.
+    SseEndless { chunk: Vec<u8>, interval: Duration },
 }
 
 impl fmt::Debug for Behavior {
@@ -102,6 +109,7 @@ impl fmt::Debug for Behavior {
             Self::DisconnectMidBody { .. } => "Behavior::DisconnectMidBody",
             Self::Malformed(_) => "Behavior::Malformed",
             Self::Sse { .. } => "Behavior::Sse",
+            Self::SseEndless { .. } => "Behavior::SseEndless",
         })
     }
 }
@@ -187,6 +195,10 @@ impl fmt::Display for ForwardViolation {
 impl std::error::Error for ForwardViolation {}
 
 struct State {
+    /// SSE connections on which the peer was seen to close (EOF or failed write).
+    peer_closed: usize,
+    /// SSE body bytes successfully written to sockets (before the framing).
+    streamed_bytes: usize,
     connections: usize,
     calls: Vec<RecordedCall>,
     script: VecDeque<Behavior>,
@@ -234,6 +246,8 @@ impl FakeUpstream {
         let addr = listener.local_addr().expect("local addr");
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
+                peer_closed: 0,
+                streamed_bytes: 0,
                 connections: 0,
                 calls: Vec::new(),
                 script: VecDeque::new(),
@@ -280,6 +294,32 @@ impl FakeUpstream {
     /// Replace the default behavior.
     pub fn set_default(&self, behavior: Behavior) {
         self.shared.lock().default = behavior;
+    }
+
+    /// SSE connections the fake saw the gateway close.
+    #[must_use]
+    pub fn peer_closed(&self) -> usize {
+        self.shared.lock().peer_closed
+    }
+
+    /// SSE body bytes the fake successfully wrote (kernel buffers included).
+    #[must_use]
+    pub fn streamed_bytes(&self) -> usize {
+        self.shared.lock().streamed_bytes
+    }
+
+    /// Poll until `peer_closed() >= n` or the timeout elapses.
+    pub async fn wait_for_peer_closed(&self, n: usize, timeout: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if self.peer_closed() >= n {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
     }
 
     #[must_use]
@@ -465,7 +505,31 @@ async fn handle(mut stream: TcpStream, shared: Arc<Shared>) {
             .pop_front()
             .unwrap_or_else(|| state.default.clone())
     };
-    respond(&mut stream, behavior).await;
+    respond(&mut stream, behavior, &shared).await;
+}
+
+/// Wait `delay`; true if the peer closed the connection first (read EOF or error).
+async fn sleep_or_closed(stream: &mut TcpStream, delay: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + delay;
+    let mut probe = [0_u8; 64];
+    loop {
+        tokio::select! {
+            () = tokio::time::sleep_until(deadline) => return false,
+            read = stream.read(&mut probe) => {
+                if matches!(read, Ok(0) | Err(_)) {
+                    return true;
+                }
+            }
+        }
+    }
+}
+
+fn note_closed(shared: &Shared) {
+    shared.lock().peer_closed += 1;
+}
+
+fn note_streamed(shared: &Shared, n: usize) {
+    shared.lock().streamed_bytes += n;
 }
 
 fn reason(status: u16) -> &'static str {
@@ -481,7 +545,7 @@ fn reason(status: u16) -> &'static str {
     }
 }
 
-async fn respond(stream: &mut TcpStream, behavior: Behavior) {
+async fn respond(stream: &mut TcpStream, behavior: Behavior, shared: &Shared) {
     let mut behavior = behavior;
     while let Behavior::Slow { delay, then } = behavior {
         tokio::time::sleep(delay).await;
@@ -528,8 +592,11 @@ async fn respond(stream: &mut TcpStream, behavior: Behavior) {
                 return;
             }
             for fragment in fragments {
-                if !fragment.delay_before.is_zero() {
-                    tokio::time::sleep(fragment.delay_before).await;
+                if !fragment.delay_before.is_zero()
+                    && sleep_or_closed(stream, fragment.delay_before).await
+                {
+                    note_closed(shared);
+                    return;
                 }
                 let ok = match framing {
                     SseFraming::Chunked => {
@@ -541,14 +608,37 @@ async fn respond(stream: &mut TcpStream, behavior: Behavior) {
                     SseFraming::CloseDelimited => stream.write_all(&fragment.bytes).await,
                 };
                 if ok.is_err() || stream.flush().await.is_err() {
+                    note_closed(shared);
                     return;
                 }
+                note_streamed(shared, fragment.bytes.len());
             }
             if finish {
                 if framing == SseFraming::Chunked {
                     let _ = stream.write_all(b"0\r\n\r\n").await;
                 }
                 let _ = stream.shutdown().await;
+            }
+        }
+        Behavior::SseEndless { chunk, interval } => {
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+            if stream.write_all(head.as_bytes()).await.is_err() {
+                note_closed(shared);
+                return;
+            }
+            let mut framed = format!("{:x}\r\n", chunk.len()).into_bytes();
+            framed.extend_from_slice(&chunk);
+            framed.extend_from_slice(b"\r\n");
+            loop {
+                if stream.write_all(&framed).await.is_err() {
+                    note_closed(shared);
+                    return;
+                }
+                note_streamed(shared, chunk.len());
+                if !interval.is_zero() && sleep_or_closed(stream, interval).await {
+                    note_closed(shared);
+                    return;
+                }
             }
         }
     }

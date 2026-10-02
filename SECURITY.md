@@ -50,7 +50,7 @@ Unsupported images, audio, files, external/stored content references, opaque pay
 
 Provider authentication headers are intentionally delivered to the configured provider and must not appear in diagnostics. Request redaction is separate from credential transport. Redacted text can alter model/tool behavior; Gateway does not authorize tool execution.
 
-Initial responses, including provider error bodies and SSE events, are not content-sanitized. Applications must not assume they are safe to log or store. Cancellation cannot retract bytes already transmitted. After streaming starts, failure must follow the documented termination behavior and cannot be disguised as a new successful response.
+Initial responses, including provider error bodies and SSE events, are not content-sanitized. Applications must not assume they are safe to log or store. Cancellation cannot retract bytes already transmitted. After streaming starts, failure follows the documented termination contract ([ADR 0018](docs/decisions/0018-sse-relay-termination-and-stream-bounds.md)): the stream ends abruptly with no completion event, so it cannot be disguised as a successful response.
 
 ## Operations and residual risks
 

@@ -22,16 +22,24 @@
 //!    response (any status) is relayed with allowlisted headers and an unredacted body;
 //!    every Gateway-side failure is a fixed safe code ([`Reject::Transport`]).
 //!
-//! `stream: true` is rejected locally with `501 not_implemented` before inspection until SSE
-//! relay lands (#21): nothing is forwarded and no stream is half-relayed as JSON. A route
-//! with no configured upstream also ends in `501 not_implemented`. This module holds no
-//! HTTP client and builds no request; it hands the sealed request, the request-local
-//! credential carried on [`Admitted`] (#24), and the permit to the transport.
+//! `stream: true` (#21, ADR 0018) takes exactly the same road: the whole request is
+//! received, admitted, and inspected first, and any rejection sends zero upstream body
+//! bytes. After inspection has released its permit, the upstream permit and then an
+//! independent stream permit are acquired (`try`, so a full class is an immediate
+//! `overload`), and [`Upstream::forward_stream`] relays the provider's SSE bytes as they
+//! arrive. The response headers are committed when the provider's headers arrive; from
+//! then on failures cannot change the status and end the stream abruptly (see
+//! [`crate::transport::stream`]). A route with no configured upstream ends in `501
+//! not_implemented`. This module holds no HTTP client and builds no request; it hands the
+//! sealed request, the request-local credential carried on [`Admitted`] (#24), and the
+//! permits to the transport.
 //!
-//! The handler future owns the whole request. When the caller disconnects, hyper drops it,
+//! The handler future owns the whole request until the response headers. When the caller disconnects, hyper drops it,
 //! which cancels any pending wait, inspection await, or upstream exchange and releases
 //! every permit and buffer through RAII. Nothing is spawned here. On shutdown,
-//! [`ChatRoute::cancel_in_flight`] ends the same futures after the drain deadline.
+//! [`ChatRoute::cancel_in_flight`] ends the same futures after the drain deadline and
+//! also ends every response stream already past its headers, which owns its permits and
+//! the provider connection and closes them when it is dropped.
 //!
 //! Every rejection closes the connection (`Connection: close`): a body that was not read
 //! must not be parsed as the next request. Responses are fixed strings and contain no
@@ -48,7 +56,7 @@ use axum::Router;
 use axum::body::{Body, HttpBody};
 use axum::extract::Request;
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Version, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use tokio::sync::watch;
@@ -61,7 +69,7 @@ use crate::protocol::chat::ChatRequest;
 use crate::protocol::{self, Protocol, ProtocolError, ValidatedRequest};
 use crate::telemetry::{Metrics, SafeCode, Stage};
 use crate::transport::headers::{HeaderReject, VettedHeaders, vet_inbound};
-use crate::transport::{TransportError, Upstream, UpstreamResponse};
+use crate::transport::{Forwarded, StreamResponse, TransportError, Upstream, UpstreamResponse};
 
 /// The one exact route served by this module.
 pub const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
@@ -92,8 +100,7 @@ pub enum Reject {
     Unsupported,
     /// A parse budget or count limit was exceeded.
     LimitExceeded,
-    /// Not served by this build or deployment: `stream: true` until SSE relay (#21), or no
-    /// upstream is configured for the route.
+    /// Not served by this build or deployment: no upstream is configured for the route.
     NotImplemented,
     /// A Gateway-side forwarding failure (#20). The provider's own error responses are
     /// relayed as responses and never take this path.
@@ -225,6 +232,9 @@ pub struct Admitted {
     route: RouteId,
     /// Request-local provider credential and reviewed metadata (#24). Taken by #20.
     headers: Option<VettedHeaders>,
+    /// The request used HTTP/1.0 or older. A streamed response to such a caller would be
+    /// close-delimited, so a cut stream would look like a finished one (#21).
+    legacy_http: bool,
 }
 
 impl Admitted {
@@ -383,9 +393,11 @@ impl ChatRoute {
     /// Inspect, approve, forward, and relay an admitted request. Every Gateway-side
     /// failure is a fixed safe rejection; a provider answer is relayed as received.
     async fn process(&self, mut admitted: Admitted) -> Response {
-        // SSE relay is #21: a streaming request is never forwarded as a JSON relay.
-        if admitted.chat().stream() == Some(true) {
-            return Reject::NotImplemented.into_response();
+        let streaming = admitted.chat().stream() == Some(true);
+        // A streamed response to an HTTP/1.0 caller would end with the connection, so an
+        // interrupted stream could not be told from a finished one: not served.
+        if streaming && admitted.legacy_http {
+            return Reject::Unsupported.into_response();
         }
         let Some(inspection) = &self.inspection else {
             return Reject::NotImplemented.into_response();
@@ -413,8 +425,24 @@ impl ChatRoute {
             Ok(permit) => permit,
             Err(_) => return Reject::Overload.into_response(),
         };
-        match upstream.forward(sanitized, headers, permit).await {
-            Ok(response) => relay(response),
+        if !streaming {
+            return match upstream.forward(sanitized, headers, permit).await {
+                Ok(response) => relay(response),
+                Err(error) => Reject::Transport(error).into_response(),
+            };
+        }
+        // Order (ADR 0003): receipt, memory, inspection, upstream, then stream. Inspection
+        // finished above and released its permit; the stream permit is independent of it.
+        let stream_permit = match self.admission.try_stream() {
+            Ok(permit) => permit,
+            Err(_) => return Reject::Overload.into_response(),
+        };
+        match upstream
+            .forward_stream(sanitized, headers, permit, stream_permit)
+            .await
+        {
+            Ok(Forwarded::Stream(stream)) => relay_stream(stream, self.cancel.subscribe()),
+            Ok(Forwarded::Buffered(response)) => relay(response),
             Err(error) => Reject::Transport(error).into_response(),
         }
     }
@@ -426,6 +454,7 @@ impl ChatRoute {
     /// A [`Reject`] for every admission, receipt, parse, and limit failure.
     pub async fn admit(&self, request: Request) -> Result<Admitted, Reject> {
         let (parts, body) = request.into_parts();
+        let legacy_http = parts.version < Version::HTTP_11;
         let declared = self.check_head(&parts)?;
         let headers = vet_inbound(&parts.headers)?;
         let cap = declared.map_or(self.max_body, |d| d.min(self.max_body));
@@ -450,6 +479,7 @@ impl ChatRoute {
             validated,
             route: self.route.clone(),
             headers: Some(headers),
+            legacy_http,
         })
     }
 
@@ -501,6 +531,18 @@ impl ChatRoute {
 /// abandoned.
 fn relay(response: UpstreamResponse) -> Response {
     let (status, headers, body) = response.into_parts();
+    let mut out = Response::new(Body::new(body));
+    *out.status_mut() = status;
+    *out.headers_mut() = headers;
+    out
+}
+
+/// The provider's event stream as the caller's response: status and allowlisted headers
+/// as received, the body relayed incrementally and unredacted. The server frames it (no
+/// length; chunked). The body owns both permits and the provider connection, and ends the
+/// stream abruptly on any failure after this point.
+fn relay_stream(response: StreamResponse, cancel: watch::Receiver<bool>) -> Response {
+    let (status, headers, body) = response.into_parts(cancel);
     let mut out = Response::new(Body::new(body));
     *out.status_mut() = status;
     *out.headers_mut() = headers;

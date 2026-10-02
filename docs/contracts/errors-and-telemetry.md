@@ -1,6 +1,6 @@
 # Contract: safe errors and telemetry
 
-Status: approved categories; code spellings fixed in #4; HTTP status mappings for the Chat Completions admission path fixed in #18 (below); header and credential outcomes added in #24 ([contract](headers-and-credentials.md)). Mappings for transport failures and relayed ordinary JSON responses fixed in #20 ([ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md); below); SSE stream errors land with #21.
+Status: approved categories; code spellings fixed in #4; HTTP status mappings for the Chat Completions admission path fixed in #18 (below); header and credential outcomes added in #24 ([contract](headers-and-credentials.md)). Mappings for transport failures and relayed ordinary JSON responses fixed in #20 ([ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md); below); the SSE stream termination contract and stream timings fixed in #21 ([ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md); below).
 
 ## Gateway-owned error categories
 
@@ -20,7 +20,7 @@ Status: approved categories; code spellings fixed in #4; HTTP status mappings fo
 | `invalid_config` | Startup only: static configuration failed validation. Never a request outcome. |
 | `not_ready` | Readiness is false: validated plan or required initialization is missing. |
 | `missing_credential` | No usable provider `Authorization` on a request (#24). The provider credential, not a local-auth result. |
-| `not_implemented` | The request cannot be served by this build or deployment: `stream: true` until SSE relay lands (#21), or no `deployment.upstream` is configured (#20). Never forwarded. |
+| `not_implemented` | The request cannot be served by this build or deployment: no `deployment.upstream` is configured (#20). Never forwarded. |
 
 Errors never echo payload fragments, credentials, or offending text. Provider response and error bodies are relayed under the response contract and may contain sensitive data. Document status mappings and SDK-retry implications. After response bytes start, errors cannot change the HTTP status; terminate per the stream error contract without fabricating completion events.
 
@@ -65,7 +65,8 @@ SDK retry column: the OpenAI Python and Node SDKs retry `408`, `409`, `429`, and
 | Duplicate or malformed `Authorization`, malformed or repeated organization/project, malformed or ambiguous `Connection` (#24) | 400 | `malformed_input` | no |
 | `Expect` other than `100-continue` (#24) | 417 | `unsupported_input` | no |
 | Request headers over the byte limits (#24) | 431 | `limit_exceeded` | no |
-| `stream: true` (admitted and validated; SSE relay is #21), or no upstream configured | 501 | `not_implemented` | yes (5xx; wasted work) |
+| No upstream configured (`stream: true` or not) | 501 | `not_implemented` | yes (5xx; wasted work) |
+| `stream: true` from an HTTP/1.0 caller (a cut stream could not be told from a finished one) | 422 | `unsupported_input` | no |
 
 After admission, inspection and approval (#19) add these rejections, all local, with no upstream byte and the same fixed body:
 
@@ -107,10 +108,35 @@ Content coding: the Gateway requests `Accept-Encoding: identity` and does not de
 
 Cancellation and shutdown. When the caller disconnects, the request future is dropped: any wait, inspection await, or upstream exchange is cancelled, the connection to the provider is closed, and the memory reservation and permits are released. Bytes already written to the provider cannot be retracted, so a cancelled request may still have been received (and acted on) by the provider. At shutdown the Gateway stops accepting, reports not ready, and drains for at most `shutdown_drain_ms`; remaining in-flight requests are then cancelled the same way (answering `503 not_ready` if the caller is still connected) and `serve` returns without waiting further than a one-second grace.
 
+## SSE streams (#21; [ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md))
+
+`stream: true` is admitted, parsed, inspected, and sealed exactly like any request (every rejection above applies and sends zero upstream bytes), then forwarded once. A `2xx` answer with `Content-Type: text/event-stream` is relayed incrementally and unredacted; any other answer (a provider `4xx`/`5xx`, a JSON answer) is the ordinary buffered relay above. Provider events are relayed byte for byte: the Gateway never parses, merges, splits, reorders, or adds events, and never adds `data: [DONE]` or any other completion or error event.
+
+**Before the response headers are committed** every failure is a normal Gateway error with a real status, from the table above plus: stream capacity unavailable (`503 overload`, `Retry-After: 1`, nothing sent upstream), and a provider event stream with no explicit end of message, that is close-delimited (`502 upstream_invalid_response`; a cut could not be told from a finish).
+
+**After the response headers are committed** no status can change. The termination contract: every failure ends the stream abruptly. The server closes the connection without the terminating chunk, so the caller sees a truncated, errored stream and never a normal end. Nothing is written into the stream. The causes (closed counters, never visible to the caller beyond the truncation):
+
+| Cause | Trigger | Provider connection |
+| --- | --- | --- |
+| Provider error | Connection error, malformed or truncated chunked framing, or a provider disconnect before the final chunk (recorded as `upstream_invalid_response`) | closed |
+| Idle | No provider chunk within `stream_idle_ms` (recorded as `upstream_timeout`) | closed |
+| Lifetime | Stream older than `stream_lifetime_ms` (recorded as `upstream_timeout`) | closed |
+| Buffer | One provider chunk over `stream_buffer_bytes` (recorded as `upstream_response_too_large`) | closed |
+| Shutdown | Drain deadline passed (recorded as `not_ready`) | closed |
+| Abandoned | Caller disconnected, or no write progress for `stream_write_stall_ms` (the connection is closed) | closed |
+
+Only a clean provider end (the provider's own final chunk) produces a normal end. Bytes already transmitted to the caller cannot be retracted.
+
+SDK behavior (documented SDK defaults, not yet verified against pinned versions; that is #22). An SDK sees a response whose chunked body ends without its final chunk, or a connection reset, and raises a stream or connection error. The OpenAI SDKs may retry such a request; the Gateway adds no retry, replay, or resume. A retry is a new, independent request, and where the first reached the provider it may already have run, and may bill for, the first. A caller that cannot tolerate duplicate provider-side work must disable SDK retries and must itself handle a truncated stream. For HTTP/1.1 callers the truncation is always visible; an HTTP/1.0 caller would not see it, so `stream: true` is refused for HTTP/1.0.
+
+Cancellation and shutdown. A caller that disconnects makes the server drop the response body, which closes the provider connection and returns the upstream and stream permits; the provider may stop shortly after (it sees the close). On shutdown the drain deadline applies as above; open streams are then cancelled and end abruptly. Nothing is replayed.
+
+Telemetry for streams: stage timings for first byte, total, upstream wait (time spent waiting on the provider), and downstream wait (time between handing a chunk to the server and the server asking for the next, that is consumer and socket backpressure; relay overhead is total minus both), counters for streams started and ended by cause, provider bytes relayed, and the bytes the relay holds now and at peak. No stream content, key, header, or route is ever a label or a field.
+
 ## Stage timings (ADR 0008)
 
-`telemetry::Metrics` records, as count, total, and maximum microseconds, only these stages: admission wait, parse, inspection (including worker queueing), serialization (inside inspection, measured on the worker), upstream first response (send to response headers), and upstream total (send to last buffered byte or failure), plus a counter of upstream send attempts. The vocabulary is a closed enum: no payload, route, credential, URL, or caller-supplied value can become a label. There is no exporter yet; the counters are in-process (#20 adds the minimum, not a metrics platform).
+`telemetry::Metrics` records, as count, total, and maximum microseconds, only these stages: admission wait, parse, inspection (including worker queueing), serialization (inside inspection, measured on the worker), upstream first response (send to response headers), and upstream total (send to last buffered byte or failure), plus a counter of upstream send attempts (and, for streams, the stages and counters above). The vocabulary is a closed enum: no payload, route, credential, URL, or caller-supplied value can become a label. There is no exporter yet; the counters are in-process (#20 adds the minimum, not a metrics platform).
 
 ## Status
 
-Implemented: health, local rejection, config diagnostics, the Chat Completions admission/parse/limit mappings, inspection rejections (#19), and ordinary JSON forwarding, relay, transport-error mappings, and stage timings (#20). Planned: SSE stream errors and stream timings (#21).
+Implemented: health, local rejection, config diagnostics, the Chat Completions admission/parse/limit mappings, inspection rejections (#19), and ordinary JSON forwarding, relay, transport-error mappings, and stage timings (#20). SSE relay, the stream termination contract, and stream timings and counters (#21). Planned: SDK qualification of both (#22).

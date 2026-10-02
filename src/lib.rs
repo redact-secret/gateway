@@ -20,6 +20,7 @@ pub mod protocol;
 pub mod server;
 pub mod telemetry;
 pub mod transport;
+mod write_stall;
 
 /// One-line version report printed by `--version`. Contains no configuration or secrets.
 #[must_use]

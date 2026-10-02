@@ -11,6 +11,8 @@
 fn unvalidated_types_cannot_reach_forwarding() {
     let cases = trybuild::TestCases::new();
     cases.pass("tests/ui/pass_forward_accepts_sanitized.rs");
+    cases.pass("tests/ui/pass_forward_stream_accepts_sanitized.rs");
+    cases.compile_fail("tests/ui/fail_forward_stream_bytes.rs");
     cases.compile_fail("tests/ui/fail_forward_received.rs");
     cases.compile_fail("tests/ui/fail_forward_validated.rs");
     cases.compile_fail("tests/ui/fail_forward_bytes.rs");

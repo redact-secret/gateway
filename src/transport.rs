@@ -28,12 +28,21 @@
 //!   aborts the exchange and releases the permit and buffers. Nothing is spawned. Bytes
 //!   already written to the provider cannot be retracted.
 //! * Provider response bodies are relayed unredacted and never logged or put in errors.
+//!
+//! Streaming (#21, ADR 0018): [`Upstream::forward_stream`] is the sibling entry point for
+//! `stream: true`. It takes the same sealed request and vetted headers, plus an
+//! independently acquired [`StreamPermit`] after the [`UpstreamPermit`]. A `2xx`
+//! `text/event-stream` answer is relayed incrementally as a [`StreamResponse`] whose body
+//! owns both permits for the stream's real lifetime ([`stream`]); any other answer is the
+//! ordinary bounded buffered relay. The request is fully received, admitted, inspected and
+//! sealed before either entry point is called, so streaming bypasses nothing.
 
 pub mod credential;
 pub mod destination;
 pub mod headers;
 mod relay;
 pub mod resolver;
+pub mod stream;
 
 use std::error::Error as _;
 use std::fmt;
@@ -41,7 +50,7 @@ use std::sync::Arc;
 
 use tokio::time::{Instant, timeout_at};
 
-use crate::admission::{RequestLimits, UpstreamPermit};
+use crate::admission::{RequestLimits, StreamPermit, UpstreamPermit};
 use crate::boundary::SanitizedRequest;
 use crate::config::{RouteId, RuntimePlan, UpstreamAuthority};
 use crate::telemetry::{Metrics, SafeCode, Stage};
@@ -50,6 +59,18 @@ use destination::{Destination, RouteBinding};
 use resolver::PolicyResolver;
 
 pub use relay::{HeldBody, UpstreamResponse};
+pub use stream::{StreamBody, StreamError, StreamResponse};
+
+/// What [`Upstream::forward_stream`] produced: an incremental SSE relay, or an ordinary
+/// bounded response (a provider error, or any answer that is not an event stream).
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Forwarded {
+    /// `2xx` `text/event-stream`: relay the body incrementally.
+    Stream(StreamResponse),
+    /// Anything else, buffered under the ordinary response bounds and deadlines.
+    Buffered(UpstreamResponse),
+}
 
 /// Most response header fields the HTTP parser accepts; more is a malformed response.
 const MAX_RESPONSE_HEADER_FIELDS: usize = 64;
@@ -288,7 +309,111 @@ impl Upstream {
         header_deadline: Instant,
         total_deadline: Instant,
     ) -> Result<(reqwest::StatusCode, reqwest::header::HeaderMap, Vec<u8>), TransportError> {
-        let mut response = timeout_at(header_deadline, builder.send())
+        let (response, status, relayed) = self
+            .send_for_headers(builder, started, header_deadline)
+            .await?;
+        let body = self.read_buffered(response, total_deadline).await?;
+        Ok((status, relayed, body))
+    }
+
+    /// The streaming forwarding entry point (#21, ADR 0018). As [`Self::forward`], plus a
+    /// [`StreamPermit`] the caller acquired after the upstream permit (ADR 0003 order).
+    /// Exactly one send is attempted; no failure is retried.
+    ///
+    /// Only the response headers are awaited here, under the response-header deadline. A
+    /// `2xx` answer with `Content-Type: text/event-stream` and an explicit end of message
+    /// (chunked or counted) becomes a [`Forwarded::Stream`]; its body owns both permits and
+    /// is bounded by the stream deadlines and buffer bound. Anything else (a provider
+    /// error such as `429`, a JSON answer) is read under the ordinary buffered bounds and
+    /// returned as [`Forwarded::Buffered`], and the stream permit is released.
+    ///
+    /// A close-delimited event stream is refused (`upstream_invalid_response`) before any
+    /// byte is relayed: an interrupted one cannot be told from a finished one, and the
+    /// Gateway must not make a truncated stream look normal.
+    ///
+    /// The sealed request (and its memory reservation) is released as soon as the response
+    /// headers have been received; the relay itself holds no request data.
+    ///
+    /// # Errors
+    /// As [`Self::forward`], for everything up to and including the response headers.
+    pub async fn forward_stream(
+        &self,
+        request: SanitizedRequest,
+        headers: headers::VettedHeaders,
+        upstream: UpstreamPermit,
+        stream: StreamPermit,
+    ) -> Result<Forwarded, TransportError> {
+        let builder = self.outbound(headers, &request)?;
+        let started = Instant::now();
+        let total = self.limits.upstream_total();
+        let (Some(total_deadline), Some(header_deadline)) = (
+            started.checked_add(total),
+            started.checked_add(self.limits.upstream_header().min(total)),
+        ) else {
+            return Err(TransportError::Timeout);
+        };
+        if Instant::now() >= total_deadline {
+            return Err(TransportError::Timeout);
+        }
+        if let Some(m) = &self.metrics {
+            m.note_upstream_attempt();
+        }
+        let sent = self
+            .send_for_headers(builder, started, header_deadline)
+            .await;
+        // Everything the request owned (sealed body, memory reservation) ends with the
+        // headers: the relay holds only provider bytes.
+        drop(request);
+        let (response, status, relayed) = match sent {
+            Ok(parts) => parts,
+            Err(error) => {
+                if let Some(m) = &self.metrics {
+                    m.record(Stage::UpstreamTotal, started.elapsed());
+                }
+                return Err(error);
+            }
+        };
+        if status.is_success() && is_event_stream(response.headers()) {
+            if !has_explicit_end(&response) {
+                return Err(TransportError::InvalidResponse);
+            }
+            let body = axum::http::Response::from(response).into_body();
+            return Ok(Forwarded::Stream(StreamResponse::new(
+                status,
+                relayed,
+                body,
+                upstream,
+                stream,
+                stream::StreamLimits::from_limits(&self.limits),
+                started,
+                self.metrics.clone(),
+            )));
+        }
+        // Not an event stream: the ordinary bounded relay. The stream permit is not needed.
+        drop(stream);
+        let body = self.read_buffered(response, total_deadline).await;
+        if let Some(m) = &self.metrics {
+            m.record(Stage::UpstreamTotal, started.elapsed());
+        }
+        body.map(|body| Forwarded::Buffered(UpstreamResponse::new(status, relayed, body, upstream)))
+    }
+
+    /// One send, up to the response headers: deadline, header-size bound, and the
+    /// allowlisted relay headers. The body is not read.
+    async fn send_for_headers(
+        &self,
+        builder: reqwest::RequestBuilder,
+        started: Instant,
+        header_deadline: Instant,
+    ) -> Result<
+        (
+            reqwest::Response,
+            reqwest::StatusCode,
+            reqwest::header::HeaderMap,
+        ),
+        TransportError,
+    > {
+        let response = timeout_at(header_deadline, builder.send())
             .await
             .map_err(|_| TransportError::Timeout)?
             .map_err(|e| classify(&e))?;
@@ -297,13 +422,23 @@ impl Upstream {
         }
         let header_cap =
             usize::try_from(self.limits.max_response_header_bytes).unwrap_or(usize::MAX);
-        let body_cap = usize::try_from(self.limits.max_response_body_bytes).unwrap_or(usize::MAX);
         if header_bytes(response.headers()) > header_cap {
             return Err(TransportError::ResponseTooLarge);
         }
         let status = response.status();
         let relayed = headers::relay_response_headers(response.headers())
             .map_err(|_| TransportError::InvalidResponse)?;
+        Ok((response, status, relayed))
+    }
+
+    /// Read the whole body under the declared-length check, the byte cap, and the total
+    /// deadline.
+    async fn read_buffered(
+        &self,
+        mut response: reqwest::Response,
+        total_deadline: Instant,
+    ) -> Result<Vec<u8>, TransportError> {
+        let body_cap = usize::try_from(self.limits.max_response_body_bytes).unwrap_or(usize::MAX);
         let declared = response
             .content_length()
             .map(|n| usize::try_from(n).unwrap_or(usize::MAX));
@@ -322,8 +457,40 @@ impl Upstream {
         })
         .await
         .map_err(|_| TransportError::Timeout)??;
-        Ok((status, relayed, body))
+        Ok(body)
     }
+}
+
+/// Whether the response is exactly one `Content-Type: text/event-stream` (parameters such
+/// as `charset` allowed).
+fn is_event_stream(headers: &reqwest::header::HeaderMap) -> bool {
+    let mut values = headers.get_all(reqwest::header::CONTENT_TYPE).iter();
+    let (Some(value), None) = (values.next(), values.next()) else {
+        return false;
+    };
+    value.to_str().is_ok_and(|text| {
+        text.split(';')
+            .next()
+            .is_some_and(|essence| essence.trim().eq_ignore_ascii_case("text/event-stream"))
+    })
+}
+
+/// Whether the message has an explicit end the HTTP layer can check: chunked coding or a
+/// declared length. A close-delimited body ends when the connection closes, so a cut and a
+/// finish look the same.
+fn has_explicit_end(response: &reqwest::Response) -> bool {
+    response.content_length().is_some()
+        || response
+            .headers()
+            .get_all(reqwest::header::TRANSFER_ENCODING)
+            .iter()
+            .any(|v| {
+                v.to_str().is_ok_and(|s| {
+                    s.rsplit(',')
+                        .next()
+                        .is_some_and(|last| last.trim().eq_ignore_ascii_case("chunked"))
+                })
+            })
 }
 
 /// Bytes the response header block occupies: each name, value, and the `": "` and CRLF.

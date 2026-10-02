@@ -25,7 +25,7 @@ Status: implemented for inbound vetting, the request-local credential, outbound 
 | `Expect` | `100-continue` accepted (answered by the HTTP layer, never forwarded). Any other value: `417 unsupported_input` | RFC 9110 section 10.1.1 |
 | `Host` | Ignored. Outbound `Host` comes only from the reviewed destination URL | The caller cannot choose the origin |
 | `User-Agent` | Ignored. Outbound is `redact-secret-gateway/<version>` | Caller UA is arbitrary, fingerprints the caller, and can carry data |
-| `Accept` | Ignored. Outbound is `application/json, text/event-stream` | Fixed; streaming relay is #21 |
+| `Accept` | Ignored. Outbound is `application/json, text/event-stream` | Fixed; streaming relay is #21 ([ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md)) |
 | `Accept-Encoding` | Ignored. Outbound is `identity` | The gateway does not decode provider responses, so it must not ask for a coding |
 | `TE`, `Trailer`, `Keep-Alive`, `Proxy-*`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `Via`, `Cookie`, `X-Api-Key`, `api-key`, SDK telemetry (`X-Stainless-*`, ...), `OpenAI-Beta`, any other header | Ignored (not forwarded) | Strip is safer for SDK and proxy compatibility than reject, and an allowlist cannot forward what it does not name |
 | `X-Gateway-Local-*` (reserved) | Ignored and never forwarded | Local-authority namespace, see below |
@@ -80,7 +80,7 @@ Observed behavior of the served stack (tests in `tests/header_credentials.rs`; t
 
 ## Provider response headers (`relay_response_headers`)
 
-Applied when relaying ordinary JSON responses (#20); #21 applies it to streams. Relayed: `Content-Type`, `Cache-Control`, `Retry-After`, `X-Request-Id`, `OpenAI-Processing-Ms`, `OpenAI-Version`, and `X-RateLimit-*`. Everything else is dropped, including `Set-Cookie`, hop-by-hop headers and anything the response's `Connection` nominates, `Content-Length` and `Transfer-Encoding` (the gateway's server regenerates framing), `Location` (redirects are not followed), `WWW-Authenticate`, `Server`, `Alt-Svc`, CORS and security headers, and `OpenAI-Organization`. A value over 1 KiB is dropped. A `Content-Encoding` other than `identity` makes the response non-relayable (`502 upstream_invalid_response`): the gateway does not decode, and relaying the bytes without the header would corrupt them. Response header bytes are bounded by `max_response_header_bytes` and the parser's 64-field cap (`502 upstream_response_too_large`) (#20).
+Applied when relaying ordinary JSON responses (#20) and to the headers of a streamed response (#21), where it is applied once, when the provider's headers arrive. Relayed: `Content-Type`, `Cache-Control`, `Retry-After`, `X-Request-Id`, `OpenAI-Processing-Ms`, `OpenAI-Version`, and `X-RateLimit-*`. Everything else is dropped, including `Set-Cookie`, hop-by-hop headers and anything the response's `Connection` nominates, `Content-Length` and `Transfer-Encoding` (the gateway's server regenerates framing), `Location` (redirects are not followed), `WWW-Authenticate`, `Server`, `Alt-Svc`, CORS and security headers, and `OpenAI-Organization`. A value over 1 KiB is dropped. A `Content-Encoding` other than `identity` makes the response non-relayable (`502 upstream_invalid_response`): the gateway does not decode, and relaying the bytes without the header would corrupt them. Response header bytes are bounded by `max_response_header_bytes` and the parser's 64-field cap (`502 upstream_response_too_large`) (#20).
 
 ## Verification
 
