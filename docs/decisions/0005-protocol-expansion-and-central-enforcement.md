@@ -1,6 +1,6 @@
 # ADR 0005: Protocol expansion and centralized enforcement
 
-Status: Accepted (design). Implementation status: planned. Covers issue #3 section D.
+Status: Accepted (design). Implementation status: module skeleton implemented in #2; no protocol is implemented. A source-scan test in `tests/dependency_policy.rs` checks the authority direction and that only `transport` names `reqwest`. Covers issue #3 section D.
 
 ## Context
 

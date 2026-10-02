@@ -32,4 +32,4 @@ This is a structural safeguard. Types do not prove detector coverage and do not 
 
 ## Implemented status
 
-Nothing implemented. Update this line in the implementing PR.
+Implemented in #2 as a scaffold: the three types, the sealed constructor, and `transport::Upstream::forward(SanitizedRequest)`, with `trybuild` compile-fail tests (`tests/api_boundary.rs`). No route exists and no request can reach upstream. Field classification (#18/#19) and runtime no-forward tests (#6) are not implemented.

@@ -1,6 +1,6 @@
 # ADR 0006: Immutable RuntimePlan and authority separation
 
-Status: Accepted (design). Implementation status: planned. Covers issue #3 section E.
+Status: Accepted (design). Implementation status: `RuntimePlan` placeholder type implemented in #2 (`config`); parsing, validation, and readiness remain #4. Covers issue #3 section E.
 
 ## Context
 

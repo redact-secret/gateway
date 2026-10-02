@@ -32,7 +32,7 @@ Authority is centralized and flows one way: `protocol` modules define endpoint-s
 
 Startup builds one immutable `RuntimePlan` (route/origin mapping, protocol contracts, core profile and policy, limits and deadlines, shared transport clients). Deployment authority, content policy, and resource policy are separate parts of it, and per-request state and credentials stay request-local ([ADR 0006](docs/decisions/0006-runtime-plan-and-authority-separation.md)). Decisions and contracts are indexed in [docs/decisions/README.md](docs/decisions/README.md).
 
-Preferred initial stack: Rust plus Tokio/Axum/Reqwest and a JSON implementation. Pin selected versions and toolchain during scaffolding. Measure scan scheduling (inline, bounded `spawn_blocking`, or a dedicated pool) before choosing; synchronous CPU work must not indefinitely monopolize the async reactor. A started synchronous job may be non-interruptible, so the worker owns its CPU and memory permits until real completion ([ADR 0004](docs/decisions/0004-cancellation-and-synchronous-core-work.md)).
+Preferred initial stack: Rust plus Tokio/Axum/Reqwest and a JSON implementation. Selected versions, toolchain, and core pin are recorded in [ADR 0011](docs/decisions/0011-dependency-and-toolchain-selection.md). Measure scan scheduling (inline, bounded `spawn_blocking`, or a dedicated pool) before choosing; synchronous CPU work must not indefinitely monopolize the async reactor. A started synchronous job may be non-interruptible, so the worker owns its CPU and memory permits until real completion ([ADR 0004](docs/decisions/0004-cancellation-and-synchronous-core-work.md)).
 
 ## Request state machine
 
