@@ -1,0 +1,10 @@
+error[E0624]: associated function `new` is private
+ --> tests/ui/fail_destination_construct.rs:6:26
+  |
+6 |     let _ = Destination::new(origin, "/anything", RouteMethod::Post);
+  |                          ^^^ private associated function
+  |
+ ::: src/transport/destination.rs
+  |
+  |     fn new(origin: Origin, path: &'static str, method: RouteMethod) -> Result<Self, OriginError> {
+  |     -------------------------------------------------------------------------------------------- private associated function defined here

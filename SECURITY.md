@@ -56,6 +56,8 @@ Initial responses, including provider error bodies and SSE events, are not conte
 
 Default to loopback; validate deployment exposure; run containers without root or unnecessary capabilities; keep configuration and credentials outside public artifacts. Bound and document process memory, including buffered plaintext. Operators are responsible for access control around crash dumps, diagnostics, host memory, and any surrounding log collectors.
 
+Outbound destination policy (fixed HTTPS origin, address policy, no redirects, no inherited proxy) is implemented in the transport layer ([contract](docs/contracts/upstream-destinations.md)). Operators must still enforce egress controls (direct upstream bypass is not preventable by the gateway), trust the host resolver and platform trust store, and understand that a transparent TLS-intercepting proxy requires its CA in the trust store; see the residual risks in [ADR 0013](docs/decisions/0013-fixed-https-destinations-and-outbound-authority.md).
+
 Health/readiness must reveal no secrets and must not issue credentialed upstream probes by default. No provider key persistence, shared authorization platform, inbound TLS platform, restore service, or Vault coupling is included in the first stable contract.
 
 ## Security release gates

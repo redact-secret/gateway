@@ -78,7 +78,7 @@ Gateway releases have an independent version. Each release records its exact cor
 
 ## Development
 
-The Rust scaffold exists (issue #2): a private binary crate with the module skeleton, a pinned toolchain (`rust-toolchain.toml`, Rust 1.98.1, MSRV 1.88), a committed `Cargo.lock`, and an exact core pin (`redact-secret =0.1.0-beta.12`). Selected versions and features are in [ADR 0011](docs/decisions/0011-dependency-and-toolchain-selection.md). The executable reports its version, validates a static configuration, and serves loopback health endpoints (issue #4). It is not a working proxy: every other route is rejected locally and nothing is forwarded. See [docs/configuration.md](docs/configuration.md).
+The Rust scaffold exists (issue #2): a private binary crate with the module skeleton, a pinned toolchain (`rust-toolchain.toml`, Rust 1.98.1, MSRV 1.88), a committed `Cargo.lock`, and an exact core pin (`redact-secret =0.1.0-beta.12`). Selected versions and features are in [ADR 0011](docs/decisions/0011-dependency-and-toolchain-selection.md). The executable reports its version, validates a static configuration, and serves loopback health endpoints (issue #4). The outbound destination layer exists (issue #23: reviewed HTTPS origin, address policy, hardened shared client; see [the contract](docs/contracts/upstream-destinations.md)), but it is not a working proxy: every other route is rejected locally and nothing is forwarded. See [docs/configuration.md](docs/configuration.md).
 
 Commands that work today (install Rust through `rustup`; the toolchain file selects the compiler):
 

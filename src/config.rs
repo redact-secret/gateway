@@ -83,20 +83,84 @@ impl ListenerAuthority {
     }
 }
 
-/// Deployment authority: listener, upstream origins, TLS rules, credential requirements.
-/// Only the listener exists in the skeleton. Origins, TLS, and credential rules arrive
-/// with #23-#25 and will live here, never in content or resource policy. Credentials are
-/// never configuration values.
+/// A reviewed upstream provider profile. Selecting one is the only way configuration can
+/// influence upstream destinations: the profile fixes the HTTPS origin, the exact route
+/// paths, the port, and the TLS rules inside `transport` (ADR 0013). Configuration never
+/// carries a hostname, URL, port, or TLS toggle. Adding a variant is a reviewed change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Provider {
+    /// OpenAI public API, `POST /v1/chat/completions` (Alpha 1).
+    OpenAi,
+}
+
+impl Provider {
+    /// Exact, case-sensitive configuration name.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "openai" => Some(Self::OpenAi),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+        }
+    }
+}
+
+/// Upstream authority: which reviewed provider profile this deployment forwards to.
+/// Immutable; derived once at startup and never changed by content or resource policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UpstreamAuthority {
+    provider: Provider,
+}
+
+impl UpstreamAuthority {
+    #[must_use]
+    pub const fn new(provider: Provider) -> Self {
+        Self { provider }
+    }
+
+    #[must_use]
+    pub const fn provider(&self) -> Provider {
+        self.provider
+    }
+}
+
+/// Deployment authority: listener, upstream provider profile, credential requirements.
+/// Content and resource policy live elsewhere; nothing outside this struct can change a
+/// destination or a TLS rule. Credentials are never configuration values.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct DeploymentAuthority {
     listener: ListenerAuthority,
+    upstream: Option<UpstreamAuthority>,
 }
 
 impl DeploymentAuthority {
+    /// An authority with no upstream configured: no route exists and nothing can be
+    /// forwarded (fail closed).
     #[must_use]
     pub const fn new(listener: ListenerAuthority) -> Self {
-        Self { listener }
+        Self {
+            listener,
+            upstream: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_upstream(mut self, upstream: UpstreamAuthority) -> Self {
+        self.upstream = Some(upstream);
+        self
+    }
+
+    #[must_use]
+    pub const fn upstream(&self) -> Option<&UpstreamAuthority> {
+        self.upstream.as_ref()
     }
 
     /// Loopback listener on an OS-assigned port, for tests and scaffolding. Not a
@@ -108,6 +172,7 @@ impl DeploymentAuthority {
                 addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
                 non_loopback_acknowledged: false,
             },
+            upstream: None,
         }
     }
 
@@ -342,7 +407,11 @@ pub fn parse(bytes: &[u8]) -> Result<RuntimePlan, ConfigError> {
 }
 
 fn parse_deployment(obj: &Obj<'_>) -> Result<DeploymentAuthority, ConfigError> {
-    obj.only(&["listener"])?;
+    obj.only(&["listener", "upstream"])?;
+    let upstream = match obj.get("upstream") {
+        None => None,
+        Some(v) => Some(parse_upstream(&Obj::new(v, "deployment.upstream")?)?),
+    };
     let listener = Obj::new(
         obj.require("listener", "deployment.listener")?,
         "deployment.listener",
@@ -365,9 +434,23 @@ fn parse_deployment(obj: &Obj<'_>) -> Result<DeploymentAuthority, ConfigError> {
             ));
         }
     };
-    Ok(DeploymentAuthority::new(ListenerAuthority::new(
-        addr, allow,
-    )?))
+    let authority = DeploymentAuthority::new(ListenerAuthority::new(addr, allow)?);
+    Ok(match upstream {
+        Some(u) => authority.with_upstream(u),
+        None => authority,
+    })
+}
+
+fn parse_upstream(obj: &Obj<'_>) -> Result<UpstreamAuthority, ConfigError> {
+    obj.only(&["provider"])?;
+    let name = obj
+        .require("provider", "deployment.upstream.provider")?
+        .as_str("deployment.upstream.provider")?;
+    let provider = Provider::from_name(name).ok_or(ConfigError::new(
+        ConfigErrorKind::InvalidValue,
+        "deployment.upstream.provider",
+    ))?;
+    Ok(UpstreamAuthority::new(provider))
 }
 
 fn parse_content(obj: &Obj<'_>) -> Result<ContentPolicy, ConfigError> {
@@ -567,6 +650,56 @@ mod tests {
         );
         assert_eq!(err("not json").kind(), ConfigErrorKind::Malformed);
         assert_eq!(err("[]").kind(), ConfigErrorKind::InvalidType);
+    }
+
+    #[test]
+    fn upstream_is_optional_and_selects_only_a_reviewed_provider() {
+        let plan = parse(VALID.as_bytes()).expect("valid");
+        assert!(plan.deployment().upstream().is_none());
+        let with = VALID.replace(
+            "\"listener\":",
+            "\"upstream\": {\"provider\": \"openai\"}, \"listener\":",
+        );
+        let plan = parse(with.as_bytes()).expect("valid");
+        assert_eq!(
+            plan.deployment()
+                .upstream()
+                .map(UpstreamAuthority::provider),
+            Some(Provider::OpenAi)
+        );
+    }
+
+    #[test]
+    fn upstream_rejects_destination_and_tls_fields_and_unknown_providers() {
+        let base = VALID.replace("\"listener\":", "\"upstream\": {UP}, \"listener\":");
+        for up in [
+            r#"{"provider": "openai", "origin": "https://example.test"}"#,
+            r#"{"provider": "openai", "url": "https://example.test"}"#,
+            r#"{"provider": "openai", "host": "example.test"}"#,
+            r#"{"provider": "openai", "port": 443}"#,
+            r#"{"provider": "openai", "insecure": true}"#,
+            r#"{"provider": "openai", "allow_http": true}"#,
+            r#"{"provider": "openai", "proxy": "http://127.0.0.1:1"}"#,
+            r#"{"provider": "openai", "test_upstream": "http://127.0.0.1:1"}"#,
+            r#"{"provider": "openai", "follow_redirects": true}"#,
+        ] {
+            let e = err(&base.replace("{UP}", up));
+            assert_eq!(e.kind(), ConfigErrorKind::UnknownField, "{up}");
+            assert_eq!(e.location(), "deployment.upstream");
+        }
+        for (up, kind) in [
+            (r"{}", ConfigErrorKind::MissingField),
+            (r#"{"provider": "OpenAI"}"#, ConfigErrorKind::InvalidValue),
+            (
+                r#"{"provider": "https://api.openai.com"}"#,
+                ConfigErrorKind::InvalidValue,
+            ),
+            (r#"{"provider": "evil"}"#, ConfigErrorKind::InvalidValue),
+            (r#"{"provider": 1}"#, ConfigErrorKind::InvalidType),
+            (r#""openai""#, ConfigErrorKind::InvalidType),
+        ] {
+            assert_eq!(err(&base.replace("{UP}", up)).kind(), kind, "{up}");
+        }
     }
 
     #[test]

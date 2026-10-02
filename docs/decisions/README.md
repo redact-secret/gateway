@@ -26,6 +26,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0010](0010-release-prerequisites-license-and-reporting.md) | License and private security reporting | **Partially decided** (MIT; test-report verification open) | maintainer |
 | [0011](0011-dependency-and-toolchain-selection.md) | Toolchain, dependency, and core pin selection | Accepted (design); implemented (scaffold) | #2, #4, #5, #6, #7 |
 | [0012](0012-release-candidate-artifact-build.md) | Release-candidate artifact build for the skeleton | Accepted (design); implemented (scaffold) | #7 |
+| [0013](0013-fixed-https-destinations-and-outbound-authority.md) | Fixed HTTPS destinations and outbound authority | Accepted (design); implemented (destination, client, address policy); body forwarding planned | #23 |
 
 ## Contracts
 
@@ -36,6 +37,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [field-classification](../contracts/field-classification.md) | Initial classification rules and rejected forms |
 | [resource-limits](../contracts/resource-limits.md) | Resource-limit categories with no numeric defaults |
 | [errors-and-telemetry](../contracts/errors-and-telemetry.md) | Safe error code taxonomy and telemetry exclusions |
+| [upstream-destinations](../contracts/upstream-destinations.md) | Fixed HTTPS destinations, client hardening, address policy, test-seam isolation |
 
 ## Template
 
