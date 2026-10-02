@@ -29,8 +29,9 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0013](0013-fixed-https-destinations-and-outbound-authority.md) | Fixed HTTPS destinations and outbound authority | Accepted (design); implemented (destination, client, address policy); body forwarding implemented in #20 (ADR 0017) | #23 |
 | [0014](0014-chat-completions-admission.md) | Chat Completions request admission and provisional limits | Accepted; implemented (admission, strict budgeted parse, field matrix); forwarding implemented in #20 (ADR 0017) | #18 |
 | [0015](0015-core-inspection-and-request-transformation.md) | Core inspection and validated request transformation | Accepted; implemented (inspection, Block/Warn policy, fresh bounded serialization, approval); forwarding implemented in #20 (ADR 0017) | #19 |
-| [0016](0016-header-allowlists-and-request-local-credentials.md) | Header allowlists and request-local provider credentials | Accepted; implemented (inbound vetting, credential type, wire headers, JSON response relay); SSE relay planned | #24 |
-| [0017](0017-json-forwarding-deadlines-and-cancellation.md) | Ordinary JSON forwarding, deadlines, response bounds, and cancellation | Accepted; implemented (JSON relay, deadlines, bounds, cancellation, drain); SSE planned (#21); SDK qualification planned (#22); numbers provisional | #20 |
+| [0016](0016-header-allowlists-and-request-local-credentials.md) | Header allowlists and request-local provider credentials | Accepted; implemented (inbound vetting, credential type, wire headers, JSON and SSE response relay) | #24 |
+| [0017](0017-json-forwarding-deadlines-and-cancellation.md) | Ordinary JSON forwarding, deadlines, response bounds, and cancellation | Accepted; implemented (JSON relay, deadlines, bounds, cancellation, drain); SSE relay in ADR 0018; SDK qualification planned (#22); numbers provisional | #20 |
+| [0018](0018-sse-relay-termination-and-stream-bounds.md) | SSE relay, stream termination contract, and stream bounds | Accepted; implemented (incremental relay, stream permit, idle/lifetime/buffer/write-stall bounds, termination contract, cancellation, stream telemetry); SDK qualification planned (#22); numbers provisional | #21 |
 
 ## Contracts
 

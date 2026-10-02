@@ -1,6 +1,6 @@
 # ADR 0016: Header allowlists and request-local provider credentials
 
-Status: Accepted. Implementation status: implemented (inbound vetting, credential type, outbound wire headers, response-header allowlist); sending and relaying of ordinary JSON responses are implemented in #20 ([ADR 0017](0017-json-forwarding-deadlines-and-cancellation.md)); SSE relay is planned (#21). Date: 2026-10-02. Implements the #3 design contract for issue #24 on top of [ADR 0009](0009-credential-and-upstream-trust-model.md), [ADR 0013](0013-fixed-https-destinations-and-outbound-authority.md), and [ADR 0014](0014-chat-completions-admission.md).
+Status: Accepted. Implementation status: implemented (inbound vetting, credential type, outbound wire headers, response-header allowlist); sending and relaying of ordinary JSON responses are implemented in #20 ([ADR 0017](0017-json-forwarding-deadlines-and-cancellation.md)); SSE relay is implemented in #21 ([ADR 0018](0018-sse-relay-termination-and-stream-bounds.md)). Date: 2026-10-02. Implements the #3 design contract for issue #24 on top of [ADR 0009](0009-credential-and-upstream-trust-model.md), [ADR 0013](0013-fixed-https-destinations-and-outbound-authority.md), and [ADR 0014](0014-chat-completions-admission.md).
 
 ## Context
 
@@ -35,7 +35,7 @@ Rejections are local, before any capacity reservation or upstream contact, with 
 ## Implementation handoff
 
 - #20: take the vetted headers with `Admitted::take_headers()` (before `into_parts`), call `Upstream::outbound(headers, &sanitized)`, send, and keep the `SanitizedRequest` alive until the send completes. Apply `relay_response_headers` to the provider response.
-- #21: streaming relay and response header/size bounds.
+- #21 (implemented, [ADR 0018](0018-sse-relay-termination-and-stream-bounds.md)): streaming relay; response headers go through the same allowlist, once, when they arrive.
 - #12: local caller token under `X-Gateway-Local-*`.
 
 ## Verification

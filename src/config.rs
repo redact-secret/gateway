@@ -638,6 +638,16 @@ fn parse_resources(obj: &Obj<'_>) -> Result<ResourcePolicy, ConfigError> {
         None => RequestLimits::provisional(),
         Some(value) => parse_limits(&Obj::new(value, "resources.limits")?)?,
     };
+    // The aggregate stream buffer bound is the product of the two configured numbers; it
+    // must itself be finite and reviewable.
+    let stream_total = u64::from(capacity.stream_permits().get())
+        .saturating_mul(u64::from(limits.stream_buffer_bytes));
+    if stream_total > MAX_STREAM_BUFFER_TOTAL {
+        return Err(ConfigError::new(
+            ConfigErrorKind::InvalidCombination,
+            "resources.limits.stream_buffer_bytes",
+        ));
+    }
     Ok(ResourcePolicy::new(capacity).with_limits(limits))
 }
 
@@ -645,6 +655,14 @@ fn parse_resources(obj: &Obj<'_>) -> Result<ResourcePolicy, ConfigError> {
 const MAX_BODY_CEILING: u32 = 16 * 1024 * 1024;
 /// Ceiling for the buffered provider response body (#20).
 const MAX_RESPONSE_CEILING: u32 = 64 * 1024 * 1024;
+/// Ceiling for the stream idle and lifetime deadlines (#21): one hour. Infinite streams
+/// are a non-goal.
+const MAX_STREAM_LIFETIME_MS: u32 = 3_600_000;
+/// Ceiling for the per-stream relay buffer (#21).
+const MAX_STREAM_BUFFER_CEILING: u32 = 16 * 1024 * 1024;
+/// Ceiling for `resources.capacity.stream` times `stream_buffer_bytes` (#21): the most
+/// memory streamed provider bytes may be configured to hold in the relay in aggregate.
+const MAX_STREAM_BUFFER_TOTAL: u64 = 4 * 1024 * 1024 * 1024;
 
 /// Optional `resources.limits`. Absent fields keep the provisional value
 /// ([`RequestLimits::provisional`]); present fields must be within their ceilings.
@@ -664,6 +682,10 @@ fn parse_limits(obj: &Obj<'_>) -> Result<RequestLimits, ConfigError> {
         "max_response_header_bytes",
         "max_response_body_bytes",
         "shutdown_drain_ms",
+        "stream_idle_ms",
+        "stream_lifetime_ms",
+        "stream_write_stall_ms",
+        "stream_buffer_bytes",
     ])?;
     let mut limits = RequestLimits::provisional();
     let read = |key: &str, loc: &'static str, lo: u32, hi: u32, slot: &mut u32| {
@@ -770,6 +792,42 @@ fn parse_limits(obj: &Obj<'_>) -> Result<RequestLimits, ConfigError> {
         600_000,
         &mut limits.shutdown_drain_ms,
     )?;
+    read(
+        "stream_idle_ms",
+        "resources.limits.stream_idle_ms",
+        1,
+        MAX_STREAM_LIFETIME_MS,
+        &mut limits.stream_idle_ms,
+    )?;
+    read(
+        "stream_lifetime_ms",
+        "resources.limits.stream_lifetime_ms",
+        1,
+        MAX_STREAM_LIFETIME_MS,
+        &mut limits.stream_lifetime_ms,
+    )?;
+    read(
+        "stream_write_stall_ms",
+        "resources.limits.stream_write_stall_ms",
+        1,
+        600_000,
+        &mut limits.stream_write_stall_ms,
+    )?;
+    read(
+        "stream_buffer_bytes",
+        "resources.limits.stream_buffer_bytes",
+        1,
+        MAX_STREAM_BUFFER_CEILING,
+        &mut limits.stream_buffer_bytes,
+    )?;
+    // The idle deadline is part of the stream's lifetime: an idle deadline beyond the
+    // lifetime could never fire.
+    if limits.stream_idle_ms > limits.stream_lifetime_ms {
+        return Err(ConfigError::new(
+            ConfigErrorKind::InvalidValue,
+            "resources.limits.stream_idle_ms",
+        ));
+    }
     // The response-header deadline is part of the total: a header deadline beyond the total
     // could never fire.
     if limits.upstream_header_ms > limits.upstream_total_ms {
@@ -1012,6 +1070,15 @@ mod tests {
             r#"{"max_response_header_bytes": 0}"#,
             r#"{"max_response_body_bytes": 67108865}"#,
             r#"{"shutdown_drain_ms": 600001}"#,
+            r#"{"stream_idle_ms": 0}"#,
+            r#"{"stream_idle_ms": 3600001}"#,
+            r#"{"stream_lifetime_ms": 3600001}"#,
+            r#"{"stream_write_stall_ms": 0}"#,
+            r#"{"stream_write_stall_ms": 600001}"#,
+            r#"{"stream_buffer_bytes": 0}"#,
+            r#"{"stream_buffer_bytes": 16777217}"#,
+            // The idle deadline is part of the lifetime.
+            r#"{"stream_idle_ms": 2000, "stream_lifetime_ms": 1000}"#,
             // The header deadline is part of the total.
             r#"{"upstream_header_ms": 2000, "upstream_total_ms": 1000}"#,
             r#"{"max_depth": "8"}"#,
@@ -1023,6 +1090,52 @@ mod tests {
         assert_eq!(
             err(&with(r#"{"SYNTH_KEY": 1}"#)).kind(),
             ConfigErrorKind::UnknownField
+        );
+    }
+
+    #[test]
+    fn stream_limits_are_provisional_bounded_and_composed_with_the_stream_capacity() {
+        let defaults = RequestLimits::provisional();
+        assert_eq!(
+            (
+                defaults.stream_idle_ms,
+                defaults.stream_lifetime_ms,
+                defaults.stream_write_stall_ms,
+                defaults.stream_buffer_bytes
+            ),
+            (120_000, 900_000, 30_000, 1_048_576)
+        );
+        let with = |doc: &str, limits: &str| {
+            doc.replacen(
+                "\n        }}",
+                &format!("\n        }}, \"limits\": {limits}}}"),
+                1,
+            )
+        };
+        let plan = parse(
+            with(
+                VALID,
+                r#"{"stream_idle_ms": 50, "stream_lifetime_ms": 50, "stream_write_stall_ms": 7, "stream_buffer_bytes": 4096}"#,
+            )
+            .as_bytes(),
+        )
+        .expect("valid stream limits");
+        let l = plan.resources().limits();
+        assert_eq!(
+            (
+                l.stream_idle_ms,
+                l.stream_lifetime_ms,
+                l.stream_write_stall_ms,
+                l.stream_buffer_bytes
+            ),
+            (50, 50, 7, 4096)
+        );
+        // Capacity times buffer is itself bounded: 5000 streams of 1 MiB is over 4 GiB.
+        let big = VALID.replace("\"stream\": 1", "\"stream\": 5000");
+        assert_eq!(err(&big).kind(), ConfigErrorKind::InvalidCombination);
+        assert!(
+            parse(with(&big, r#"{"stream_buffer_bytes": 65536}"#).as_bytes()).is_ok(),
+            "a smaller buffer brings the product under the ceiling"
         );
     }
 

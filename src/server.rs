@@ -22,6 +22,7 @@ use crate::health::{self, HealthState};
 use crate::telemetry::{Metrics, SafeCode};
 use crate::transport::Upstream;
 use crate::transport::destination;
+use crate::write_stall::StallListener;
 
 /// How long [`BoundServer::serve`] waits for connections to close after cancelling
 /// in-flight requests at the drain deadline.
@@ -215,6 +216,8 @@ impl BoundServer {
         let on_shutdown = Arc::clone(&state);
         let draining = Arc::new(Notify::new());
         let started = Arc::clone(&draining);
+        // Every accepted connection enforces the write-stall deadline (#21).
+        let listener = StallListener::new(listener, chat.limits().stream_write_stall());
         let server = axum::serve(listener, app)
             .with_graceful_shutdown(async move {
                 shutdown.await;

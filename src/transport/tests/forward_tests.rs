@@ -27,10 +27,11 @@ use crate::telemetry::{Metrics, Stage};
 use crate::transport::headers::{self, WIRE_HEADER_NAMES};
 
 const MEM: u32 = 8192;
-const KEY: &str = "sk-SYNTHETIC-REVOKED-FWD0-0000-NOT-A-KEY";
+pub(super) const KEY: &str = "sk-SYNTHETIC-REVOKED-FWD0-0000-NOT-A-KEY";
 const ORG: &str = "org-SYNTHETIC-ORG-0001";
-const TOKEN: &str = "ghp_SYNTHETICREVOKED00000000000000000001";
-const GOOD: &str = r#"{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}"#;
+pub(super) const TOKEN: &str = "ghp_SYNTHETICREVOKED00000000000000000001";
+pub(super) const GOOD: &str =
+    r#"{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}"#;
 
 /// A vetted credential for tests outside this module.
 pub(super) fn vetted_for_forward(key: &str) -> headers::VettedHeaders {
@@ -47,27 +48,29 @@ fn nz(n: u32) -> NonZeroU32 {
 }
 
 #[derive(Clone, Copy)]
-struct Caps {
-    receipt: u32,
-    inspection: u32,
-    upstream: u32,
+pub(super) struct Caps {
+    pub(super) receipt: u32,
+    pub(super) inspection: u32,
+    pub(super) upstream: u32,
+    pub(super) stream: u32,
 }
 
 impl Caps {
-    const ROOMY: Self = Self {
+    pub(super) const ROOMY: Self = Self {
         receipt: 8,
         inspection: 2,
         upstream: 8,
+        stream: 1,
     };
 }
 
-struct Out {
-    status: u16,
-    headers: reqwest::header::HeaderMap,
-    body: Vec<u8>,
+pub(super) struct Out {
+    pub(super) status: u16,
+    pub(super) headers: reqwest::header::HeaderMap,
+    pub(super) body: Vec<u8>,
 }
 
-fn assert_gateway_error(out: &Out, status: u16, code: &str) {
+pub(super) fn assert_gateway_error(out: &Out, status: u16, code: &str) {
     assert_eq!(out.status, status, "status");
     assert_eq!(
         String::from_utf8_lossy(&out.body),
@@ -75,28 +78,33 @@ fn assert_gateway_error(out: &Out, status: u16, code: &str) {
     );
 }
 
-struct Rig {
-    route: Arc<ChatRoute>,
-    admission: Arc<Admission>,
-    inspection: Arc<Inspection>,
-    fake: FakeUpstream,
-    metrics: Arc<Metrics>,
-    caps: Caps,
-    limits: RequestLimits,
+pub(super) struct Rig {
+    pub(super) route: Arc<ChatRoute>,
+    pub(super) admission: Arc<Admission>,
+    pub(super) inspection: Arc<Inspection>,
+    pub(super) fake: FakeUpstream,
+    pub(super) metrics: Arc<Metrics>,
+    pub(super) caps: Caps,
+    pub(super) limits: RequestLimits,
 }
 
 impl Rig {
-    async fn new(behavior: Behavior) -> Self {
+    pub(super) async fn new(behavior: Behavior) -> Self {
         Self::with(behavior, RequestLimits::provisional(), Caps::ROOMY).await
     }
 
-    async fn with(behavior: Behavior, limits: RequestLimits, caps: Caps) -> Self {
+    pub(super) async fn with(behavior: Behavior, limits: RequestLimits, caps: Caps) -> Self {
         let fake = FakeUpstream::start(behavior).await;
         let upstream = http_upstream_with(fake.addr(), limits);
         Self::over(fake, upstream, limits, caps)
     }
 
-    fn over(fake: FakeUpstream, upstream: Upstream, limits: RequestLimits, caps: Caps) -> Self {
+    pub(super) fn over(
+        fake: FakeUpstream,
+        upstream: Upstream,
+        limits: RequestLimits,
+        caps: Caps,
+    ) -> Self {
         let metrics = Arc::new(Metrics::new());
         let upstream = Upstream {
             metrics: Some(Arc::clone(&metrics)),
@@ -107,7 +115,7 @@ impl Rig {
             nz(MEM),
             nz(caps.inspection),
             nz(caps.upstream),
-            nz(1),
+            nz(caps.stream),
         );
         let admission = Arc::new(Admission::new(&plan));
         let inspection = Arc::new(
@@ -137,7 +145,7 @@ impl Rig {
         }
     }
 
-    async fn post(&self, request: Request) -> Out {
+    pub(super) async fn post(&self, request: Request) -> Out {
         let response = self.route.handle(request).await;
         let (parts, body) = response.into_parts();
         let body = axum::body::to_bytes(body, 1 << 24).await.unwrap();
@@ -148,12 +156,12 @@ impl Rig {
         }
     }
 
-    async fn post_good(&self) -> Out {
+    pub(super) async fn post_good(&self) -> Out {
         self.post(request(GOOD, KEY, &[])).await
     }
 
     /// Wait until every capacity class is back at its baseline.
-    async fn settle(&self) {
+    pub(super) async fn settle(&self) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         loop {
             let memory = self.admission.try_reserve_memory(MEM);
@@ -166,12 +174,14 @@ impl Rig {
             let upstreams: Vec<_> = (0..self.caps.upstream)
                 .map(|_| self.admission.try_upstream())
                 .collect();
-            let stream = self.admission.try_stream();
+            let stream: Vec<_> = (0..self.caps.stream)
+                .map(|_| self.admission.try_stream())
+                .collect();
             if memory.is_ok()
                 && receipts.iter().all(Result::is_ok)
                 && inspections.iter().all(Result::is_ok)
                 && upstreams.iter().all(Result::is_ok)
-                && stream.is_ok()
+                && stream.iter().all(Result::is_ok)
             {
                 return;
             }
@@ -185,7 +195,7 @@ impl Rig {
     }
 
     /// Exactly one upstream connection and request, and nothing more arrives later.
-    async fn assert_single_attempt(&self) {
+    pub(super) async fn assert_single_attempt(&self) {
         tokio::time::sleep(Duration::from_millis(250)).await;
         let tally = self.fake.tally();
         assert_eq!(tally.connections, 1, "one connection");
@@ -194,7 +204,7 @@ impl Rig {
     }
 }
 
-fn request(body: &str, key: &str, extra: &[(&str, &str)]) -> Request {
+pub(super) fn request(body: &str, key: &str, extra: &[(&str, &str)]) -> Request {
     let mut b = Request::builder()
         .method("POST")
         .uri("/v1/chat/completions")
@@ -209,11 +219,11 @@ fn request(body: &str, key: &str, extra: &[(&str, &str)]) -> Request {
     b.body(Body::from(body.to_owned())).unwrap()
 }
 
-fn chat_body(content: &str) -> String {
+pub(super) fn chat_body(content: &str) -> String {
     format!(r#"{{"model":"gpt-4o-mini","messages":[{{"role":"user","content":"{content}"}}]}}"#)
 }
 
-fn raw_post(body: &str, key: &str) -> Vec<u8> {
+pub(super) fn raw_post(body: &str, key: &str) -> Vec<u8> {
     format!(
         "POST /v1/chat/completions HTTP/1.1\r\nHost: gw.test\r\nContent-Type: application/json\r\nAuthorization: Bearer {key}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -383,6 +393,7 @@ async fn every_pre_forward_failure_delivers_zero_bytes_upstream() {
         receipt: 1,
         inspection: 1,
         upstream: 1,
+        stream: 1,
     };
     let rig = Rig::with(Behavior::ok_json(), limits, caps).await;
 
@@ -394,16 +405,6 @@ async fn every_pre_forward_failure_delivers_zero_bytes_upstream() {
             request(r#"{"model":"m","messages":[],"tools":[]}"#, KEY, &[]),
             422,
             "unsupported_input",
-        ),
-        (
-            // `stream: true` is not a JSON relay until #21: rejected locally, not forwarded.
-            request(
-                r#"{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"stream":true}"#,
-                KEY,
-                &[],
-            ),
-            501,
-            "not_implemented",
         ),
     ] {
         let out = rig.post(req).await;
@@ -640,7 +641,7 @@ async fn tls_failure_is_a_distinct_safe_code_and_sends_no_request() {
 
 // ------------------------------------------------------------- ownership and cancellation
 
-fn alive_tasks() -> usize {
+pub(super) fn alive_tasks() -> usize {
     tokio::runtime::Handle::current()
         .metrics()
         .num_alive_tasks()
@@ -781,6 +782,7 @@ async fn overload_is_immediate_bounded_and_returns_all_capacity() {
         receipt: 8,
         inspection: 2,
         upstream: 1,
+        stream: 1,
     };
     let rig = Rig::with(
         Behavior::Slow {
@@ -818,6 +820,7 @@ async fn concurrent_requests_with_different_keys_do_not_cross() {
             receipt: 8,
             inspection: 8,
             upstream: 8,
+            stream: 1,
         },
     )
     .await;

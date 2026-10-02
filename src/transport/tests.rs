@@ -52,6 +52,7 @@ mod forward_tests;
 #[path = "../../tests/support/leak.rs"]
 #[allow(dead_code)]
 mod leak;
+mod stream_tests;
 mod wire_tests;
 
 use fake_upstream::{Behavior, FakeUpstream};
