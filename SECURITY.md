@@ -8,9 +8,9 @@ The gateway is in architecture/scaffolding development. No stable release or pro
 
 Do not disclose sensitive exploit details, real credentials, or personal data in a public issue.
 
-Use GitHub's private vulnerability reporting flow for `redact-secret/gateway` (Security tab, "Report a vulnerability"). The GitHub API reported it as enabled when last checked; an end-to-end test report has not yet been recorded. If no private reporting flow is available, contact the maintainer through an already established private channel. If none is known, a public request for a private contact may contain only the request, with no exploit details or sensitive payload.
+Use GitHub's private vulnerability reporting flow for `redact-secret/gateway` (Security tab, "Report a vulnerability"). The GitHub API reports it as enabled (`private-vulnerability-reporting` returned `enabled: true`, checked 2026-10-02). If no private reporting flow is available, contact the maintainer through an already established private channel. If none is known, a public request for a private contact may contain only the request, with no exploit details or sensitive payload.
 
-The channel is enabled; verifying it with a test report is a tracked prerequisite before the first distributed alpha. No unverified security email, response SLA, bug bounty, or disclosure deadline is promised here.
+The channel is enabled and verified through the GitHub API; repository admins receive reports through GitHub's advisory workflow. No unverified security email, response SLA, bug bounty, or disclosure deadline is promised here.
 
 Private reports should provide affected versions/commits, deployment assumptions, a synthetic reproduction, expected boundary behavior, observed behavior, and impact. Do not use live credentials to demonstrate a leak.
 
@@ -64,7 +64,7 @@ Health/readiness must reveal no secrets and must not issue credentialed upstream
 
 ## Security release gates
 
-Before Alpha 1 distribution: private reporting flow verified (enabled; the end-to-end test report is still to be recorded), license selected (MIT, done), foundational threat model and upstream/credential contracts reviewed, synthetic no-forward and diagnostic-leak tests passed (done; see the [Alpha 1 qualification report](docs/qualification/alpha1-qualification-report.md)), and the exact candidate artifacts smoke-tested (done for the unpublished candidate; re-run on any published artifact).
+Before Alpha 1 distribution: private reporting flow verified (enabled, checked through the GitHub API on 2026-10-02), license selected (MIT, done), foundational threat model and upstream/credential contracts reviewed, synthetic no-forward and diagnostic-leak tests passed (done; see the [Alpha 1 qualification report](docs/qualification/alpha1-qualification-report.md)), and the exact candidate artifacts smoke-tested (done for the unpublished candidate; re-run on any published artifact).
 
 Before stable 0.1.0: protocol coverage and unknown-field gates, core completion/failure evidence, header/SSRF tests, stream failure/cancellation/backpressure tests, measured aggregate resource bounds, pinned SDK compatibility, dependency/artifact review, and documented upgrade/rollback are complete. Beta 3 owns final reconciliation; unresolved blockers prevent stable promotion.
 

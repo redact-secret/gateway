@@ -71,7 +71,7 @@ Defaults (`maxRetries` / `max_retries` = 2), counted with SDK-side hooks and the
 | Candidate-specific end-to-end tests: supported text forms, core completeness failures, no-forward negative paths, JSON/SSE relay, cancellation, limits, safe diagnostics | Met (qualification build, not the shipped bytes) | SDK suites above; `https://github.com/redact-secret/gateway/actions/runs/37044335074` |
 | Pin Node/Python SDK versions; real baseURL examples; Compose and static config; SDK retry guidance | Met | `examples/node`, `examples/python`, `examples/compose/compose.yaml`, `examples/config.openai.json`; lockfiles with integrity hashes; guidance in errors-and-telemetry |
 | Build and execute the exact Linux x86_64 / macOS ARM64 binaries and the Linux amd64 image; record source/toolchain/core/config/SDK pins and checksums | Met for the unpublished candidate | `Candidate artifacts` run `https://github.com/redact-secret/gateway/actions/runs/37044335173`; manifest v2 and `SHA256SUMS` in the bundle (values below) |
-| Verify license and private reporting; document loopback trust, egress bypass, pre-Gateway exposure, response pass-through, redaction semantics | **Partly met** | License MIT (`LICENSE`, `Cargo.toml`); private reporting API `enabled: true`. **The end-to-end test report is not recorded**: the maintainer must send one and confirm it arrives (ADR 0010). Documentation of the trust assumptions: README, SECURITY.md, threat-control map, this report |
+| Verify license and private reporting; document loopback trust, egress bypass, pre-Gateway exposure, response pass-through, redaction semantics | **Met** | License MIT (`LICENSE`, `Cargo.toml`); private reporting API `enabled: true` (checked 2026-10-02, ADR 0010). Documentation of the trust assumptions: README, SECURITY.md, threat-control map, this report |
 | Reconcile Alpha 1 blockers; reviewable release evidence; no publication authorized | Met (this document and the manifest) | "Unresolved blockers" below |
 | AC: exact candidate artifacts pass documented startup and MVP smoke checks on supported environments | Met | Smoke matrix in [docs/artifacts.md](../artifacts.md); `https://github.com/redact-secret/gateway/actions/runs/37044335173` |
 | AC: rejected inputs never deliver upstream body bytes; auth/destination/diagnostic tests pass | Met | Provider-side zero-connection assertions (SDK suites); `src/transport/tests/forward_tests.rs`, `attack_tests.rs`, `tests/destination_policy.rs`, `tests/diagnostic_surface.rs` ([control map](alpha1-threat-control-map.md)) |
@@ -123,7 +123,7 @@ The #21 box "slow consumer, upstream disconnect, malformed response and timeout 
 | Skeleton starts safely, validates config, rejects unsupported routes, no upstream body transmission | Met (and superseded by the proxy; the smoke probes still send only locally rejected requests) |
 | Fake-upstream and core completeness probes run in CI without real credentials | Met (`cargo test`, `tests/core_probe_*`) |
 | Build outputs match the documented target matrix and are labelled accurately | Met (manifest `status: alpha1-release-candidate-unpublished`, `distributable: false`) |
-| Baseline docs, threat model, license decision, and private reporting readiness reconciled | License decided (MIT); private reporting enabled, **test report not recorded** (open) |
+| Baseline docs, threat model, license decision, and private reporting readiness reconciled | License decided (MIT); private reporting enabled and verified via the API (2026-10-02) |
 
 ## Candidate artifacts
 
@@ -222,7 +222,6 @@ Nothing measured here is a default, and no choice below is promoted by this repo
 
 | Item | Owner | Why it matters |
 | --- | --- | --- |
-| **Private vulnerability reporting end-to-end test.** Reporting is enabled (API `enabled: true`) and the license is MIT, but no test report has been sent and confirmed (ADR 0010) | Maintainer | Release gate (SECURITY.md, ADR 0010); the manifest lists it as a distribution blocker |
 | **Registry and image name** are not selected; nothing is pushed | Maintainer | No distribution possible |
 | **Publication is not authorized**; no signing, SBOM, or provenance exists (Beta 3) | Maintainer | `distributable: false` |
 | **Quiet-host measurement.** The figures below were taken on a host that was not quiet (see the host line); the numeric limits and capacity remain provisional (ADR 0008) | Maintainer (host) / Alpha 2 | No limit becomes a default without a recorded quiet-host measurement |

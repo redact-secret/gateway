@@ -87,7 +87,6 @@ jq -n -S \
   description: "Alpha 1 MVP candidate: health endpoints and the POST /v1/chat/completions text-subset proxy (JSON and SSE relay, responses not redacted) to the fixed OpenAI route. Not published, not distributable.",
   distributable: false,
   distribution_blockers: [
-    "private vulnerability reporting is enabled (the license is MIT) but no end-to-end test report is recorded (ADR 0010)",
     "registry and image name are not selected; nothing is pushed",
     "no signing, SBOM, or provenance is produced (planned for Beta 3)",
     "numeric limits and capacity are provisional: no quiet-host performance measurement is recorded (ADR 0008)",

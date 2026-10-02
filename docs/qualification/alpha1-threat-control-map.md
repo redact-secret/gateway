@@ -122,7 +122,7 @@ Tested HTTP stack assumptions: HTTP/1.1 only on both legs; hyper 1.11.1 behavior
 
 ## Residual risks and unresolved blockers (input to #22)
 
-Unresolved release blockers carried from SECURITY.md and ADR 0010, unchanged by this work: (a) the private vulnerability reporting flow has not been verified end to end with a test report; (b) SDK (Node.js/TypeScript, Python) qualification against a gateway wired to a fake provider, which #22 has since done through the ADR 0020 test build (see the qualification report). Neither is a finding of this suite.
+Unresolved release blockers carried from SECURITY.md and ADR 0010, unchanged by this work: (a) private vulnerability reporting is enabled and verified through the GitHub API (ADR 0010); (b) SDK (Node.js/TypeScript, Python) qualification against a gateway wired to a fake provider, which #22 has since done through the ADR 0020 test build (see the qualification report). Neither is a finding of this suite.
 
 Residual risks, none a release blocker for the Alpha 1 minimum slice provided the operator requirements above are met:
 

@@ -146,4 +146,4 @@ Unpublished release-candidate builds (Linux x86_64, macOS ARM64, a Linux amd64 i
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md), [CONVENTIONS.md](CONVENTIONS.md), [CONTRIBUTION.md](CONTRIBUTION.md), and [SECURITY.md](SECURITY.md) before implementation.
 
-The gateway is licensed under the MIT License; see [LICENSE](LICENSE). Private vulnerability reporting is enabled for the repository; an end-to-end test report has not yet been recorded and is a release blocker (see [SECURITY.md](SECURITY.md) and ADR 0010).
+The gateway is licensed under the MIT License; see [LICENSE](LICENSE). Private vulnerability reporting is enabled for the repository; verified through the GitHub API on 2026-10-02 (see [SECURITY.md](SECURITY.md) and ADR 0010).

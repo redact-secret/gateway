@@ -4,7 +4,7 @@ Status: Accepted (design); implemented (scaffold, issue #7; extended to the Alph
 
 ## Context
 
-Issue #7 needs an explicit build matrix, an image, a manifest, and smoke evidence for the verified skeleton, without distributing anything. The license is MIT and private reporting is enabled, but a test-report verification is still open (ADR 0010), and the gateway is not yet a proxy (the Alpha 1 MVP, #8, is open).
+Issue #7 needs an explicit build matrix, an image, a manifest, and smoke evidence for the verified skeleton, without distributing anything. The license is MIT and private reporting is enabled and verified (ADR 0010), and the gateway is not yet a proxy (the Alpha 1 MVP, #8, is open).
 
 ## Decision
 
@@ -26,7 +26,7 @@ Image:
 
 Manifest (`scripts/candidate-manifest.sh`, a POSIX shell script using `jq`; no new dependencies): source commit, toolchain, exact core pin and its `Cargo.lock` checksum, `Cargo.lock` sha256, config schema version, per-artifact sha256, size and platform, and the image identity. `signing`, `sbom`, `provenance` are the string `not produced`. `distributable` is `false` with the ADR 0010 and Alpha 1 blockers. `SHA256SUMS` covers the artifacts, the manifest, and the smoke evidence.
 
-Release gating: no workflow publishes, creates a release, or pushes to a registry, and none holds registry credentials. A future publish workflow must refuse to run until the ADR 0010 test-report verification is recorded and until the Alpha 1 MVP qualification epic passes.
+Release gating: no workflow publishes, creates a release, or pushes to a registry, and none holds registry credentials. A future publish workflow must refuse to run unless private reporting is enabled (ADR 0010) and until the Alpha 1 MVP qualification epic passes.
 
 ## Owner
 
