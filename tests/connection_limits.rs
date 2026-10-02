@@ -290,3 +290,27 @@ async fn shutdown_with_the_bound_reached_and_exceeded_stays_bounded() {
     );
     drop((held, over));
 }
+
+#[tokio::test]
+async fn heads_refused_by_the_guard_release_their_slot_when_the_connection_closes() {
+    // The head guard writes a fixed 400 for ambiguous framing and then closes (#43). The
+    // slot belongs to the connection IO, so it is returned only when that close happens.
+    let running = start(2, 60_000, 50).await;
+    let ambiguous = "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nTransfer-Encoding: chunked\r\n\r\n{}";
+    for _ in 0..6 {
+        let (status, _) = request(running.addr, ambiguous)
+            .await
+            .expect("the guard answers");
+        assert_eq!(status, 400);
+    }
+    wait_until_admitted(running.addr).await;
+    assert_exactly_bound_slots(running.addr, 2).await;
+    // A peer that sends the ambiguous head and never reads the refusal still gives its slot
+    // back when the connection closes.
+    let mut unread = TcpStream::connect(running.addr).await.expect("connect");
+    unread.write_all(ambiguous.as_bytes()).await.expect("write");
+    wait_closed(&mut unread).await;
+    drop(unread);
+    assert_exactly_bound_slots(running.addr, 2).await;
+    shutdown(running).await;
+}
