@@ -19,6 +19,7 @@ set -euo pipefail
 gimage="$1"
 out="$2"
 mkdir -p "$out/framing"
+out="$(cd "$out" && pwd)" # absolute: used as a docker bind-mount source
 work="$out/framing"
 trap 'cleanup_run' EXIT
 net="$RUN_ID-net"

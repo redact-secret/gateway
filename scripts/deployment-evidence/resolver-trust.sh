@@ -19,6 +19,7 @@ set -euo pipefail
 gimage="$1"
 out="$2"
 mkdir -p "$out"
+out="$(cd "$out" && pwd)" # absolute: used as a docker bind-mount source
 work="$(mktemp -d)"
 trap 'cleanup_run; rm -rf "$work"' EXIT
 log="$out/resolver-trust.txt"

@@ -13,6 +13,7 @@ set -euo pipefail
 gimage="$1"
 out="$2"
 mkdir -p "$out"
+out="$(cd "$out" && pwd)" # absolute: used as a docker bind-mount source
 
 pull_helpers
 record_environment "$out/environment.txt" "$gimage"
