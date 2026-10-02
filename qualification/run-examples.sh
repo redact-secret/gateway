@@ -37,7 +37,7 @@ reset
 verify_calls
 echo "== examples/node without a key exits 2 and says so"
 code=0
-(cd "$root/examples/node" && OPENAI_API_KEY= npm start --silent) >/dev/null 2>&1 || code=$?
+(cd "$root/examples/node" && OPENAI_API_KEY='' npm start --silent) >/dev/null 2>&1 || code=$?
 test "$code" -eq 2
 
 echo "== examples/python (--demo-redaction)"
@@ -46,7 +46,7 @@ reset
 verify_calls
 echo "== examples/python without a key exits 2 and says so"
 code=0
-(cd "$root/examples/python" && OPENAI_API_KEY= "$py" openai_via_gateway.py) >/dev/null 2>&1 || code=$?
+(cd "$root/examples/python" && OPENAI_API_KEY='' "$py" openai_via_gateway.py) >/dev/null 2>&1 || code=$?
 test "$code" -eq 2
 
 echo "examples verified against the qualification build"

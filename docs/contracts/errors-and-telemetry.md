@@ -1,6 +1,6 @@
 # Contract: safe errors and telemetry
 
-Status: approved categories; code spellings fixed in #4; HTTP status mappings for the Chat Completions admission path fixed in #18 (below); header and credential outcomes added in #24 ([contract](headers-and-credentials.md)). Mappings for transport failures and relayed ordinary JSON responses fixed in #20 ([ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md); below); the SSE stream termination contract and stream timings fixed in #21 ([ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md); below).
+Status: SDK retry behavior and stream truncation behavior verified with the pinned Node.js and Python SDKs in #22 ([ADR 0020](../decisions/0020-sdk-qualification-test-build.md); section "SDK retry guidance" below). Approved categories; code spellings fixed in #4; HTTP status mappings for the Chat Completions admission path fixed in #18 (below); header and credential outcomes added in #24 ([contract](headers-and-credentials.md)). Mappings for transport failures and relayed ordinary JSON responses fixed in #20 ([ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md); below); the SSE stream termination contract and stream timings fixed in #21 ([ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md); below).
 
 ## Gateway-owned error categories
 
@@ -47,7 +47,7 @@ Configuration diagnostics (`invalid_config: <kind> at <schema location>`) are de
 
 Every rejection below is generated locally before anything is sent upstream, has a fixed body `{"error":{"code":"<code>"}}` with `Content-Type: application/json`, `Cache-Control: no-store`, and `Connection: close` (a body that was not read must not be parsed as the next request). No response contains request text, header values, field names, or parser messages. Field-level detail is deliberately not reported: names and values are caller payload.
 
-SDK retry column: the OpenAI Python and Node SDKs retry `408`, `409`, `429`, and every `5xx` by default (twice, with backoff, honoring `Retry-After`); they do not retry other `4xx`. (Documented SDK defaults, not yet verified against pinned SDK versions; that qualification is #22.) This is SDK behavior, not gateway behavior: the gateway performs no retries. A retried request is safe here because nothing from a rejected request reached the provider. Retries of the `501` below are wasted work, not a hazard.
+SDK retry column: **verified in #22** with the pinned SDKs (npm `openai` 7.27.0, PyPI `openai` 3.24.0; evidence table in "SDK retry guidance" below). Both retry `408`, `409`, `429`, every `5xx`, and connection errors, twice by default (three attempts), and do not retry other `4xx`; the decision is by status code, because the gateway does not relay the provider's `x-should-retry` and `retry-after-ms` hints. This is SDK behavior, not gateway behavior: the gateway performs no retries. A retried request that the gateway rejected locally is safe because nothing from it reached the provider. The guidance table lists the situations exercised directly through the SDKs; the other rows follow from their status code. Retries of the `501` below are wasted work, not a hazard.
 
 | Situation | Status | Code | SDK retries |
 | --- | --- | --- | --- |
@@ -102,7 +102,7 @@ The response is buffered under hard bounds and relayed only when complete, so ev
 | Response header block over `max_response_header_bytes`, or body over `max_response_body_bytes` (declared or counted) | 502 | `upstream_response_too_large` | yes | yes |
 | Caller disconnected, or shutdown cancelled the request | none deliverable / 503 `not_ready` | n/a | maybe | n/a |
 
-SDK retry implications. The OpenAI Python and Node SDKs retry `5xx` and `408`/`409`/`429` by default (documented SDK behavior; qualification is #22). The Gateway itself never retries and never replays a payload after any send attempt began. A retry by the SDK is a **new, independent request**, and where the first attempt reached the provider (a timeout, an invalid or oversized response, a disconnect) the provider may already have run, and may bill for, the first one. Only the rows marked "no" are known to have transmitted nothing. A caller that cannot tolerate duplicate provider-side work must disable SDK retries. No exactly-once or at-most-once delivery is claimed.
+SDK retry implications (verified in #22, see "SDK retry guidance"). The OpenAI Python and Node SDKs retry `5xx` and `408`/`409`/`429` by default, and a failed connection. The Gateway itself never retries and never replays a payload after any send attempt began. A retry by the SDK is a **new, independent request**, and where the first attempt reached the provider (a timeout, an invalid or oversized response, a disconnect) the provider may already have run, and may bill for, the first one: with the SDK defaults, an oversize, truncated, or timed-out provider answer reaches the provider three times. Only the rows marked "no" in the "Request bytes sent?" column are known to have transmitted nothing. A caller that cannot tolerate duplicate provider-side work must disable SDK retries (`maxRetries: 0` / `max_retries=0`, as the shipped examples do). No exactly-once or at-most-once delivery is claimed.
 
 Content coding: the Gateway requests `Accept-Encoding: identity` and does not decode. A provider response with any other `Content-Encoding` cannot be relayed faithfully (the coding header is not relayed) and is `upstream_invalid_response`.
 
@@ -127,11 +127,40 @@ Cancellation and shutdown. When the caller disconnects, the request future is dr
 
 Only a clean provider end (the provider's own final chunk) produces a normal end. Bytes already transmitted to the caller cannot be retracted.
 
-SDK behavior (documented SDK defaults, not yet verified against pinned versions; that is #22). An SDK sees a response whose chunked body ends without its final chunk, or a connection reset, and raises a stream or connection error. The OpenAI SDKs may retry such a request; the Gateway adds no retry, replay, or resume. A retry is a new, independent request, and where the first reached the provider it may already have run, and may bill for, the first. A caller that cannot tolerate duplicate provider-side work must disable SDK retries and must itself handle a truncated stream. For HTTP/1.1 callers the truncation is always visible; an HTTP/1.0 caller would not see it, so `stream: true` is refused for HTTP/1.0.
+SDK behavior (**observed in #22**; the earlier unverified text here claimed both SDKs raise and may retry, which was wrong in two respects). On the wire a broken stream ends without its terminating chunk (no `0` chunk), and nothing is ever added to it. The **Python** SDK (httpx) raises `APIConnectionError` after delivering only the events the provider really sent. The **Node.js** SDK (Node's built-in fetch, undici) does **not** raise: every gateway response carries `Connection: close` ([ADR 0019](../decisions/0019-request-head-guard-and-one-request-per-connection.md)), and undici treats the close of a chunked `Connection: close` body as a clean end, so the SDK yields a shorter stream and ends normally (a control run in the suite shows undici does raise for the same truncation on a keep-alive response). Neither SDK retried a stream cut after the headers (one request each). **A Node.js caller must therefore require the provider's own completion indicator (`finish_reason` on the last chunk) and treat a stream without it as truncated**; the shipped Node example does. A caller that cannot tolerate duplicate provider-side work must disable SDK retries; a provider `429`/`5xx` before the stream starts is retried like any other. An HTTP/1.0 caller would not see truncation at all, so `stream: true` is refused for HTTP/1.0. Whether the gateway should signal truncation more forcefully for undici (for example with an abortive close) is a follow-up decision, not made here.
 
 Cancellation and shutdown. A caller that disconnects makes the server drop the response body, which closes the provider connection and returns the upstream and stream permits; the provider may stop shortly after (it sees the close). On shutdown the drain deadline applies as above; open streams are then cancelled and end abruptly. Nothing is replayed.
 
 Telemetry for streams: stage timings for first byte, total, upstream wait (time spent waiting on the provider), and downstream wait (time between handing a chunk to the server and the server asking for the next, that is consumer and socket backpressure; relay overhead is total minus both), counters for streams started and ended by cause, provider bytes relayed, and the bytes the relay holds now and at peak. No stream content, key, header, or route is ever a label or a field.
+
+## SDK retry guidance (observed in #22)
+
+Method: the pinned SDKs at their default retry setting (`maxRetries` / `max_retries` = 2) call the NON-RELEASE qualification build ([ADR 0020](../decisions/0020-sdk-qualification-test-build.md)) wired to a scripted fake provider. Each row counts the HTTP attempts the SDK made to the gateway (an SDK fetch hook, an httpx request hook) and the requests that actually reached the fake provider. Both SDKs gave identical counts on every row. Evidence files (`retry-observations-node.json`, `retry-observations-python.json`, `stream-truncation-observations-*.json`) are uploaded by the qualification workflow; the assertions in `qualification/sdk/*/` fail if the SDK policy ever changes, and this table must then be reconciled.
+
+| Situation | SDK attempts | Requests that reached the provider |
+| --- | --- | --- |
+| Provider `400`, `401`, `403`, `404`, `422` (relayed unchanged) | 1 (not retried) | 1 |
+| Provider `408`, `409`, `429`, `500`, `502`, `503`, `504` (relayed unchanged) | 3 (retried twice) | 3 |
+| Provider `429` with `Retry-After: 0` (the header is relayed) | 3 | 3 |
+| Provider `429`, `429`, then `200` | 3, and the call succeeds | 3 |
+| Provider `500` with `x-should-retry: false` and `retry-after-ms: 10`, through the gateway | 3 (the hints are not relayed, so the SDK uses its status policy); directly to the provider the SDK makes 1 | 3 |
+| Gateway `422 unsupported_input`, `413 limit_exceeded` | 1 | 0 |
+| Gateway `501 not_implemented` (no upstream configured) | 3 (wasted work) | 0 |
+| Gateway `503 overload` (`Retry-After: 1` is relayed) | 3, and the SDK waited the relayed second between attempts | 0 (nothing was sent for the refused attempts) |
+| Gateway `502 upstream_unavailable` (provider unreachable) | 3 | 0 |
+| Gateway `502 upstream_response_too_large`, `502 upstream_invalid_response` | 3 | 3 (each attempt reached the provider) |
+| Gateway `504 upstream_timeout` (provider never answered) | 3 | 3 |
+| Connection refused to the gateway | 3 (`APIConnectionError`) | 0 |
+| Stream cut after the response headers (provider cut, or gateway idle cut) | 1 (not retried) | 1 |
+| Provider `429` before a stream starts | 3 | 3 |
+
+What to tell integrators:
+
+1. The default retry policy is status-based and the gateway does not change it, except that the gateway drops the provider's `x-should-retry` and `retry-after-ms` hints (its response-header allowlist relays only `content-type`, `cache-control`, `retry-after`, `x-request-id`, `openai-processing-ms`, `openai-version`, and `x-ratelimit-*`). A provider that says "do not retry" is therefore retried through the gateway. This was observed with the fake provider; the headers a real provider sends were not observed.
+2. With the defaults, a failure after the request reached the provider is sent to the provider up to three times (duplicate and possibly billed work). Set `maxRetries: 0` (Node) or `max_retries=0` (Python) unless duplicates are acceptable; the shipped examples do.
+3. A retry of a request the gateway rejected locally (`4xx`, `501`, `503 overload`, `502 upstream_unavailable`) never reaches the provider, so it is safe; retries of `501` are wasted work.
+4. Stream truncation: Python raises `APIConnectionError`; Node.js does not raise (see the SSE section). Require `finish_reason` in Node.
+5. This is not a statement about other SDK versions or other HTTP clients, and not a statement about the real provider.
 
 ## Stage timings (ADR 0008)
 
@@ -139,4 +168,4 @@ Telemetry for streams: stage timings for first byte, total, upstream wait (time 
 
 ## Status
 
-Implemented: health, local rejection, config diagnostics, the Chat Completions admission/parse/limit mappings, inspection rejections (#19), and ordinary JSON forwarding, relay, transport-error mappings, and stage timings (#20). SSE relay, the stream termination contract, and stream timings and counters (#21). Planned: SDK qualification of both (#22).
+Implemented: health, local rejection, config diagnostics, the Chat Completions admission/parse/limit mappings, inspection rejections (#19), and ordinary JSON forwarding, relay, transport-error mappings, and stage timings (#20). SSE relay, the stream termination contract, and stream timings and counters (#21). SDK qualification of both with the pinned Node.js and Python SDKs, and the observed retry and truncation behavior below (#22).

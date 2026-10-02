@@ -1,6 +1,6 @@
-# Configuration and CLI (skeleton)
+# Configuration and CLI
 
-Status: implemented for the loopback health skeleton (#4). Governing decisions: [ADR 0006](decisions/0006-runtime-plan-and-authority-separation.md), [ADR 0009](decisions/0009-credential-and-upstream-trust-model.md). The upstream provider profile is implemented (#23, [ADR 0013](decisions/0013-fixed-https-destinations-and-outbound-authority.md), [contract](contracts/upstream-destinations.md)); credential and header rules are implemented (#24, [contract](contracts/headers-and-credentials.md)); ordinary JSON body forwarding with deadlines, response bounds, and cancellation is implemented (#20, [ADR 0017](decisions/0017-json-forwarding-deadlines-and-cancellation.md)); SSE relay with stream bounds is implemented (#21, [ADR 0018](decisions/0018-sse-relay-termination-and-stream-bounds.md)); SDK qualification is planned (#22), and proxy hardening is planned (#25).
+Status: implemented (#4 loopback health, #18 to #25 the Chat Completions proxy). Governing decisions: [ADR 0006](decisions/0006-runtime-plan-and-authority-separation.md), [ADR 0009](decisions/0009-credential-and-upstream-trust-model.md). The upstream provider profile is implemented (#23, [ADR 0013](decisions/0013-fixed-https-destinations-and-outbound-authority.md), [contract](contracts/upstream-destinations.md)); credential and header rules are implemented (#24, [contract](contracts/headers-and-credentials.md)); ordinary JSON body forwarding with deadlines, response bounds, and cancellation is implemented (#20, [ADR 0017](decisions/0017-json-forwarding-deadlines-and-cancellation.md)); SSE relay with stream bounds is implemented (#21, [ADR 0018](decisions/0018-sse-relay-termination-and-stream-bounds.md)); SDK qualification (#22) and proxy hardening (#25) are done ([ADR 0020](decisions/0020-sdk-qualification-test-build.md), [ADR 0019](decisions/0019-request-head-guard-and-one-request-per-connection.md)).
 
 ## CLI
 
@@ -14,6 +14,10 @@ Status: implemented for the loopback health skeleton (#4). Governing decisions: 
 Exit codes: 0 success, 1 validation/startup/runtime failure, 2 usage error. Arguments, paths, and file content are never echoed. There are no environment-variable settings, and no proxy settings are inherited.
 
 Configuration is static: it is read once at startup and restart-activated. There is no hot reload, no per-request config read, and no request-time policy selection.
+
+## Example configurations
+
+`examples/config.openai.json` is the working example: loopback listener, `deployment.upstream.provider: openai`, profile `full`, and capacity numbers (`receipt 8`, `memory_units 65536`, `inspection 2`, `upstream 8`, `stream 8`) that are the ones the SDK qualification ran with. They are **provisional and unmeasured** (ADR 0008), not recommendations. `container/config.container.json` is the same with a non-loopback bind inside the container. Neither holds a credential: the provider key comes from your application per request.
 
 ## Skeleton configuration
 
@@ -61,4 +65,4 @@ Served on the configured listener only. See [errors and telemetry](contracts/err
 | other methods on that path | `405` with `Allow: POST`, rejected locally. |
 | anything else | `404 {"error":{"code":"unsupported_input"}}`, rejected locally. No upstream call, no forwarding, no body read. |
 
-Health endpoints make no upstream calls and use no credentials. Core inspection workers are built in startup initialization (`Services::init`); a profile, PII selection, or worker the pinned core cannot initialize fails startup, so readiness depends on both the initialized flag and successful core initialization. Inspection workers and queue derive from `resources.capacity.inspection` (provisional).
+Health endpoints make no upstream calls and use no credentials. Core inspection workers are built in startup initialization (`Services::init`); a profile, PII selection, or worker the pinned core cannot initialize fails startup, so readiness depends on both the initialized flag and successful core initialization. Inspection workers and queue derive from `resources.capacity.inspection` (provisional). `inspection` is both the number of worker threads and the bound on queued plus running inspection jobs, so a request beyond it is refused at once with `503 overload`, not queued. In the synthetic qualification run (provisional, host not quiet; [report](qualification/alpha1-qualification-report.md#performance-adr-0008-synthetic-stage-timing-and-peak-memory)), eight simultaneous clients saw 30%, 16%, and 2% of tiny requests refused at `inspection` 1, 2, and 4: set it to at least your application's expected number of requests in flight.

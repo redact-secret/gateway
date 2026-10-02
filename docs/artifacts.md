@@ -1,8 +1,8 @@
-# Candidate artifacts (skeleton, unpublished)
+# Candidate artifacts (Alpha 1, unpublished)
 
-Status: implemented for the verified skeleton (#7). Governing decision: [ADR 0012](decisions/0012-release-candidate-artifact-build.md). Nothing described here is published or distributable.
+Status: implemented (#7 scaffold; extended to the Alpha 1 MVP candidate in #22). Governing decision: [ADR 0012](decisions/0012-release-candidate-artifact-build.md). Nothing described here is published or distributable.
 
-The artifacts contain the **skeleton**: `--version`, `validate-config`, and a loopback server with `/healthz` and `/readyz`. Every other route is rejected locally with 404 `unsupported_input`. `POST /v1/chat/completions` runs strict admission, validation (#18), and core inspection (#19) and then, when `deployment.upstream` is configured, forwards the sanitized body once and relays the provider's ordinary JSON response (#20). `stream: true` follows the same road and the provider's SSE answer is relayed incrementally (#21); a deployment with no upstream configured answers `501`. The smoke checks post only requests that are rejected before forwarding; CI never contacts a provider. These candidate artifacts have not been qualified with the pinned Node/Python SDKs (#22).
+The artifacts contain the Alpha 1 MVP: `--version`, `validate-config`, a loopback server with `/healthz` and `/readyz`, and `POST /v1/chat/completions` for the OpenAI Chat Completions text subset (strict admission, core inspection, one forward to the fixed OpenAI route, JSON and SSE relay, responses not redacted). Every other route is rejected locally with 404 `unsupported_input`. The smoke checks post only requests that are rejected before inspection and forwarding, so even a config with an upstream cannot reach a provider; CI never contacts a provider. The pinned Node/Python SDK suites are run against a **separate non-release test build**, never against these artifacts ([ADR 0020](decisions/0020-sdk-qualification-test-build.md)).
 
 ## Target matrix
 
@@ -12,41 +12,57 @@ The artifacts contain the **skeleton**: `--version`, `validate-config`, and a lo
 | `redact-secret-gateway-aarch64-apple-darwin` | macOS ARM64 | `macos-15` (Apple silicon) |
 | `redact-secret-gateway-candidate-image-linux-amd64.tar` (`docker save` of `redact-secret-gateway:candidate`) | linux/amd64 OCI image | `ubuntu-24.04` with Docker |
 
-Not included: Linux ARM64 and multi-arch images (Beta 2), Windows, macOS x86_64, Helm, npm/PyPI launchers, Kubernetes manifests. Each binary is built once; the image copies the Linux binary and its smoke test checks the bytes match.
+Not included: Linux ARM64 and multi-arch images (Beta 2), Windows, macOS x86_64, Helm, npm/PyPI launchers, Kubernetes manifests. Each binary is built once with `cargo build --locked --release` (no features, no cfg); the image copies the Linux binary and its smoke test checks the bytes match.
+
+## Smoke checks (run on the exact candidate bytes, on their own platform)
+
+| Check | Linux binary | macOS binary | Image |
+| --- | --- | --- | --- |
+| Qualification-seam absence (`scripts/check-no-qualification-seam.sh`: no marker, flag, or test-constructor symbol of the test build) | yes | yes | yes (binary extracted from the image) |
+| `--version` has the expected shape | yes | yes | (same bytes, checksum-compared) |
+| `validate-config` on every shipped example config | yes | yes | the image's own config, with the image's binary |
+| Start on loopback, `/healthz` and `/readyz` 200 | yes | yes | yes, through a host-loopback published port |
+| Seven proxy-route probes, all rejected locally with the documented status and safe code (no credential 401, `{}` 422, unknown field plus a synthetic token 422 with no echo, wrong content type 415, `GET` on the route 405, unknown route 404) | yes | yes | yes |
+| Graceful SIGTERM, exit 0, `shutdown complete` | yes | yes | yes (`docker stop`) |
+| Non-root (uid 65532), read-only root, no capabilities, no new privileges | n/a | n/a | yes |
+| Compose example: `docker compose config`, start, ready, probes, down | n/a | n/a | yes, against the candidate image |
 
 ## Build locally
 
 ```bash
 cargo build --locked --release                      # binary for your host
-sh scripts/smoke-binary.sh target/release/redact-secret-gateway examples/config.skeleton.json /tmp/rsg-evidence
+sh scripts/smoke-binary.sh target/release/redact-secret-gateway examples/config.openai.json /tmp/rsg-evidence
 # Linux x86_64 host with Docker only:
 sh scripts/build-image.sh target/release/redact-secret-gateway redact-secret-gateway:candidate
 sh scripts/smoke-image.sh redact-secret-gateway:candidate "$(sha256sum target/release/redact-secret-gateway | cut -d ' ' -f 1)" /tmp/rsg-image-evidence
+sh scripts/smoke-compose.sh examples/compose/compose.yaml /tmp/rsg-compose-evidence
 ```
 
-The authoritative candidate is built by the `Candidate artifacts (skeleton, unpublished)` workflow (`.github/workflows/artifacts.yml`, on `workflow_dispatch` and on pull requests touching build files). Local builds do not match the CI bytes (different toolchain host and paths); bit reproducibility is not verified.
+The authoritative candidate is built by the `Candidate artifacts (Alpha 1, unpublished)` workflow (`.github/workflows/artifacts.yml`, on `workflow_dispatch` and on pull requests touching build files). Local builds do not match the CI bytes (different toolchain host and paths); bit reproducibility is not verified.
 
 ## What the workflow produces
 
-One workflow artifact, `skeleton-candidate-<commit>`, containing the two binaries, the image archive, `image-info.json`, `manifest.json`, `SHA256SUMS`, and `evidence/` (smoke logs: version, config validation, probe results, server and container output; no payloads or credentials). `manifest.json` records:
+One workflow artifact, `alpha1-candidate-<commit>`, containing the two binaries, the image archive, `image-info.json`, `manifest.json`, `SHA256SUMS`, and `evidence/` (smoke logs: seam check, version, config validation, probe results, per-platform `rustc -vV`, server and container output; no payloads or credentials). `manifest.json` (version 2) records:
 
-- source commit, toolchain (`rust-toolchain.toml` channel and `rustc --version`), gateway version
+- source commit, whether the tree was dirty, and the CI run URL; toolchain (`rust-toolchain.toml` channel, `rustc --version`, and each platform's own `rustc`); gateway version
 - exact core pin (`=0.1.0-beta.12` from `Cargo.lock`, with its lock checksum) and `Cargo.lock` sha256
-- config schema version
+- config schema version and the sha256 of each shipped example config and the Compose file
+- `capabilities.proxy`: the endpoint, the subset, JSON and SSE relay, `response_redaction: false`, and the fixed upstream
+- `sdk_pins`: npm `openai` and PyPI `openai` versions and the sha256 of the lockfiles that carry their integrity hashes (examples and qualification harness)
 - per artifact: file, platform, kind, sha256, size
 - image identity: image id, pinned base image digest, runtime user, contained binary sha256
-- `signing`, `sbom`, `provenance`: `"not produced"`; `distributable: false` with the blockers
+- `signing`, `sbom`, `provenance`: `"not produced"`; `distributable: false` with `distribution_blockers` that are true at the candidate commit (private-report test not recorded, registry and name unselected, no signing/SBOM/provenance, no quiet-host measurement, open follow-ups, publication not authorized)
 
-Verify a downloaded bundle with `sha256sum -c SHA256SUMS` (use `shasum -a 256 -c` on macOS).
+A workflow step asserts those fields (`distributable` false, proxy capability, pins present, three artifacts, "not produced" markers). Verify a downloaded bundle with `sha256sum -c SHA256SUMS` (use `shasum -a 256 -c` on macOS).
 
 ## Container assumptions
 
 - Base: distroless `cc-debian13:nonroot` pinned by digest; no shell, no package manager. Runs as uid 65532.
-- Filesystem: read-only root is supported. The process writes nothing. Contents: the binary and `/etc/redact-secret-gateway/config.json`. Mount your own config over that path to change it (validate it first with `validate-config`).
+- Filesystem: read-only root is supported. The process writes nothing. Contents: the binary and `/etc/redact-secret-gateway/config.json` (`container/config.container.json`: upstream `openai`, profile `full`, capacity `8/65536/2/8/8`, provisional and unmeasured). Mount your own config over that path to change it (validate it first with `validate-config`).
 - Capabilities: none needed. Run with `--cap-drop ALL --security-opt no-new-privileges`.
-- Network: the container config binds `0.0.0.0:8787` with `allow_non_loopback: true`, the explicit acknowledgement required by [ADR 0009](decisions/0009-credential-and-upstream-trust-model.md). Publish the port to host loopback only (`-p 127.0.0.1:8787:8787`) or to a private network shared with the single application or sidecar. Publishing it beyond that is outside the supported model; loopback is an address restriction, not authentication.
-- No secrets, environment variables, or build arguments. No provider credentials are used by the skeleton.
-- Compose: `examples/compose/compose.skeleton.yaml` (single service, loopback-published port, skeleton only).
+- Network: the container config binds `0.0.0.0:8787` with `allow_non_loopback: true`, the explicit acknowledgement required by [ADR 0009](decisions/0009-credential-and-upstream-trust-model.md). Publish the port to host loopback only (`-p 127.0.0.1:8787:8787`) or to a private network shared with the single application or sidecar. Publishing it beyond that is outside the supported model; loopback is an address restriction, not authentication. The container needs outbound HTTPS to `api.openai.com`; the gateway cannot prevent bypass, so restrict direct egress separately.
+- No secrets, environment variables, or build arguments. The provider key comes from your application per request.
+- Compose: `examples/compose/compose.yaml` (single service, loopback-published port).
 - Image name: `redact-secret-gateway:candidate` is a local name. The registry and image name are to be selected; nothing is pushed.
 
 ## Release gating
@@ -54,10 +70,11 @@ Verify a downloaded bundle with `sha256sum -c SHA256SUMS` (use `shasum -a 256 -c
 Artifact distribution is gated and nothing is published. Before any publication:
 
 1. A license is selected by the maintainer (MIT, done; [ADR 0010](decisions/0010-release-prerequisites-license-and-reporting.md)).
-2. Private vulnerability reporting is enabled (done) and verified with an end-to-end test report (ADR 0010, open).
-3. The Alpha 1 MVP qualification epic is complete (#8 and dependents), plus the other Alpha 1 gates in `SECURITY.md`.
+2. Private vulnerability reporting is enabled (done) and verified with an end-to-end test report (ADR 0010, **open**).
+3. The Alpha 1 MVP qualification is reconciled ([report](qualification/alpha1-qualification-report.md)) and the maintainer accepts the residual risks and open follow-ups.
 4. A registry and image name are selected, and a separate, environment-gated publish workflow is reviewed. Signing, SBOM, and provenance are not produced by the current workflow.
+5. The maintainer authorizes publication.
 
-## Draft integration examples
+## Integration examples
 
-`examples/node` and `examples/python` show an OpenAI SDK pointed at the gateway base URL. They are drafts: the proxy endpoint is not available until the Alpha 1 MVP (#8), and they must not be run expecting success.
+`examples/node` and `examples/python` point the OpenAI SDKs at the gateway base URL; `examples/compose/compose.yaml` runs the candidate image. They require your own provider key at run time. How each was verified, and what was not, is in [examples/README.md](../examples/README.md) and the root [README](../README.md#try-it).

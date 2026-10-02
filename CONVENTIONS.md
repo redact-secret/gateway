@@ -4,7 +4,7 @@ These conventions govern implementation in `redact-secret/gateway`. Proposed com
 
 ## Names and versioning
 
-- Product: RedactSecret Gateway. Repository: `redact-secret/gateway`. Planned executable: `redact-secret-gateway`.
+- Product: RedactSecret Gateway. Repository: `redact-secret/gateway`. Executable: `redact-secret-gateway` (unpublished). The separate non-release SDK test build `redact-secret-gateway-qualification` is never an artifact ([ADR 0020](docs/decisions/0020-sdk-qualification-test-build.md)).
 - Initial milestones are exactly `Alpha 1`, `Alpha 2`, `Beta 1`, `Beta 2`, and `Beta 3`.
 - Intended release tags follow `v0.1.0-alpha.1`, `v0.1.0-alpha.2`, and `v0.1.0-beta.N`; stable is `v0.1.0` after qualification. Additional prereleases may be required; milestone completion is not automatic release approval.
 - Gateway versioning is independent of core. Record the exact core version and source identity per release. Do not use floating git dependencies or automatically follow core beta releases.
@@ -56,4 +56,4 @@ Preserve Alpha 1 MVP delivery separately from skeleton completion. A compiling e
 
 Build once from the candidate commit and qualify the exact artifacts. Record checksums, source commit, toolchain, core pin, dependency lock, configuration version, SDK compatibility, and supported platforms. Do not assert signing, SBOM, provenance, or security review exists before those checks are implemented.
 
-Document upgrade and rollback behavior. Never silently reinterpret configuration or weaken rejection behavior to preserve compatibility. License selection is an explicit maintainer decision before distribution. As of 2026-10-02 no license is selected and GitHub private vulnerability reporting is not enabled; both are open release blockers tracked in [ADR 0010](docs/decisions/0010-release-prerequisites-license-and-reporting.md).
+Document upgrade and rollback behavior. Never silently reinterpret configuration or weaken rejection behavior to preserve compatibility. License selection is an explicit maintainer decision before distribution. As of 2026-10-02 the license is MIT (maintainer decision) and GitHub private vulnerability reporting is enabled; an end-to-end test report is still to be recorded and remains an open release blocker tracked in [ADR 0010](docs/decisions/0010-release-prerequisites-license-and-reporting.md).
