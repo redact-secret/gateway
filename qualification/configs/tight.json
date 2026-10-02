@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "deployment": {
+    "listener": { "address": "127.0.0.1:0" },
+    "upstream": { "provider": "openai" }
+  },
+  "content": { "profile": "full", "max_findings": 2 },
+  "resources": {
+    "capacity": { "receipt": 4, "memory_units": 65536, "inspection": 2, "upstream": 4, "stream": 4 },
+    "limits": {
+      "max_body_bytes": 4096,
+      "max_messages": 3,
+      "upstream_header_ms": 500,
+      "upstream_total_ms": 1000,
+      "stream_idle_ms": 500,
+      "stream_lifetime_ms": 5000
+    }
+  }
+}

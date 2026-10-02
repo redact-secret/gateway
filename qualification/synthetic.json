@@ -1,0 +1,16 @@
+{
+  "_comment": "Synthetic, revoked-looking values only. Shared by the Node, Python, and shell qualification code.",
+  "api_key": "sk-SYNTHETIC-REVOKED-QUAL-NOT-A-KEY",
+  "secret_prefix": "ghp_SYNTHETICREVOKED",
+  "prompt_marker_prefix": "RSG-QUAL-PROMPT-",
+  "stream_text": "Hello 안녕하세요 🙂!",
+  "log_forbidden": [
+    "ghp_SYNTH",
+    "sk-SYNTHETIC-REVOKED-QUAL",
+    "RSG-QUAL-PROMPT-",
+    "synthetic reply",
+    "synthetic provider error",
+    "chatcmpl-qual",
+    "안녕하세요"
+  ]
+}

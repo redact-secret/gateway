@@ -40,3 +40,8 @@ out/
 
 # Cargo build output
 /target
+
+# Qualification test build (ADR 0020): generated crate, evidence, perf output
+/qualification/gen/
+/qualification/target/
+/qualification/evidence/

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "deployment": {
+    "listener": { "address": "127.0.0.1:0" }
+  },
+  "content": { "profile": "full" },
+  "resources": {
+    "capacity": { "receipt": 4, "memory_units": 65536, "inspection": 2, "upstream": 4, "stream": 4 }
+  }
+}
