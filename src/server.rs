@@ -253,15 +253,16 @@ impl BoundServer {
     }
 }
 
-/// The listener every served connection goes through: the write-stall deadline (#21) and
-/// the request-head guard (#25, ADR 0019). Tests that serve a router themselves use this
+/// The listener every served connection goes through: the connection bound (#40, ADR
+/// 0022), the write-stall deadline (#21), and the request-head guard (#25, ADR 0019). Tests that serve a router themselves use this
 /// too, so they exercise the production connection handling.
 pub(crate) fn guarded_listener(
     listener: TcpListener,
     limits: &RequestLimits,
 ) -> impl axum::serve::Listener<Addr = SocketAddr> {
     HeadGuardListener::new(
-        StallListener::new(listener, limits.stream_write_stall()),
+        StallListener::new(listener, limits.stream_write_stall())
+            .with_connection_limit(usize::try_from(limits.max_connections).unwrap_or(usize::MAX)),
         limits.body_deadline(),
     )
 }

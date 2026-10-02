@@ -138,6 +138,10 @@ pub struct RequestLimits {
     /// Most provider bytes one stream may hold in the relay at once, in bytes. A single
     /// upstream chunk larger than this terminates the stream (#21).
     pub stream_buffer_bytes: u32,
+    /// Most connections served at once (#40). Enforced at accept time: a connection that
+    /// arrives while this many are open is closed immediately, never queued. Separate from
+    /// every capacity class; see `docs/contracts/resource-limits.md`.
+    pub max_connections: u32,
 }
 
 impl RequestLimits {
@@ -163,6 +167,7 @@ impl RequestLimits {
             stream_lifetime_ms: 900_000,
             stream_write_stall_ms: 30_000,
             stream_buffer_bytes: 1_048_576,
+            max_connections: 256,
         }
     }
 

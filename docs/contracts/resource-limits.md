@@ -1,13 +1,14 @@
 # Contract: resource limits
 
-Status: categories approved. **Per-request body, parse, and receipt limits have numeric values (#18) that are provisional pending quiet-host measurement.** Capacity counts (receipt, memory, inspection, upstream, stream) still have no defaults and come from configuration. **Upstream connect, response-header, and total deadlines, response header and body byte bounds, and the shutdown drain deadline have provisional values (#20, below).** **Stream idle and lifetime deadlines, the write-stall deadline, and the per-stream relay buffer bound have provisional values (#21, below).** Mechanism: [ADR 0003](../decisions/0003-resource-admission-and-lifetime.md); measurement gate: [ADR 0008](../decisions/0008-performance-measurement-gate.md); decision record: [ADR 0014](../decisions/0014-chat-completions-admission.md).
+Status: categories approved. **Per-request body, parse, and receipt limits have numeric values (#18) that are provisional pending quiet-host measurement.** Capacity counts (receipt, memory, inspection, upstream, stream) still have no defaults and come from configuration. **Upstream connect, response-header, and total deadlines, response header and body byte bounds, and the shutdown drain deadline have provisional values (#20, below).** **Stream idle and lifetime deadlines, the write-stall deadline, and the per-stream relay buffer bound have provisional values (#21, below).** **The accepted-connection bound has a provisional value (#40, below).** Mechanism: [ADR 0003](../decisions/0003-resource-admission-and-lifetime.md); measurement gate: [ADR 0008](../decisions/0008-performance-measurement-gate.md); decision record: [ADR 0014](../decisions/0014-chat-completions-admission.md).
 
 Every category below is finite, configurable through the validated static configuration, and tested near and across its boundary. A finite per-request limit is never enough alone: there is also an aggregate budget.
 
 | Category | Capacity owner / permit | Notes |
 | --- | --- | --- |
 | Request bytes | `ReceiptPermit` | Do not trust `Content-Length` |
-| Connections / concurrent body receipt | `ReceiptPermit` | |
+| Concurrent body receipt | `ReceiptPermit` | |
+| Accepted connections | connection slot (`max_connections`, accept time) | Separate budget; immediate close over the bound, no queue (#40, [ADR 0022](../decisions/0022-connection-bound-at-accept.md), below) |
 | JSON depth and node count | `MemoryReservation` | Parsed structure budget |
 | Decoded string bytes / inspected text | `MemoryReservation` | |
 | Findings | `boundary` / `core_bridge` | Over-limit rejects (`limit_exceeded`); request-wide, summed across texts |
@@ -89,11 +90,25 @@ Waiting follows the fixed acquisition order (receipt, then memory) with a bounde
 
 Parsing runs on the request task (no `spawn_blocking`), bounded by `max_body_bytes` and the node/depth budgets. If #5 measurement shows this blocks the reactor too long, parsing moves to the inspection pool; the limits above are unaffected.
 
+## Connection bound (#40; provisional pending quiet-host measurement)
+
+Same configuration object, same status: finite, validated, justified, **not tuned**. Mechanism and rationale: [ADR 0022](../decisions/0022-connection-bound-at-accept.md).
+
+| Field | Provisional value | Ceiling | Rationale |
+| --- | --- | --- | --- |
+| `max_connections` | 256 | 65,536 | Most connections served at once. One connection per in-flight request (every response closes), so legitimate use is the receipt, upstream, and stream capacities plus connections still sending a head. Measured cost on a loaded host: 1 descriptor, about 5 to 7 KiB idle, about 71 KiB with a nearly full held head, one connection task. At 256 that is about 1.4 to 17 MiB. |
+
+Behavior. The bound is checked at accept, before a byte is read: with a free slot the connection is served, otherwise it is closed immediately with no response and the accept loop moves on. Nothing waits and nothing queues, apart from the OS listen backlog, which the accept loop drains continuously. The slot belongs to the connection's IO and is returned only when the server drops it (peer close, head deadline, framing refusal, write stall, `Connection: close`, or shutdown), after the socket is closed. Request outcomes below the bound are unchanged.
+
+Interaction with `resources.capacity.receipt` and the other classes. Connections are a separate budget, not a capacity class. A connection holds no receipt, memory, inspection, upstream, or stream permit until its request head is complete and admission runs, and then acquires them in the existing fixed order (receipt, then memory, ...). The slot is taken first, before any other permit, and nothing waits on it, so there is no lock-order cycle. The two bounds are independent: `max_connections` below `receipt` makes part of the receipt capacity unreachable, and a `receipt` far below `max_connections` leaves connections that are refused at admission with `overload` instead of at accept. Size `max_connections` at least at `receipt + admission_queue + stream` plus headroom for connections still sending a head and for probes, and the process descriptor limit above `max_connections + resources.capacity.upstream` plus a small constant (13 at baseline). The gateway does not read or raise the descriptor limit. Every connection holds one task and up to 64 KiB of head while its head is incomplete.
+
+Health. Not exempt, and not reserved: the decision happens before any byte is read, so a reserve for health would be open to any peer. At the bound a probe is closed without a response and succeeds as soon as a slot frees. Per-peer limits are not implemented: the listener is loopback and every peer shares one address (ADR 0021).
+
 ## Known gaps
 
-- Connection count is still not limited. A peer that opens many sockets holds a file descriptor and a connection task each until the head deadline (`body_deadline_ms`) closes it; no receipt or memory is reserved for a connection that has not finished its head. Connection-count and per-peer limits belong to transport hardening (#10, Alpha 2; tracked in a #25 follow-up issue). The request head is bounded since #25: absolute head deadline, 64 KiB hold bound, then the route's 16 KiB total / 8 KiB per value header limits (`431`). The header sizes are not measured values (ADR 0008).
+- Connection count is bounded since #40 (`max_connections`, above); the remaining gaps are that the default is provisional, that a refused connection is neither counted nor logged yet, that a local peer can still occupy every slot until its silent connections hit the head deadline (the bound makes that finite, not impossible), and that there is no per-peer bound (loopback peers share an address). The request head is bounded since #25: absolute head deadline, 64 KiB hold bound, then the route's 16 KiB total / 8 KiB per value header limits (`431`). The header sizes are not measured values (ADR 0008).
 - Stream limits (#21) and upstream deadlines and response bounds (#20) are provisional.
-- The write-stall deadline bounds a response write that stops making progress; read-side stalls are bounded separately: the head by the head deadline (#25) and the body by `body_deadline_ms` (#18); only the connection count remains the gap in the first bullet. The HTTP server's own write buffer per connection is bounded by the library and is not part of `stream_buffer_bytes`.
+- The write-stall deadline bounds a response write that stops making progress; read-side stalls are bounded separately: the head by the head deadline (#25) and the body by `body_deadline_ms` (#18); the connection count by `max_connections` (#40). The HTTP server's own write buffer per connection is bounded by the library and is not part of `stream_buffer_bytes`.
 - Idle connection pooling to the provider is off, so every request pays a connection setup; revisit with measurement (ADR 0017).
 - The request-wide finding bound (`content.max_findings`, default 1024, ceiling 50,000) and the inspection pool sizing (workers `min(inspection permits, CPUs, 16)`, queue `min(inspection permits, 1024)`) are provisional (#19), not measured on a quiet host (ADR 0008). The transformed-output bound is `min(max_body_bytes, bytes covered by the request's reservation)`; the reservation already budgets one output copy.
 
