@@ -28,8 +28,8 @@ Files, images, audio, URL content, stored conversation/file references, encrypte
 
 ## Scope
 
-Alpha 1: Chat Completions text subset. Beta 1: Responses API text subset. Anything else needs its own ADR. This contract does not enumerate fields yet; the field-by-field table is a deliverable of #18/#19 and Alpha 2.
+Alpha 1: Chat Completions text subset. Beta 1: Responses API text subset. Anything else needs its own ADR. The field-by-field table for the Chat Completions text subset is [chat-completions-request](chat-completions-request.md) (#18). Tool, metadata, and schema-text contracts remain Alpha 2.
 
 ## Status
 
-Planned. Nothing implemented.
+Implemented for the Chat Completions text subset (#18): the matrix, the recursive unknown-field rejection, and the decoded-string and duplicate-key rules. Contracts for tool results, app-submitted tool arguments, metadata, and tool descriptions or schema text are planned (Alpha 2, #9).

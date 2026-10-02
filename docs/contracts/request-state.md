@@ -32,4 +32,6 @@ This is a structural safeguard. Types do not prove detector coverage and do not 
 
 ## Implemented status
 
-Implemented in #2 as a scaffold: the three types, the sealed constructor, and `transport::Upstream::forward(SanitizedRequest)`, with `trybuild` compile-fail tests (`tests/api_boundary.rs`). No route exists and no request can reach upstream. Field classification (#18/#19) and runtime no-forward tests (#6) are not implemented.
+Implemented in #2 as a scaffold: the three types, the sealed constructor, and `transport::Upstream::forward(SanitizedRequest)`, with `trybuild` compile-fail tests (`tests/api_boundary.rs`). Runtime no-forward tests use the fake upstream (#6).
+
+#18 adds the first two states on a real route: `admission::ReceivedRequest` is produced by `Admission::begin_body_receipt` (reservation before collection) and `protocol::validate_with` turns it into a `ValidatedRequest` holding the typed `protocol::chat::ChatRequest`; `chat_route::Admitted` pairs that with the operator-defined `RouteId`. The route then ends in a local `501 not_implemented`: nothing constructs a `SanitizedRequest` and no request reaches upstream. Core inspection, `boundary::approve`, and forwarding are #19/#20.

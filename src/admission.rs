@@ -13,16 +13,23 @@
 //!
 //! Acquisition order is fixed to avoid deadlock: receipt, then memory, then inspection,
 //! then upstream, then stream. A request never waits for an earlier class while holding a
-//! later one. This scaffold never waits at all: every acquisition is `try_*` and overload
-//! is an immediate typed error, so there is no queue to grow. Bounded waiting with
-//! deadlines is added in #18 and verified by #6.
+//! later one. Every acquisition is `try_*`, except body receipt on the Chat Completions
+//! route ([`Admission::begin_body_receipt`], #18): when capacity is not free it waits in
+//! a bounded queue ([`RequestLimits::admission_queue`]) for at most
+//! [`RequestLimits::admission_wait_ms`], then fails with [`AdmissionError::Overload`].
+//! Waiters hold only the receipt permit while waiting for memory (earlier class before
+//! later class), so the order cannot deadlock.
 //!
 //! No capacity has a default. [`CapacityPlan`] needs every number from the caller; the
 //! values come from validated configuration (#4) and measurements (#5, ADR 0008).
+//! [`RequestLimits`] holds the per-request limits; its provisional values are justified
+//! in `docs/contracts/resource-limits.md` and are not measured.
 
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError};
 
@@ -55,6 +62,105 @@ impl CapacityPlan {
             upstream,
             stream,
         }
+    }
+}
+
+/// Bytes per memory unit. A request reservation is counted in these.
+pub const MEMORY_UNIT_BYTES: usize = 1024;
+
+/// Conservative bytes charged per parsed node (value or key). `Json` is 32 bytes, an
+/// object entry 56 bytes, plus `Vec` growth slack and the hash entry for key uniqueness.
+pub const NODE_COST_BYTES: usize = 128;
+
+/// Buffer copies charged per body byte: the received buffer, the decoded strings, the
+/// transient duplicate-key sets, and the transformed output reserved for #19.
+pub const BUFFER_COPIES: usize = 4;
+
+/// Per-request limits. Every value is finite; none is measured yet (ADR 0008), see
+/// `docs/contracts/resource-limits.md`. They compose with the aggregate budget: the body
+/// a request may carry is clamped to what one reservation can ever cover
+/// ([`RequestLimits::effective_max_body`]), so a configured per-request limit can never
+/// exceed the global memory budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RequestLimits {
+    /// Maximum request body bytes (after HTTP framing).
+    pub max_body_bytes: u32,
+    /// Maximum JSON container nesting.
+    pub max_depth: u32,
+    /// Maximum parsed values plus object keys.
+    pub max_nodes: u32,
+    /// Maximum decoded bytes of a single string or key.
+    pub max_string_bytes: u32,
+    /// Maximum number of `messages`.
+    pub max_messages: u32,
+    /// Longest wait for receipt/memory capacity before an overload rejection.
+    pub admission_wait_ms: u32,
+    /// Most requests allowed to wait for capacity at once; more fail immediately.
+    pub admission_queue: u32,
+    /// Total time allowed to receive the body once capacity is reserved.
+    pub body_deadline_ms: u32,
+}
+
+impl RequestLimits {
+    /// Provisional values, pending quiet-host measurement.
+    #[must_use]
+    pub const fn provisional() -> Self {
+        Self {
+            max_body_bytes: 1_048_576,
+            max_depth: 16,
+            max_nodes: 16_384,
+            max_string_bytes: 524_288,
+            max_messages: 256,
+            admission_wait_ms: 250,
+            admission_queue: 16,
+            body_deadline_ms: 10_000,
+        }
+    }
+
+    /// Memory charged up front for a body of at most `body_cap` bytes, in bytes. The
+    /// parsed node count cannot exceed the body length, so small bodies reserve little.
+    #[must_use]
+    pub fn reservation_bytes(&self, body_cap: usize) -> usize {
+        let nodes = usize::try_from(self.max_nodes)
+            .unwrap_or(usize::MAX)
+            .min(body_cap);
+        body_cap
+            .saturating_mul(BUFFER_COPIES)
+            .saturating_add(nodes.saturating_mul(NODE_COST_BYTES))
+    }
+
+    /// [`Self::reservation_bytes`] rounded up to memory units, saturating at `u32::MAX`.
+    #[must_use]
+    pub fn reservation_units(&self, body_cap: usize) -> u32 {
+        u32::try_from(self.reservation_bytes(body_cap).div_ceil(MEMORY_UNIT_BYTES))
+            .unwrap_or(u32::MAX)
+    }
+
+    /// Largest body (at most `max_body_bytes`) whose reservation fits `total_units`. This
+    /// is the composition rule between the per-request and the aggregate limits.
+    #[must_use]
+    pub fn effective_max_body(&self, total_units: u32) -> usize {
+        let mut lo = 0_usize;
+        let mut hi = usize::try_from(self.max_body_bytes).unwrap_or(usize::MAX);
+        while lo < hi {
+            let mid = lo.saturating_add(hi.saturating_sub(lo).saturating_add(1) / 2);
+            if self.reservation_units(mid) <= total_units {
+                lo = mid;
+            } else {
+                hi = mid.saturating_sub(1);
+            }
+        }
+        lo
+    }
+
+    #[must_use]
+    pub fn admission_wait(&self) -> Duration {
+        Duration::from_millis(u64::from(self.admission_wait_ms))
+    }
+
+    #[must_use]
+    pub fn body_deadline(&self) -> Duration {
+        Duration::from_millis(u64::from(self.body_deadline_ms))
     }
 }
 
@@ -128,6 +234,8 @@ impl MemoryReservation {
 /// Owner of the five capacities. Cheap to share by reference; holds no request state.
 #[derive(Debug)]
 pub struct Admission {
+    memory_total: u32,
+    waiting: Arc<AtomicU32>,
     receipt: Arc<Semaphore>,
     memory: Arc<Semaphore>,
     inspection: Arc<Semaphore>,
@@ -152,6 +260,8 @@ impl Admission {
     #[must_use]
     pub fn new(plan: &CapacityPlan) -> Self {
         Self {
+            memory_total: plan.memory_units.get(),
+            waiting: Arc::new(AtomicU32::new(0)),
             receipt: sized(plan.receipt),
             memory: sized(plan.memory_units),
             inspection: sized(plan.inspection),
@@ -167,9 +277,79 @@ impl Admission {
     /// [`AdmissionError::Overload`] when either class is exhausted;
     /// [`AdmissionError::InvalidReservation`] for zero units.
     pub fn begin_receipt(&self, memory_units: u32) -> Result<ReceiptTicket, AdmissionError> {
+        // Low-level form: one unit is one body byte.
+        let body_cap = usize::try_from(memory_units).unwrap_or(usize::MAX);
+        self.begin_receipt_sized(memory_units, body_cap)
+    }
+
+    fn begin_receipt_sized(
+        &self,
+        memory_units: u32,
+        body_cap: usize,
+    ) -> Result<ReceiptTicket, AdmissionError> {
         let receipt = self.try_receipt()?;
         let memory = self.try_reserve_memory(memory_units)?;
-        Ok(ReceiptTicket { receipt, memory })
+        Ok(ReceiptTicket {
+            receipt,
+            memory,
+            body_cap,
+        })
+    }
+
+    /// Total aggregate memory budget in units.
+    #[must_use]
+    pub const fn memory_total_units(&self) -> u32 {
+        self.memory_total
+    }
+
+    /// Reserve receipt capacity and the conservative memory for a body of at most
+    /// `body_cap` bytes **before** any body byte is collected (ADR 0003). The reservation
+    /// comes from `limits`, never from a declared length alone: callers pass a declared
+    /// length only as an upper bound that collection then enforces.
+    ///
+    /// When capacity is not free the call joins a bounded wait queue and gives up after
+    /// `limits.admission_wait()`; when the queue is full it fails immediately.
+    ///
+    /// # Errors
+    /// [`AdmissionError::InvalidReservation`] when `body_cap` is zero or its reservation
+    /// can never fit the aggregate budget; [`AdmissionError::Overload`] when capacity is
+    /// not available in time or the queue is full.
+    pub async fn begin_body_receipt(
+        &self,
+        body_cap: usize,
+        limits: &RequestLimits,
+    ) -> Result<ReceiptTicket, AdmissionError> {
+        let units = limits.reservation_units(body_cap);
+        if body_cap == 0 || units == 0 || units > self.memory_total {
+            return Err(AdmissionError::InvalidReservation);
+        }
+        match self.begin_receipt_sized(units, body_cap) {
+            Err(AdmissionError::Overload) => {}
+            other => return other,
+        }
+        let _slot = WaitSlot::enter(&self.waiting, limits.admission_queue)?;
+        let acquire = async {
+            let receipt = Arc::clone(&self.receipt)
+                .acquire_owned()
+                .await
+                .map_err(|_| AdmissionError::Overload)?;
+            let memory = Arc::clone(&self.memory)
+                .acquire_many_owned(units)
+                .await
+                .map_err(|_| AdmissionError::Overload)?;
+            Ok::<_, AdmissionError>((receipt, memory))
+        };
+        let (receipt, memory) = tokio::time::timeout(limits.admission_wait(), acquire)
+            .await
+            .map_err(|_| AdmissionError::Overload)??;
+        Ok(ReceiptTicket {
+            receipt: ReceiptPermit { _permit: receipt },
+            memory: MemoryReservation {
+                units,
+                _permit: memory,
+            },
+            body_cap,
+        })
     }
 
     /// # Errors
@@ -225,21 +405,51 @@ impl Admission {
     }
 }
 
+/// Slot in the bounded admission wait queue. Released on drop.
+struct WaitSlot {
+    waiting: Arc<AtomicU32>,
+}
+
+impl WaitSlot {
+    fn enter(waiting: &Arc<AtomicU32>, queue_cap: u32) -> Result<Self, AdmissionError> {
+        waiting
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < queue_cap).then(|| n.saturating_add(1))
+            })
+            .map_err(|_| AdmissionError::Overload)?;
+        Ok(Self {
+            waiting: Arc::clone(waiting),
+        })
+    }
+}
+
+impl Drop for WaitSlot {
+    fn drop(&mut self) {
+        self.waiting.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 /// Capacity reserved for one request body that has not been received yet.
 #[derive(Debug)]
 pub struct ReceiptTicket {
     receipt: ReceiptPermit,
     memory: MemoryReservation,
+    body_cap: usize,
 }
 
 impl ReceiptTicket {
+    /// Most body bytes the reservation covers. Collection must stop at this bound.
+    #[must_use]
+    pub const fn body_cap(&self) -> usize {
+        self.body_cap
+    }
+
     /// Attach the received bytes. The body must fit the reservation made up front.
     ///
     /// # Errors
-    /// [`AdmissionError::InvalidReservation`] if `body` exceeds the reserved units.
+    /// [`AdmissionError::InvalidReservation`] if `body` exceeds the reserved body cap.
     pub fn complete(self, body: Vec<u8>) -> Result<ReceivedRequest, AdmissionError> {
-        let fits = u32::try_from(body.len()).is_ok_and(|len| len <= self.memory.units());
-        if !fits {
+        if body.len() > self.body_cap {
             return Err(AdmissionError::InvalidReservation);
         }
         Ok(ReceivedRequest {
@@ -265,7 +475,6 @@ impl ReceivedRequest {
 
     /// Split into the memory reservation (which the next state must keep alive for as
     /// long as any derived buffer lives) and the receipt permit; the body is dropped.
-    #[expect(dead_code, reason = "consumed by #18/#19 when validation succeeds")]
     pub(crate) fn into_reservation(self) -> (MemoryReservation, ReceiptPermit) {
         (self.memory, self.receipt)
     }

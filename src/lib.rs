@@ -11,6 +11,7 @@
 
 pub mod admission;
 pub mod boundary;
+pub mod chat_route;
 pub mod cli;
 pub mod config;
 pub mod core_bridge;
