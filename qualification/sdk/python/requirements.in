@@ -1,0 +1,5 @@
+# Top-level pin for the Python SDK qualification (ADR 0020). The fully pinned, hash-locked
+# set is requirements.txt (regenerate with the command in its header). The openai version
+# here must equal the one in examples/python/requirements.in and the Node SDK's major
+# line is tracked separately in qualification/sdk/node/package.json.
+openai==3.24.0

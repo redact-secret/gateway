@@ -19,6 +19,50 @@ updates:
     commit-message:
       prefix: "deps"
 
+  # Pinned SDK qualification and example dependencies (ADR 0020). The `openai` SDK itself is
+  # ignored: its version is an explicit qualification decision (examples and qualification must
+  # stay equal, and tests/shipped_examples.rs checks that). Everything else, including the
+  # transitive hash-locked Python set and the dev tooling, gets reviewable update PRs.
+  - package-ecosystem: npm
+    directory: /qualification/sdk/node
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
+    ignore:
+      - dependency-name: "openai"
+
+  - package-ecosystem: npm
+    directory: /examples/node
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
+    ignore:
+      - dependency-name: "openai"
+
+  - package-ecosystem: pip
+    directory: /qualification/sdk/python
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
+    ignore:
+      - dependency-name: "openai"
+
+  - package-ecosystem: pip
+    directory: /examples/python
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
+    ignore:
+      - dependency-name: "openai"
+
   - package-ecosystem: cargo
     directory: /
     schedule:
