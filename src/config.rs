@@ -658,6 +658,9 @@ const MAX_RESPONSE_CEILING: u32 = 64 * 1024 * 1024;
 /// Ceiling for the stream idle and lifetime deadlines (#21): one hour. Infinite streams
 /// are a non-goal.
 const MAX_STREAM_LIFETIME_MS: u32 = 3_600_000;
+/// Ceiling for the accepted-connection bound (#40): the size of the per-process file
+/// descriptor space a deployment can reasonably be given.
+const MAX_CONNECTIONS_CEILING: u32 = 65_536;
 /// Ceiling for the per-stream relay buffer (#21).
 const MAX_STREAM_BUFFER_CEILING: u32 = 16 * 1024 * 1024;
 /// Ceiling for `resources.capacity.stream` times `stream_buffer_bytes` (#21): the most
@@ -686,6 +689,7 @@ fn parse_limits(obj: &Obj<'_>) -> Result<RequestLimits, ConfigError> {
         "stream_lifetime_ms",
         "stream_write_stall_ms",
         "stream_buffer_bytes",
+        "max_connections",
     ])?;
     let mut limits = RequestLimits::provisional();
     let read = |key: &str, loc: &'static str, lo: u32, hi: u32, slot: &mut u32| {
@@ -819,6 +823,13 @@ fn parse_limits(obj: &Obj<'_>) -> Result<RequestLimits, ConfigError> {
         1,
         MAX_STREAM_BUFFER_CEILING,
         &mut limits.stream_buffer_bytes,
+    )?;
+    read(
+        "max_connections",
+        "resources.limits.max_connections",
+        1,
+        MAX_CONNECTIONS_CEILING,
+        &mut limits.max_connections,
     )?;
     // The idle deadline is part of the stream's lifetime: an idle deadline beyond the
     // lifetime could never fire.
@@ -1039,6 +1050,10 @@ mod tests {
         let plan = parse(with(r#"{"max_body_bytes": 2048, "admission_wait_ms": 0}"#).as_bytes())
             .expect("valid limits");
         assert_eq!(plan.resources().limits().max_body_bytes, 2048);
+        // The connection bound (#40) is finite by default and bounded when set.
+        assert_eq!(RequestLimits::provisional().max_connections, 256);
+        let capped = parse(with(r#"{"max_connections": 65536}"#).as_bytes()).expect("ceiling");
+        assert_eq!(capped.resources().limits().max_connections, 65_536);
         assert_eq!(plan.resources().limits().admission_wait_ms, 0);
         let plan = parse(
             with(r#"{"upstream_header_ms": 1000, "upstream_total_ms": 1000, "shutdown_drain_ms": 0}"#)
@@ -1077,6 +1092,9 @@ mod tests {
             r#"{"stream_write_stall_ms": 600001}"#,
             r#"{"stream_buffer_bytes": 0}"#,
             r#"{"stream_buffer_bytes": 16777217}"#,
+            r#"{"max_connections": 0}"#,
+            r#"{"max_connections": 65537}"#,
+            r#"{"max_connections": "8"}"#,
             // The idle deadline is part of the lifetime.
             r#"{"stream_idle_ms": 2000, "stream_lifetime_ms": 1000}"#,
             // The header deadline is part of the total.

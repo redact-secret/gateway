@@ -1,6 +1,6 @@
 # ADR 0019: Request-head guard and one request per connection
 
-Status: Accepted; implemented (#25). Implements the Alpha 1 minimum slice of the "slowloris on headers" and "`Content-Length` with `Transfer-Encoding` is invisible to the handler" known gaps recorded by #24 and #21. Wider transport hardening (connection-count limits, per-peer limits, header-size measurement, HTTP/2 policy) remains #10 (Alpha 2). Date: 2026-10-02. Amended by [ADR 0021](0021-framing-ambiguity-parser-level-investigation.md) (#43): the guard now answers an ambiguous head with a local `400 malformed_input` (and an over-long head with `431`) instead of closing silently; the "no response" statements below describe the original decision. The pinned stack cannot expose the ambiguity itself (evidence in ADR 0021).
+Status: Accepted; implemented (#25). Implements the Alpha 1 minimum slice of the "slowloris on headers" and "`Content-Length` with `Transfer-Encoding` is invisible to the handler" known gaps recorded by #24 and #21. Wider transport hardening (connection-count limits, per-peer limits, header-size measurement, HTTP/2 policy) remains #10 (Alpha 2). Date: 2026-10-02. Amended by [ADR 0022](0021-framing-ambiguity-parser-level-investigation.md) (#43): the guard now answers an ambiguous head with a local `400 malformed_input` (and an over-long head with `431`) instead of closing silently; the "no response" statements below describe the original decision. The pinned stack cannot expose the ambiguity itself (evidence in ADR 0021).
 
 ## Context
 
@@ -26,7 +26,7 @@ The route's own header limits (16 KiB total, 8 KiB per value, `431`) are applied
 
 - It is a structural check on two framing fields, not a general HTTP parser and not a proof against all request smuggling. Other differences between a front proxy and hyper (header-name tokenization, line-ending leniency, `Transfer-Encoding` obfuscation that both treat as unknown) remain the operator's to eliminate by not placing a non-validating intermediary in front of the gateway, or by using one that rejects ambiguous requests (see the control map).
 - A rejected-by-guard request gets **no response**. A client sees a closed connection, not a `400`. This is the price of acting before the parser; a gateway-written `400` would require either a second parser or parsing the head twice. SDKs generally surface it as a connection error; their retry behavior is SDK-specific and is qualified in #22, and the control map lists it.
-- It does not limit the number of concurrent connections. An attacker who can open many sockets still consumes file descriptors and a connection task each until the head deadline closes them. Connection-count and per-peer limits are tracked for #10.
+- (Superseded by #40, [ADR 0022](0022-connection-bound-at-accept.md): the connection count is now bounded at accept.) It did not limit the number of concurrent connections. An attacker who can open many sockets still consumes file descriptors and a connection task each until the head deadline closes them. Connection-count and per-peer limits are tracked for #10.
 - HTTP/2 is not enabled (`http1` only); the guard is HTTP/1 specific.
 - The 16 KiB / 8 KiB header bounds and the 64 KiB hold bound are not measured values (ADR 0008).
 

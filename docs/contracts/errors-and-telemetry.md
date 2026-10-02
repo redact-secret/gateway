@@ -108,6 +108,8 @@ SDK retry implications (verified in #22, see "SDK retry guidance"). The OpenAI P
 
 Content coding: the Gateway requests `Accept-Encoding: identity` and does not decode. A provider response with any other `Content-Encoding` cannot be relayed faithfully (the coding header is not relayed) and is `upstream_invalid_response`.
 
+Connection bound (#40, [ADR 0022](../decisions/0022-connection-bound-at-accept.md)). A connection that arrives while `resources.limits.max_connections` connections are open is closed at accept: no status, no body, no error code, because nothing has been read and nothing is written. The caller sees a closed or reset connection (an SDK `APIConnectionError`, retried by default like any connection error). This is not the `overload` of request admission, which is a `503` after a complete request head; the two bounds are independent. Health probes at the bound are refused the same way. There is no refusal counter or log yet.
+
 Cancellation and shutdown. When the caller disconnects, the request future is dropped: any wait, inspection await, or upstream exchange is cancelled, the connection to the provider is closed, and the memory reservation and permits are released. Bytes already written to the provider cannot be retracted, so a cancelled request may still have been received (and acted on) by the provider. At shutdown the Gateway stops accepting, reports not ready, and drains for at most `shutdown_drain_ms`; remaining in-flight requests are then cancelled the same way (answering `503 not_ready` if the caller is still connected) and `serve` returns without waiting further than a one-second grace.
 
 ## SSE streams (#21; [ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md))
