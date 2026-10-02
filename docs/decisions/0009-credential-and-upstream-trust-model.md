@@ -54,7 +54,7 @@ Misconfigured or disallowed destination fails at startup. A disallowed header, q
 
 ## Verification
 
-Fake-upstream tests record headers and destinations. Redirect, TLS, proxy-environment, and address-policy tests landed with #23 (ADR 0013); credential-isolation and header tests land with #24/#25.
+Fake-upstream tests record headers and destinations. Redirect, TLS, proxy-environment, and address-policy tests landed with #23 (ADR 0013); credential-isolation and header tests landed with #24 ([contract](../contracts/headers-and-credentials.md), [ADR 0016](0016-header-allowlists-and-request-local-credentials.md)); #25 adds routing tests.
 
 ## Deferred measured choices
 

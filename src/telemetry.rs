@@ -21,6 +21,9 @@ pub enum SafeCode {
     /// The request passed admission and validation, but forwarding does not exist yet
     /// (until #19/#20). Never forwarded; replaced by the real outcome when wired.
     NotImplemented,
+    /// The caller supplied no usable provider `Authorization` (#24). Distinct from every
+    /// local-authentication outcome (Beta 1 #12): this credential is the provider's.
+    MissingCredential,
 }
 
 impl SafeCode {
@@ -37,6 +40,7 @@ impl SafeCode {
             Self::InvalidConfig => "invalid_config",
             Self::NotReady => "not_ready",
             Self::NotImplemented => "not_implemented",
+            Self::MissingCredential => "missing_credential",
         }
     }
 }

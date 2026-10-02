@@ -8,9 +8,30 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-/// Build a `POST` request with a `Content-Length` body.
+/// Synthetic provider credential added by [`post`] and [`post_chunked`] when the caller
+/// supplies no `Authorization` header (#24 requires one on the Chat Completions route).
+/// Obviously fake and revoked-looking; never a real key.
+pub const DEFAULT_SYNTHETIC_AUTH: &str = "Bearer sk-SYNTHETIC-REVOKED-DEFAULT-NOT-A-KEY";
+
+/// Build a `POST` request with a `Content-Length` body. An `Authorization` header is added
+/// unless `headers` already names one; use [`post_exact`] to send exactly `headers`.
 #[must_use]
 pub fn post(path: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
+    if headers
+        .iter()
+        .any(|(n, _)| n.eq_ignore_ascii_case("authorization"))
+    {
+        return post_exact(path, headers, body);
+    }
+    let mut with_auth = headers.to_vec();
+    with_auth.push(("Authorization", DEFAULT_SYNTHETIC_AUTH));
+    post_exact(path, &with_auth, body)
+}
+
+/// Build a `POST` request with exactly the given headers (plus `Host`, `Connection:
+/// close`, and a `Content-Length` for `body`).
+#[must_use]
+pub fn post_exact(path: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
     let mut out = format!(
         "POST {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
@@ -28,7 +49,7 @@ pub fn post(path: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
 #[must_use]
 pub fn post_chunked(path: &str, chunks: &[&[u8]]) -> Vec<u8> {
     let mut bytes = format!(
-        "POST {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\n"
+        "POST {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nTransfer-Encoding: chunked\r\nAuthorization: {DEFAULT_SYNTHETIC_AUTH}\r\n\r\n"
     )
     .into_bytes();
     for chunk in chunks {

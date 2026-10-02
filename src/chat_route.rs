@@ -16,8 +16,9 @@
 //!    ([`Inspection::inspect_and_approve`], #19); any failure is a fixed local rejection.
 //!
 //! An approved request still ends in a local `not_implemented` rejection: forwarding (#20)
-//! does not exist, so no byte of any request is ever sent upstream. This module holds no HTTP client and never imports the
-//! transport module.
+//! does not exist, so no byte of any request is ever sent upstream. This module holds no HTTP client. It imports
+//! only the pure inbound header vetting function of the transport module (#24), whose
+//! request-local credential result is carried on [`Admitted`].
 //!
 //! Every rejection closes the connection (`Connection: close`): a body that was not read
 //! must not be parsed as the next request. Responses are fixed strings and contain no
@@ -44,6 +45,7 @@ use crate::core_bridge::CoreBridgeError;
 use crate::protocol::chat::ChatRequest;
 use crate::protocol::{self, Protocol, ProtocolError, ValidatedRequest};
 use crate::telemetry::SafeCode;
+use crate::transport::headers::{HeaderReject, VettedHeaders, vet_inbound};
 
 /// The one exact route served by this module.
 pub const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
@@ -78,6 +80,14 @@ pub enum Reject {
     NotImplemented,
     /// Inspection or approval failed (fail closed; see [`BoundaryError`]).
     Inspection(BoundaryError),
+    /// No usable provider `Authorization` header (#24).
+    MissingCredential,
+    /// Duplicate or malformed `Authorization`, organization/project, or `Connection` (#24).
+    Header,
+    /// Request headers over the byte limits (#24).
+    HeaderTooLarge,
+    /// `Expect` other than `100-continue` (#24).
+    Expectation,
 }
 
 impl Reject {
@@ -107,6 +117,13 @@ impl Reject {
                 SafeCode::Overload => (StatusCode::SERVICE_UNAVAILABLE, SafeCode::Overload),
                 code => (StatusCode::INTERNAL_SERVER_ERROR, code),
             },
+            Self::MissingCredential => (StatusCode::UNAUTHORIZED, SafeCode::MissingCredential),
+            Self::Header => (StatusCode::BAD_REQUEST, SafeCode::MalformedInput),
+            Self::HeaderTooLarge => (
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+                SafeCode::LimitExceeded,
+            ),
+            Self::Expectation => (StatusCode::EXPECTATION_FAILED, SafeCode::UnsupportedInput),
         }
     }
 }
@@ -130,9 +147,23 @@ impl IntoResponse for Reject {
             Self::Overload | Self::Inspection(BoundaryError::Core(CoreBridgeError::Overload)) => {
                 headers.insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
             }
+            Self::MissingCredential => {
+                headers.insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+            }
             _ => {}
         }
         response
+    }
+}
+
+impl From<HeaderReject> for Reject {
+    fn from(error: HeaderReject) -> Self {
+        match error {
+            HeaderReject::MissingCredential => Self::MissingCredential,
+            HeaderReject::TooLarge => Self::HeaderTooLarge,
+            HeaderReject::Expectation => Self::Expectation,
+            _ => Self::Header,
+        }
     }
 }
 
@@ -161,9 +192,17 @@ impl From<ProtocolError> for Reject {
 pub struct Admitted {
     validated: ValidatedRequest,
     route: RouteId,
+    /// Request-local provider credential and reviewed metadata (#24). Taken by #20.
+    headers: Option<VettedHeaders>,
 }
 
 impl Admitted {
+    /// Take the request-local vetted headers (provider credential, organization/project)
+    /// for outbound wire construction. Returns `None` the second time.
+    pub const fn take_headers(&mut self) -> Option<VettedHeaders> {
+        self.headers.take()
+    }
+
     #[must_use]
     pub const fn validated(&self) -> &ValidatedRequest {
         &self.validated
@@ -288,6 +327,7 @@ impl ChatRoute {
     pub async fn admit(&self, request: Request) -> Result<Admitted, Reject> {
         let (parts, body) = request.into_parts();
         let declared = self.check_head(&parts)?;
+        let headers = vet_inbound(&parts.headers)?;
         let cap = declared.map_or(self.max_body, |d| d.min(self.max_body));
         // Reserve before the first body byte is touched.
         // A reservation that can never fit (zero effective cap) is `TooLarge`, a busy
@@ -305,6 +345,7 @@ impl ChatRoute {
         Ok(Admitted {
             validated,
             route: self.route.clone(),
+            headers: Some(headers),
         })
     }
 
@@ -503,6 +544,10 @@ mod tests {
             Reject::Inspection(BoundaryError::Core(CoreBridgeError::Blocked)),
             Reject::Inspection(BoundaryError::Core(CoreBridgeError::Incomplete)),
             Reject::Inspection(BoundaryError::Core(CoreBridgeError::Overload)),
+            Reject::MissingCredential,
+            Reject::Header,
+            Reject::HeaderTooLarge,
+            Reject::Expectation,
         ] {
             let (status, code) = reject.status_and_code();
             assert!(status.is_client_error() || status.is_server_error());

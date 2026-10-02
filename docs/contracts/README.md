@@ -9,7 +9,8 @@ Normative rules for interfaces and behavior. Each contract has a status line tha
 - [resource-limits](resource-limits.md)
 - [errors-and-telemetry](errors-and-telemetry.md)
 - [upstream-destinations](upstream-destinations.md)
+- [headers-and-credentials](headers-and-credentials.md)
 
-Credential and upstream trust is recorded in [ADR 0009](../decisions/0009-credential-and-upstream-trust-model.md); destination and client policy in [ADR 0013](../decisions/0013-fixed-https-destinations-and-outbound-authority.md); Chat Completions admission and limits in [ADR 0014](../decisions/0014-chat-completions-admission.md).
+Credential and upstream trust is recorded in [ADR 0009](../decisions/0009-credential-and-upstream-trust-model.md); destination and client policy in [ADR 0013](../decisions/0013-fixed-https-destinations-and-outbound-authority.md); Chat Completions admission and limits in [ADR 0014](../decisions/0014-chat-completions-admission.md); header allowlists and request-local credentials in [ADR 0016](../decisions/0016-header-allowlists-and-request-local-credentials.md).
 
 A contract-changing PR updates the contract and its ADR together.

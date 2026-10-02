@@ -12,9 +12,11 @@
 //! client has redirects off, no proxy (inherited environment ignored), HTTPS-only, verified
 //! certificates and hostnames (no toggle exists), and resolves names only through the
 //! address-policy resolver ([`resolver`]). It carries no default headers, so credentials
-//! stay request-local. Forwarding of request bodies is #20; `forward` is still a stub.
+//! stay request-local ([`credential`], [`headers`]; #24). Forwarding of request bodies is #20; `forward` is still a stub.
 
+pub mod credential;
 pub mod destination;
+pub mod headers;
 pub mod resolver;
 
 use std::fmt;
@@ -136,6 +138,30 @@ impl Upstream {
     pub fn post(&self, route: &RouteId) -> Result<reqwest::RequestBuilder, TransportError> {
         let d = self.destination(route)?;
         Ok(self.client.post(d.url().clone()))
+    }
+
+    /// The vetted request for `request`: the route's fixed method and URL, the complete
+    /// regenerated header set ([`headers::wire_headers`]), and the sealed body, with
+    /// `Content-Length` computed from exactly those bytes. Consumes the request-local
+    /// [`headers::VettedHeaders`] so the credential cannot outlive the request or be reused
+    /// for a retry (there are none). `Host` comes from the reviewed URL only.
+    ///
+    /// The body is copied once from the sealed buffer; the caller keeps the
+    /// [`SanitizedRequest`] (and its memory reservation) alive until the send completes.
+    ///
+    /// # Errors
+    /// [`TransportError::UnknownRoute`] for any id outside the static table.
+    pub fn outbound(
+        &self,
+        headers: headers::VettedHeaders,
+        request: &SanitizedRequest,
+    ) -> Result<reqwest::RequestBuilder, TransportError> {
+        let body = request.body();
+        let wire = headers::wire_headers(headers, body.len());
+        Ok(self
+            .post(request.route())?
+            .headers(wire)
+            .body(body.to_vec()))
     }
 
     /// The only forwarding entry point. Accepts only the sealed [`SanitizedRequest`].

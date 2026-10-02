@@ -124,7 +124,7 @@ jobs:
           base="http://127.0.0.1:8787"
           test "$(curl -s -o /dev/null -w '%{http_code}' "$base/healthz")" = 200
           test "$(curl -s -o /dev/null -w '%{http_code}' "$base/readyz")" = 200
-          code="$(curl -s -o proxy.out -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/v1/chat/completions")"
+          code="$(curl -s -o proxy.out -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer sk-SYNTHETIC-REVOKED-CI-NOT-A-KEY' -d '{}' "$base/v1/chat/completions")"
           test "$code" = 422
           grep -q unsupported_input proxy.out
           kill -TERM "$pid"

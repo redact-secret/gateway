@@ -29,6 +29,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0013](0013-fixed-https-destinations-and-outbound-authority.md) | Fixed HTTPS destinations and outbound authority | Accepted (design); implemented (destination, client, address policy); body forwarding planned | #23 |
 | [0014](0014-chat-completions-admission.md) | Chat Completions request admission and provisional limits | Accepted; implemented (admission, strict budgeted parse, field matrix); forwarding planned | #18 |
 | [0015](0015-core-inspection-and-request-transformation.md) | Core inspection and validated request transformation | Accepted; implemented (inspection, Block/Warn policy, fresh bounded serialization, approval); forwarding planned | #19 |
+| [0016](0016-header-allowlists-and-request-local-credentials.md) | Header allowlists and request-local provider credentials | Accepted; implemented (inbound vetting, credential type, wire headers); sending/relay planned | #24 |
 
 ## Contracts
 
@@ -41,6 +42,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [resource-limits](../contracts/resource-limits.md) | Resource-limit categories; provisional request limits and memory composition |
 | [errors-and-telemetry](../contracts/errors-and-telemetry.md) | Safe error code taxonomy and telemetry exclusions |
 | [upstream-destinations](../contracts/upstream-destinations.md) | Fixed HTTPS destinations, client hardening, address policy, test-seam isolation |
+| [headers-and-credentials](../contracts/headers-and-credentials.md) | Header allowlists, request-local provider credential, framing, response headers, reserved local authority |
 
 ## Template
 

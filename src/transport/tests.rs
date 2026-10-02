@@ -48,6 +48,11 @@ use crate::protocol::ValidatedRequest;
 #[path = "../../tests/support/fake_upstream.rs"]
 mod fake_upstream;
 
+#[path = "../../tests/support/leak.rs"]
+#[allow(dead_code)]
+mod leak;
+mod wire_tests;
+
 use fake_upstream::{Behavior, FakeUpstream};
 
 const ROUTE: &str = "test.route";
