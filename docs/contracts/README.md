@@ -7,7 +7,8 @@ Normative rules for interfaces and behavior. Each contract has a status line tha
 - [field-classification](field-classification.md)
 - [resource-limits](resource-limits.md)
 - [errors-and-telemetry](errors-and-telemetry.md)
+- [upstream-destinations](upstream-destinations.md)
 
-Credential and upstream trust is recorded in [ADR 0009](../decisions/0009-credential-and-upstream-trust-model.md).
+Credential and upstream trust is recorded in [ADR 0009](../decisions/0009-credential-and-upstream-trust-model.md); destination and client policy in [ADR 0013](../decisions/0013-fixed-https-destinations-and-outbound-authority.md).
 
 A contract-changing PR updates the contract and its ADR together.

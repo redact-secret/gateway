@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/fail_post_with_url_string.rs:5:27
+  |
+5 |     let _ = upstream.post(caller_url);
+  |                      ---- ^^^^^^^^^^ expected `&RouteId`, found `&str`
+  |                      |
+  |                      arguments to this method are incorrect
+  |
+  = note: expected reference `&RouteId`
+             found reference `&str`
+note: method defined here
+ --> src/transport.rs
+  |
+  |     pub fn post(&self, route: &RouteId) -> Result<reqwest::RequestBuilder, TransportError> {
+  |            ^^^^

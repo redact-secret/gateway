@@ -55,7 +55,7 @@ fn module_authority_direction_holds() {
     for path in files {
         let text = fs::read_to_string(&path).expect("read source");
         let name = path.to_string_lossy();
-        let in_transport = name.ends_with("src/transport.rs");
+        let in_transport = name.ends_with("src/transport.rs") || name.contains("src/transport/");
         let in_protocol = name.contains("src/protocol/");
         // Strip comment lines so documentation can mention the names.
         let code: String = text

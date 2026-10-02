@@ -1,6 +1,6 @@
 # Configuration and CLI (skeleton)
 
-Status: implemented for the loopback health skeleton (#4). Governing decisions: [ADR 0006](decisions/0006-runtime-plan-and-authority-separation.md), [ADR 0009](decisions/0009-credential-and-upstream-trust-model.md). Proxy routes, upstream origins, TLS, and credential rules are **planned** (#8, #23-#25) and are not part of this schema yet.
+Status: implemented for the loopback health skeleton (#4). Governing decisions: [ADR 0006](decisions/0006-runtime-plan-and-authority-separation.md), [ADR 0009](decisions/0009-credential-and-upstream-trust-model.md). The upstream provider profile is implemented (#23, [ADR 0013](decisions/0013-fixed-https-destinations-and-outbound-authority.md), [contract](contracts/upstream-destinations.md)); proxy routes, credential rules, and body forwarding are **planned** (#8, #20, #24, #25).
 
 ## CLI
 
@@ -35,6 +35,7 @@ Configuration is static: it is read once at startup and restart-activated. There
 | `schema_version` | n/a | Required; must equal `1`. Checked before anything else. |
 | `deployment.listener.address` | deployment | Required IP-literal socket address (no hostnames). Port 0 asks the OS for a free port. |
 | `deployment.listener.allow_non_loopback` | deployment | Optional boolean, default `false`. A non-loopback address is rejected unless this is `true`. Setting it `true` on a loopback address is also rejected. Non-loopback exposure is **not a supported deployment** (ADR 0009); the flag only acknowledges that. |
+| `deployment.upstream.provider` | deployment | Optional object `{"provider": "openai"}`; when present `provider` is required and must be a reviewed profile name (`openai`, exact case). It fixes the HTTPS origin `https://api.openai.com`, port 443, and route `openai.chat_completions` (`POST /v1/chat/completions`). No other key is accepted (no URL, host, port, proxy, TLS, or test field). Absent means no upstream is configured and no route exists. Additive to `schema_version` 1 (unreleased build). |
 | `content.profile` | content | Required; a profile name the pinned core accepts (`full`, `common`). Cannot change the listener, origins, TLS, or credential rules. |
 | `resources.capacity.{receipt,memory_units,inspection,upstream,stream}` | resource | Each required, integer in `1..=4294967295`. There are no defaults; measured values are owed by ADR 0008. Deadlines and the remaining limit categories in `docs/contracts/resource-limits.md` are planned. |
 

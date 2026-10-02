@@ -1,0 +1,11 @@
+error[E0599]: no associated function or constant named `for_test_http` found for struct `Origin` in the current scope
+ --> tests/ui/fail_origin_test_http.rs:6:21
+  |
+6 |     let _ = Origin::for_test_http(addr);
+  |                     ^^^^^^^^^^^^^ associated function or constant not found in `Origin`
+  |
+note: if you're trying to build a new `Origin`, consider using `Origin::parse` which returns `Result<Origin, OriginError>`
+ --> src/transport/destination.rs
+  |
+  |     pub fn parse(input: &str) -> Result<Self, OriginError> {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

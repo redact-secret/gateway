@@ -1,6 +1,6 @@
 # ADR 0009: Credential and upstream trust model
 
-Status: Accepted (design). Implementation status: planned. Companion to ARCHITECTURE.md "Deployment and trust assumptions" and "Credentials and outbound routing".
+Status: Accepted (design). Implementation status: upstream destination, client, and address policy implemented in #23 ([ADR 0013](0013-fixed-https-destinations-and-outbound-authority.md)); header and credential handling planned (#24, #25). Companion to ARCHITECTURE.md "Deployment and trust assumptions" and "Credentials and outbound routing".
 
 ## Context
 
@@ -54,7 +54,7 @@ Misconfigured or disallowed destination fails at startup. A disallowed header, q
 
 ## Verification
 
-Fake-upstream tests record headers and destinations. Redirect and SSRF tests land with the routing issues.
+Fake-upstream tests record headers and destinations. Redirect, TLS, proxy-environment, and address-policy tests landed with #23 (ADR 0013); credential-isolation and header tests land with #24/#25.
 
 ## Deferred measured choices
 

@@ -78,8 +78,8 @@ impl Services {
     ///
     /// # Errors
     /// [`StartupError::Init`] when the transport client cannot be built.
-    pub fn init(_plan: &RuntimePlan) -> Result<Self, StartupError> {
-        let upstream = Upstream::new().map_err(|_| StartupError::Init)?;
+    pub fn init(plan: &RuntimePlan) -> Result<Self, StartupError> {
+        let upstream = Upstream::from_plan(plan).map_err(|_| StartupError::Init)?;
         Ok(Self { upstream })
     }
 }
