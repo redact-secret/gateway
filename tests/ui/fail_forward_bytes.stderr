@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/fail_forward_bytes.rs:4:30
+  |
+4 |     let _ = upstream.forward(body).await;
+  |                      ------- ^^^^ expected `SanitizedRequest`, found `Vec<u8>`
+  |                      |
+  |                      arguments to this method are incorrect
+  |
+  = note: expected struct `SanitizedRequest`
+             found struct `Vec<u8>`
+note: method defined here
+ --> src/transport.rs
+  |
+  |     pub async fn forward(
+  |                  ^^^^^^^

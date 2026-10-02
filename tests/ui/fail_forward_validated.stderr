@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+ --> tests/ui/fail_forward_validated.rs:5:30
+  |
+5 |     let _ = upstream.forward(request).await;
+  |                      ------- ^^^^^^^ expected `SanitizedRequest`, found `ValidatedRequest`
+  |                      |
+  |                      arguments to this method are incorrect
+  |
+note: method defined here
+ --> src/transport.rs
+  |
+  |     pub async fn forward(
+  |                  ^^^^^^^
