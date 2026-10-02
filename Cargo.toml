@@ -2,6 +2,7 @@
 name = "redact-secret-gateway"
 version = "0.1.0-alpha.0"
 edition = "2024"
+license = "MIT"
 rust-version = "1.88"
 description = "RedactSecret Gateway: HTTP deployment and protocol boundary (private binary, unreleased)"
 publish = false

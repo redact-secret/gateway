@@ -100,4 +100,4 @@ Planned, not implemented yet: the core probe (#5) and release builds and images 
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md), [CONVENTIONS.md](CONVENTIONS.md), [CONTRIBUTION.md](CONTRIBUTION.md), and [SECURITY.md](SECURITY.md) before implementation.
 
-The license must be explicitly selected and added before publishing artifacts. This document does not grant a license or copy the core license into the gateway.
+The gateway is licensed under the MIT License; see [LICENSE](LICENSE). Private security reporting must still be verified before publishing artifacts (see [SECURITY.md](SECURITY.md) and ADR 0010).
