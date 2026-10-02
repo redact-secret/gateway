@@ -37,3 +37,6 @@ python/dist/
 reports/
 out/
 .coverage
+
+# Cargo build output
+/target

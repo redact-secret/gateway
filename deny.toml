@@ -1,0 +1,45 @@
+# cargo-deny policy. Run: cargo deny check
+# CI wiring is owned by #6. This file only records the dependency policy (ADR 0011).
+
+[graph]
+all-features = false
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+# Allow list is permissive licenses only. The gateway's own license is an open maintainer
+# decision (ADR 0010); the private workspace crate is exempt until then.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# TLS is rustls with verified certificates only; OpenSSL-family crates are excluded.
+deny = [
+    { crate = "openssl" },
+    { crate = "openssl-sys" },
+    { crate = "native-tls" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

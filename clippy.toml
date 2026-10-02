@@ -1,0 +1,5 @@
+# Panic-free conventions apply to production code; tests may assert freely.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

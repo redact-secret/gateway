@@ -1,0 +1,45 @@
+[package]
+name = "redact-secret-gateway"
+version = "0.1.0-alpha.0"
+edition = "2024"
+rust-version = "1.88"
+description = "RedactSecret Gateway: HTTP deployment and protocol boundary (private binary, unreleased)"
+publish = false
+
+# The library target exists only so the binary and the API-boundary tests share one
+# crate. It is not a published or supported API (ADR 0001, ADR 0011).
+[lib]
+name = "redact_secret_gateway"
+path = "src/lib.rs"
+
+[[bin]]
+name = "redact-secret-gateway"
+path = "src/main.rs"
+
+[dependencies]
+# Exact core pin; see docs/decisions/0011-dependency-and-toolchain-selection.md.
+redact-secret = "=0.1.0-beta.12"
+tokio = { version = "1", default-features = false, features = ["sync"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+serde = { version = "1", default-features = false, features = ["std"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tokio = { version = "1", default-features = false, features = ["rt", "macros"] }
+trybuild = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+# Untrusted-input code must not panic: typed errors only (CONVENTIONS.md).
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+dbg_macro = "deny"
