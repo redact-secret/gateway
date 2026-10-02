@@ -8,9 +8,9 @@ The gateway is in architecture/scaffolding development. No stable release or pro
 
 Do not disclose sensitive exploit details, real credentials, or personal data in a public issue.
 
-Use GitHub's private vulnerability reporting flow for `redact-secret/gateway` if the repository has enabled it. This document does not claim it is enabled. If no private reporting flow is available, contact the maintainer through an already established private channel. If none is known, a public request for a private contact may contain only the request, with no exploit details or sensitive payload.
+Use GitHub's private vulnerability reporting flow for `redact-secret/gateway` (Security tab, "Report a vulnerability"). The GitHub API reported it as enabled when last checked; an end-to-end test report has not yet been recorded. If no private reporting flow is available, contact the maintainer through an already established private channel. If none is known, a public request for a private contact may contain only the request, with no exploit details or sensitive payload.
 
-Enabling and verifying a private reporting channel is a tracked prerequisite before the first distributed alpha. No unverified security email, response SLA, bug bounty, or disclosure deadline is promised here.
+The channel is enabled; verifying it with a test report is a tracked prerequisite before the first distributed alpha. No unverified security email, response SLA, bug bounty, or disclosure deadline is promised here.
 
 Private reports should provide affected versions/commits, deployment assumptions, a synthetic reproduction, expected boundary behavior, observed behavior, and impact. Do not use live credentials to demonstrate a leak.
 
