@@ -37,7 +37,7 @@ flowchart TD
 - Initial JSON and SSE responses are relayed without response-content redaction. Upstream errors can contain sensitive content too; applications must handle responses accordingly.
 - Inspection covers content present in the supported request. It cannot inspect provider-stored content referenced by an ID or recover content already leaked before this boundary.
 
-Gateway use alone does not enforce traffic traversal. Deployments needing mandatory protection must restrict direct application egress separately. Loopback is an address restriction, not caller authentication: any process on the host that can reach the port can call the gateway with its own provider key. Redaction can change model behavior, invalidate examples, or alter application-submitted tool data; applications must validate these effects.
+Gateway use alone does not enforce traffic traversal. Deployments needing mandatory protection must restrict direct application egress separately. A procedure and recorded evidence for that control, for a gateway behind a TLS-intercepting proxy, and for an HTTP intermediary in front of the gateway are in the [deployment-chain evidence](docs/qualification/deployment-chain-evidence.md) (executed for the Docker companion shape; Kubernetes is documented only). Loopback is an address restriction, not caller authentication: any process on the host that can reach the port can call the gateway with its own provider key. Redaction can change model behavior, invalidate examples, or alter application-submitted tool data; applications must validate these effects.
 
 ## What works today and what is planned
 

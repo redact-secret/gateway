@@ -79,6 +79,7 @@ record_environment() {
     echo "docker_os: $(docker info --format '{{.OperatingSystem}}')"
     echo "docker_storage_driver: $(docker info --format '{{.Driver}}')"
     echo "gateway_commit: ${GITHUB_SHA:-$(/usr/bin/git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
+    echo "pr_head_commit: ${EVIDENCE_HEAD_SHA:-n/a}"
     echo "core_pin: $(awk '/^name = "redact-secret"$/ {getline; print "redact-secret " $3}' "$REPO_ROOT/Cargo.lock" | tr -d '"')"
     echo "gateway_image: $gimage"
     echo "gateway_image_id: $(docker image inspect --format '{{.Id}}' "$gimage")"
