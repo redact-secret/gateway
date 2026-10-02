@@ -18,7 +18,8 @@ here="$(cd "$(dirname "$0")" && pwd)"
 
 commit="$(git rev-parse HEAD)"
 dirty=false
-[ -z "$(git status --porcelain)" ] || dirty=true
+# Tracked changes only: the bundle and stage directories the workflow creates are untracked.
+[ -z "$(git status --porcelain --untracked-files=no)" ] || dirty=true
 
 channel="$(awk -F'"' '/^channel *=/ {print $2}' rust-toolchain.toml)"
 rustc_v="$(rustc --version)"

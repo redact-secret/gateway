@@ -22,9 +22,9 @@ cid="$(docker create "$image")"
 docker cp "$cid:/usr/local/bin/redact-secret-gateway" "$out/binary-from-image"
 docker rm "$cid" >/dev/null
 got_sha="$(sha256_of "$out/binary-from-image")"
+echo "binary sha256 in image: $got_sha" | tee "$out/image-smoke.txt"
 sh "$here/check-no-qualification-seam.sh" "$out/binary-from-image" | tee -a "$out/image-smoke.txt"
 rm -f "$out/binary-from-image"
-echo "binary sha256 in image: $got_sha" | tee "$out/image-smoke.txt"
 test "$got_sha" = "$want_sha"
 
 # 2. Non-root by image configuration.
