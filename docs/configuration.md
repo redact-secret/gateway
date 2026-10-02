@@ -1,6 +1,6 @@
 # Configuration and CLI (skeleton)
 
-Status: implemented for the loopback health skeleton (#4). Governing decisions: [ADR 0006](decisions/0006-runtime-plan-and-authority-separation.md), [ADR 0009](decisions/0009-credential-and-upstream-trust-model.md). The upstream provider profile is implemented (#23, [ADR 0013](decisions/0013-fixed-https-destinations-and-outbound-authority.md), [contract](contracts/upstream-destinations.md)); proxy routes, credential rules, and body forwarding are **planned** (#8, #20, #24, #25).
+Status: implemented for the loopback health skeleton (#4). Governing decisions: [ADR 0006](decisions/0006-runtime-plan-and-authority-separation.md), [ADR 0009](decisions/0009-credential-and-upstream-trust-model.md). The upstream provider profile is implemented (#23, [ADR 0013](decisions/0013-fixed-https-destinations-and-outbound-authority.md), [contract](contracts/upstream-destinations.md)); credential and header rules are implemented (#24, [contract](contracts/headers-and-credentials.md)); proxy routes and body forwarding are **planned** (#8, #20, #25).
 
 ## CLI
 

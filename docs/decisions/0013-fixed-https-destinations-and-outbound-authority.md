@@ -63,7 +63,7 @@ An unreviewed provider name or a failed constant check fails startup (`Services:
 - The `rustls-platform-verifier` behavior on each OS is trusted; revocation checking follows the platform.
 - Address policy applies at connect time per connection; established keep-alive connections are not re-validated for their lifetime.
 - Resolver latency/timeout values are measured later (ADR 0008); none are invented here.
-- Header allowlist, hop-by-hop and upgrade removal, credential forwarding, and body transmission are #20/#24; this ADR guarantees only that they run on a client that can reach nothing else.
+- Header allowlist, hop-by-hop and upgrade removal, credential forwarding, and body transmission are #20/#24 (header and credential rules landed with #24, [ADR 0016](0016-header-allowlists-and-request-local-credentials.md); transmission is #20); this ADR guarantees only that they run on a client that can reach nothing else.
 
 ## Implementation handoff
 

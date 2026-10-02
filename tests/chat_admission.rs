@@ -276,7 +276,7 @@ async fn compression_and_transfer_codings_are_rejected() {
     for te in ["gzip, chunked", "gzip", "chunked, chunked"] {
         let req = format!(
             "POST {CHAT_COMPLETIONS_PATH} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\
-             Content-Type: application/json\r\nTransfer-Encoding: {te}\r\n\r\n0\r\n\r\n"
+             Content-Type: application/json\r\nAuthorization: Bearer sk-SYNTHETIC-REVOKED-ADM-NOT-A-KEY\r\nTransfer-Encoding: {te}\r\n\r\n0\r\n\r\n"
         );
         let r = gw.send(req.as_bytes()).await;
         assert!(
@@ -292,7 +292,7 @@ async fn compression_and_transfer_codings_are_rejected() {
 #[tokio::test]
 async fn route_method_and_target_are_exact() {
     let gw = Gateway::roomy().await;
-    let ct = "Content-Type: application/json\r\n";
+    let ct = "Content-Type: application/json\r\nAuthorization: Bearer sk-SYNTHETIC-REVOKED-ADM-NOT-A-KEY\r\n";
     for (method, status) in [("GET", 405), ("PUT", 405), ("DELETE", 405), ("PATCH", 405)] {
         let req = format!(
             "{method} {CHAT_COMPLETIONS_PATH} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{ct}\
@@ -385,7 +385,7 @@ async fn malformed_framing_is_rejected() {
     let gw = Gateway::roomy().await;
     let head = format!(
         "POST {CHAT_COMPLETIONS_PATH} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\
-         Content-Type: application/json\r\n"
+         Content-Type: application/json\r\nAuthorization: Bearer sk-SYNTHETIC-REVOKED-ADM-NOT-A-KEY\r\n"
     );
     // Duplicate, mismatched, non-numeric, signed, spaced Content-Length values.
     for lengths in [
@@ -668,6 +668,7 @@ fn request(body: &[u8]) -> Request<Body> {
         .method("POST")
         .uri(CHAT_COMPLETIONS_PATH)
         .header("content-type", "application/json")
+        .header("authorization", "Bearer sk-SYNTHETIC-REVOKED-ADM-NOT-A-KEY")
         .header("content-length", body.len().to_string())
         .body(Body::from(body.to_vec()))
         .unwrap()
@@ -838,7 +839,7 @@ fn one_max_request_units(max_body: u32) -> u32 {
 }
 
 const CHUNKED_HEAD: &str = "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\n\
-    Connection: close\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n";
+    Connection: close\r\nContent-Type: application/json\r\nAuthorization: Bearer sk-SYNTHETIC-REVOKED-ADM-NOT-A-KEY\r\nTransfer-Encoding: chunked\r\n\r\n";
 
 #[tokio::test]
 async fn oversized_declared_length_is_rejected_before_any_body_is_read() {
@@ -851,7 +852,7 @@ async fn oversized_declared_length_is_rejected_before_any_body_is_read() {
     for declared in ["2049", "1073741824", "99999999999999999999999999"] {
         let head = format!(
             "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\
-             Content-Type: application/json\r\nContent-Length: {declared}\r\n\r\n"
+             Content-Type: application/json\r\nAuthorization: Bearer sk-SYNTHETIC-REVOKED-ADM-NOT-A-KEY\r\nContent-Length: {declared}\r\n\r\n"
         );
         // No body byte is ever sent; the answer must not wait for one.
         let started = Instant::now();
@@ -965,7 +966,7 @@ async fn declared_length_larger_than_what_arrives_times_out_and_releases() {
     let units = one_max_request_units(2048);
     let gw = Gateway::start(4, units, &limits_json(2048, 50, 4, 300)).await;
     let head = "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\
-                Content-Type: application/json\r\nContent-Length: 100\r\n\r\n{\"model\"";
+                Content-Type: application/json\r\nAuthorization: Bearer sk-SYNTHETIC-REVOKED-ADM-NOT-A-KEY\r\nContent-Length: 100\r\n\r\n{\"model\"";
     let mut slow = gw.open(head).await;
     let r = gw.read(&mut slow).await;
     expect(&r, 408, "limit_exceeded");
@@ -1077,7 +1078,7 @@ async fn aggregate_budget_smaller_than_the_per_request_limit_clamps_the_body() {
     let declared = max + 1;
     let head = format!(
         "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\
-         Content-Type: application/json\r\nContent-Length: {declared}\r\n\r\n"
+         Content-Type: application/json\r\nAuthorization: Bearer sk-SYNTHETIC-REVOKED-ADM-NOT-A-KEY\r\nContent-Length: {declared}\r\n\r\n"
     );
     expect(&gw.send(head.as_bytes()).await, 413, "limit_exceeded");
     gw.assert_idle().await;

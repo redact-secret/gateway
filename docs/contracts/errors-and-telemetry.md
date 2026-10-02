@@ -1,6 +1,6 @@
 # Contract: safe errors and telemetry
 
-Status: approved categories; code spellings fixed in #4; HTTP status mappings for the Chat Completions admission path fixed in #18 (below). Mappings for transport failures and relayed responses land with #20/#21.
+Status: approved categories; code spellings fixed in #4; HTTP status mappings for the Chat Completions admission path fixed in #18 (below); header and credential outcomes added in #24 ([contract](headers-and-credentials.md)). Mappings for transport failures and relayed responses land with #20/#21.
 
 ## Gateway-owned error categories
 
@@ -14,6 +14,7 @@ Status: approved categories; code spellings fixed in #4; HTTP status mappings fo
 | `transport_failure` | Upstream connect/TLS/transmission failure (skeleton: also listener bind/serve failure at startup) |
 | `invalid_config` | Startup only: static configuration failed validation. Never a request outcome. |
 | `not_ready` | Readiness is false: validated plan or required initialization is missing. |
+| `missing_credential` | No usable provider `Authorization` on a request (#24). The provider credential, not a local-auth result. |
 | `not_implemented` | A request passed admission, validation, inspection, and approval but forwarding does not exist yet (#18/#19; removed when #20 lands). Never forwarded. |
 
 Errors never echo payload fragments, credentials, or offending text. Provider response and error bodies are relayed under the response contract and may contain sensitive data. Document status mappings and SDK-retry implications. After response bytes start, errors cannot change the HTTP status; terminate per the stream error contract without fabricating completion events.
@@ -28,7 +29,7 @@ Health reports liveness. Readiness reports valid plan, initialized core, and abi
 
 ## Implemented in the skeleton (#4)
 
-Spellings are the `as_str()` values of `telemetry::SafeCode` (`malformed_input`, `unsupported_input`, `limit_exceeded`, `incomplete_inspection`, `overload`, `transport_failure`, `invalid_config`, `not_ready`). Gateway-generated bodies are `{"error":{"code":"<code>"}}`.
+Spellings are the `as_str()` values of `telemetry::SafeCode` (`malformed_input`, `unsupported_input`, `limit_exceeded`, `incomplete_inspection`, `overload`, `transport_failure`, `invalid_config`, `not_ready`, `not_implemented`, `missing_credential`). Gateway-generated bodies are `{"error":{"code":"<code>"}}`.
 
 | Situation | Status | Code |
 | --- | --- | --- |
@@ -55,6 +56,10 @@ SDK retry column: the OpenAI Python and Node SDKs retry `408`, `409`, `429`, and
 | Declared or actual body over the limit, or a depth/node/string/count budget exceeded | 413 | `limit_exceeded` | no |
 | Body not received within `body_deadline_ms` | 408 | `limit_exceeded` | yes |
 | Receipt or memory capacity unavailable within `admission_wait_ms`, or wait queue full (`Retry-After: 1`) | 503 | `overload` | yes, after `Retry-After` |
+| No usable provider `Authorization` (`WWW-Authenticate: Bearer`) (#24) | 401 | `missing_credential` | no |
+| Duplicate or malformed `Authorization`, malformed or repeated organization/project, malformed or ambiguous `Connection` (#24) | 400 | `malformed_input` | no |
+| `Expect` other than `100-continue` (#24) | 417 | `unsupported_input` | no |
+| Request headers over the byte limits (#24) | 431 | `limit_exceeded` | no |
 | Admitted and validated; forwarding not implemented yet | 501 | `not_implemented` | yes (5xx) |
 
 After admission, inspection and approval (#19) add these rejections, all local, with no upstream byte and the same fixed body:
