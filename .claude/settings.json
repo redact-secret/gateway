@@ -1,0 +1,75 @@
+{
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-statusline.cjs\"; if [ -f \"$f\" ]; then node \"$f\"; fi"
+  },
+  "subagentStatusLine": {
+    "type": "command",
+    "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-statusline.cjs\"; if [ -f \"$f\" ]; then node \"$f\"; fi"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-hooks.cjs\"; if [ -f \"$f\" ]; then node \"$f\" post-edit; fi",
+            "timeout": 10000
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|mcp__graft__|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-hooks.cjs\"; if [ -f \"$f\" ]; then node \"$f\" tool-savings; fi",
+            "timeout": 8000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-hooks.cjs\"; if [ -f \"$f\" ]; then node \"$f\" prompt; fi",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-hooks.cjs\"; if [ -f \"$f\" ]; then node \"$f\" session-start; fi",
+            "timeout": 8000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-hooks.cjs\"; if [ -f \"$f\" ]; then node \"$f\" stop; fi",
+            "timeout": 8000
+          }
+        ]
+      }
+    ]
+  },
+  "footerLinksRegexes": ["graft/[\\w./-]+\\.md"],
+  "permissions": {
+    "allow": ["Bash(graft:*)", "Bash(npx graft:*)", "Bash(graft-dev:*)", "Bash(node dist/cli.js:*)"]
+  }
+}

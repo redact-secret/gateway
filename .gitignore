@@ -1,0 +1,39 @@
+node_modules/
+dist/
+*.tgz
+*.tsbuildinfo
+
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+python/build/
+python/dist/
+
+.DS_Store
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+# Per-developer agent tooling. graft regenerates its wiring on every session
+# start (hooks and helpers carry machine-local paths), and RTK / local notes
+# are personal. Shared agent rules live in AGENTS.md.
+/.claude/helpers/
+/.claude/settings.local.json
+/.claude/skills/graft/
+# Agent worktrees: a full checkout of this repository nested inside itself.
+# Ignoring it keeps one `git add -A` from committing an entire second copy,
+# and keeps `biome check .` from reporting the nested biome.json as a second
+# root configuration.
+/.claude/worktrees/
+/.mcp.json
+/.rtk/
+/RTK.md
+/CLAUDE.local.md
+
+# Stryker
+.stryker-tmp/
+reports/
+out/
+.coverage

@@ -14,7 +14,7 @@ These conventions govern implementation in `redact-secret/gateway`. Proposed com
 
 Detection belongs in core. Gateway code must not recreate provider token regexes, scoring, PII logic, or detector registries. Protocol field selection, HTTP handling, static routing, resource limits, and deployment belong in Gateway. Core receives no Gateway/network dependency.
 
-Use Rust and the selected asynchronous transport stack. Pin the toolchain and compatible dependency versions after the scaffolding ADR; do not assume the gateway must inherit core's workspace or exact MSRV. Minimize enabled dependency features and audit normal/build dependencies. Define an unsafe-code policy during scaffolding; prefer no unsafe application code.
+Use Rust and the selected asynchronous transport stack. Pin the toolchain and compatible dependency versions after the scaffolding ADR; do not assume the gateway must inherit core's workspace or exact MSRV. Minimize enabled dependency features and audit normal/build dependencies. Unsafe Rust code is prohibited in this repository: enforce it with `#![forbid(unsafe_code)]` in every crate root (or `unsafe_code = "forbid"` under `[workspace.lints.rust]`) and do not add `#[allow(unsafe_code)]`. Dependencies may contain unsafe code; audit them under the dependency rules above.
 
 ## Configuration
 
