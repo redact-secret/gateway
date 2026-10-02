@@ -36,6 +36,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0021](0021-framing-ambiguity-parser-level-investigation.md) | Framing ambiguity at the parser level: investigation and a local 400 | Accepted; implemented (the pinned stack cannot expose the ambiguity; the head guard now answers `400` / `431` itself) | #43 |
 | [0020](0020-sdk-qualification-test-build.md) | SDK qualification through a separate non-release test build | Accepted by the maintainer; implemented (generated crate with a loopback fake provider, dedicated workflow, eight-file allowlist, seam-absence proof on candidate binaries); supersedes the open item in ADR 0017 | #22 |
 | [0022](0022-connection-bound-at-accept.md) | Connection bound enforced at accept time | Accepted; implemented (`max_connections`, immediate close over the bound, slot tied to the connection IO, health not exempt, no per-peer bound); default provisional with a recorded loaded-host measurement | #40 |
+| [0023](0023-header-size-measurement-and-size-classes.md) | Request-head size measurement and the size classes | Accepted; implemented (pinned-SDK header measurement, caps confirmed, field-count and head bounds answered by the head guard, one outcome per size class) |
 
 ## Contracts
 

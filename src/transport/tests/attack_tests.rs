@@ -40,7 +40,7 @@ const EVIL_HOST: &str = "evil.test";
 // ------------------------------------------------------------------------------ harness
 
 /// Serve the route through the production connection handling.
-async fn serve(rig: &Rig) -> (SocketAddr, JoinHandle<()>) {
+pub(super) async fn serve(rig: &Rig) -> (SocketAddr, JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = crate::server::guarded_app(chat_route::mount(
@@ -55,18 +55,18 @@ async fn serve(rig: &Rig) -> (SocketAddr, JoinHandle<()>) {
 }
 
 /// Everything the gateway wrote on one connection.
-struct Wire {
-    bytes: Vec<u8>,
+pub(super) struct Wire {
+    pub(super) bytes: Vec<u8>,
     /// The server closed the connection (EOF or reset) before the read bound.
-    closed: bool,
+    pub(super) closed: bool,
 }
 
 impl Wire {
-    fn text(&self) -> String {
+    pub(super) fn text(&self) -> String {
         String::from_utf8_lossy(&self.bytes).into_owned()
     }
 
-    fn status(&self) -> Option<u16> {
+    pub(super) fn status(&self) -> Option<u16> {
         let text = self.text();
         let rest = text.strip_prefix("HTTP/1.1 ")?;
         rest.get(..3)?.parse().ok()
@@ -81,7 +81,7 @@ impl Wire {
     }
 }
 
-async fn read_all(stream: &mut TcpStream, within: Duration) -> Wire {
+pub(super) async fn read_all(stream: &mut TcpStream, within: Duration) -> Wire {
     let mut bytes = Vec::new();
     let mut buf = [0_u8; 8192];
     let deadline = tokio::time::Instant::now() + within;
@@ -106,7 +106,7 @@ async fn read_all(stream: &mut TcpStream, within: Duration) -> Wire {
 
 /// Write `request`, read until the server closes (bounded generously: closing is driven by
 /// the server's own events, not by this bound).
-async fn exchange(addr: SocketAddr, request: &[u8]) -> Wire {
+pub(super) async fn exchange(addr: SocketAddr, request: &[u8]) -> Wire {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let _ = stream.write_all(request).await;
     read_all(&mut stream, Duration::from_secs(15)).await
@@ -140,7 +140,7 @@ fn keyed_request(
 }
 
 /// A valid request with `Content-Length` framing plus `extra` header lines.
-fn valid_with(extra: &str, body: &str) -> Vec<u8> {
+pub(super) fn valid_with(extra: &str, body: &str) -> Vec<u8> {
     request_with(
         "POST",
         PATH,
@@ -163,7 +163,7 @@ fn json_eq_good(bytes: &[u8]) -> bool {
 
 /// Every header the fake saw is one the gateway builds, `Host` is the reviewed destination
 /// (the fake's own address), and no hostile value or the evil host reached the wire.
-fn assert_wire_is_gateway_built(rig: &Rig, call: &super::fake_upstream::RecordedCall) {
+pub(super) fn assert_wire_is_gateway_built(rig: &Rig, call: &super::fake_upstream::RecordedCall) {
     assert_eq!(call.method, "POST");
     assert_eq!(call.path, PATH);
     let allowed: BTreeSet<&str> = WIRE_HEADER_NAMES.iter().copied().chain(["host"]).collect();
@@ -199,7 +199,7 @@ fn sse_ok() -> Behavior {
     }
 }
 
-fn limits_with(f: impl FnOnce(&mut RequestLimits)) -> RequestLimits {
+pub(super) fn limits_with(f: impl FnOnce(&mut RequestLimits)) -> RequestLimits {
     let mut limits = RequestLimits::provisional();
     f(&mut limits);
     limits
@@ -761,9 +761,13 @@ async fn ambiguous_and_malformed_framing_never_delivers_upstream_bytes() {
             assert_eq!(wire.bytes, AMBIGUOUS_FRAMING_RESPONSE, "{label}");
             answered_by_guard += 1;
         }
-        // A head longer than the guard's hold bound gets the fixed `431`, and only then.
-        if wire.bytes == HEAD_TOO_LARGE_RESPONSE {
-            assert!(bytes.len() > MAX_HEAD_BYTES, "{label}");
+        // The guard's fixed `431` answers exactly the heads it judges over a bound (more
+        // than `MAX_HEAD_BYTES` bytes or `MAX_HEAD_FIELDS` fields), and only those.
+        let verdict = inspect_head(&bytes);
+        let over_bound = matches!(verdict, HeadVerdict::TooLarge | HeadVerdict::TooManyFields)
+            || (verdict == HeadVerdict::Incomplete && bytes.len() > MAX_HEAD_BYTES);
+        assert_eq!(wire.bytes == HEAD_TOO_LARGE_RESPONSE, over_bound, "{label}");
+        if over_bound {
             too_large += 1;
         }
         // Zero connections and zero bytes at the provider, for every refused request.

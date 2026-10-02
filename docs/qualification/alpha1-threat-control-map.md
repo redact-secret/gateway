@@ -129,7 +129,7 @@ Residual risks, none a release blocker for the Alpha 1 minimum slice provided th
 | Risk | Detail | Issue |
 | --- | --- | --- |
 | Unbounded connection count | Bounded at accept since #40 (`max_connections`, provisional default 256, [ADR 0022](../decisions/0022-connection-bound-at-accept.md)); residual: provisional default, no refusal counter, no per-peer bound (loopback peers share an address) | #40 (done), #10 |
-| Header and hold caps unmeasured | 16 KiB / 8 KiB / 64 KiB are conservative choices | #41 |
+| Header and hold caps | Measured against the pinned SDKs and modelled intermediaries and confirmed (16 KiB total, 8 KiB value, 100 fields, 64 KiB head); one outcome per size class, tested on both sides ([ADR 0023](../decisions/0023-header-size-measurement-and-size-classes.md)); residual: intermediary sizes are modelled, not captured | #41 (done) |
 | Every request pays connection setup | `Connection: close` locally and no provider pooling | #42 |
 | Guard is a structural scan | Not a general parser; a guard-rejected client sees a closed connection, not a `400` | #43 |
 | Environment-specific controls untested | Egress, resolver, trust store, intermediaries | #44 |

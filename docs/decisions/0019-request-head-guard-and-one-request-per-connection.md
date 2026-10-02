@@ -28,7 +28,7 @@ The route's own header limits (16 KiB total, 8 KiB per value, `431`) are applied
 - A rejected-by-guard request gets **no response**. A client sees a closed connection, not a `400`. This is the price of acting before the parser; a gateway-written `400` would require either a second parser or parsing the head twice. SDKs generally surface it as a connection error; their retry behavior is SDK-specific and is qualified in #22, and the control map lists it.
 - (Superseded by #40, [ADR 0022](0022-connection-bound-at-accept.md): the connection count is now bounded at accept.) It did not limit the number of concurrent connections. An attacker who can open many sockets still consumes file descriptors and a connection task each until the head deadline closes them. Connection-count and per-peer limits are tracked for #10.
 - HTTP/2 is not enabled (`http1` only); the guard is HTTP/1 specific.
-- The 16 KiB / 8 KiB header bounds and the 64 KiB hold bound are not measured values (ADR 0008).
+- (Measured and confirmed by #41, [ADR 0023](0023-header-size-measurement-and-size-classes.md).) The 16 KiB / 8 KiB header bounds and the 64 KiB hold bound were not measured values (ADR 0008).
 
 ## Owner
 

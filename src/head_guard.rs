@@ -37,14 +37,27 @@ use axum::serve::Listener;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::time::{Sleep, sleep};
 
-/// Largest request head held back for inspection. The route's own header limit is 16 KiB
-/// (`431`); this bound only keeps the held bytes finite for heads that never end.
+/// Largest request head the guard lets through, and the most it ever holds back: the
+/// request line, every header line, and the blank line that ends them. A head over this is
+/// refused with the fixed `431`, whether it ended inside the bound's last read or never
+/// ended, so the outcome does not depend on how the bytes were split across reads. The
+/// route's own limits (16 KiB of header names plus values, 8 KiB per value) are far below
+/// it and answer first for any head the guard lets through. Measured evidence and the
+/// relation between the three numbers: ADR 0023.
 pub(crate) const MAX_HEAD_BYTES: usize = 64 * 1024;
+
+/// Most header fields (lines after the request line) the guard lets through. This is the
+/// HTTP server's own limit (`hyper` 1.x default of 100, which answers an empty `431`
+/// itself); the guard states it so the same fixed `431 limit_exceeded` answers it and a
+/// `hyper` upgrade that changed the default cannot silently change the outcome. The
+/// boundary test at 100 and 101 fields runs through the real server.
+pub(crate) const MAX_HEAD_FIELDS: usize = 100;
 
 const READ_CHUNK: usize = 4096;
 
-/// The complete response written for a head that is still unfinished beyond
-/// [`MAX_HEAD_BYTES`]: `431 limit_exceeded`, as for headers over the route's byte limits.
+/// The complete response written for a head over [`MAX_HEAD_BYTES`] or over
+/// [`MAX_HEAD_FIELDS`] fields: `431 limit_exceeded`, as for headers over the route's byte
+/// limits.
 pub(crate) const HEAD_TOO_LARGE_RESPONSE: &[u8] =
     b"HTTP/1.1 431 Request Header Fields Too Large\r\n\
 Content-Type: application/json\r\n\
@@ -75,6 +88,10 @@ pub(crate) enum HeadVerdict {
     Clean,
     /// `Content-Length` and `Transfer-Encoding` are both present.
     Ambiguous,
+    /// The head ended, but is longer than [`MAX_HEAD_BYTES`].
+    TooLarge,
+    /// More than [`MAX_HEAD_FIELDS`] header fields.
+    TooManyFields,
 }
 
 /// Scan the start of a connection for the head and its framing fields. Line endings are
@@ -86,6 +103,7 @@ pub(crate) fn inspect_head(bytes: &[u8]) -> HeadVerdict {
     let mut in_head = false;
     let mut length = false;
     let mut coding = false;
+    let mut fields = 0_usize;
     loop {
         let Some(end) = rest.iter().position(|b| *b == b'\n') else {
             return HeadVerdict::Incomplete;
@@ -100,6 +118,8 @@ pub(crate) fn inspect_head(bytes: &[u8]) -> HeadVerdict {
             if in_head {
                 return if length && coding {
                     HeadVerdict::Ambiguous
+                } else if bytes.len().saturating_sub(rest.len()) > MAX_HEAD_BYTES {
+                    HeadVerdict::TooLarge
                 } else {
                     HeadVerdict::Clean
                 };
@@ -110,6 +130,10 @@ pub(crate) fn inspect_head(bytes: &[u8]) -> HeadVerdict {
             // The request line.
             in_head = true;
             continue;
+        }
+        fields = fields.saturating_add(1);
+        if fields > MAX_HEAD_FIELDS {
+            return HeadVerdict::TooManyFields;
         }
         let name = line
             .iter()
@@ -316,6 +340,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin> AsyncRead for HeadGuardIo<T> {
                             reject(&mut this.phase, AMBIGUOUS_FRAMING_RESPONSE);
                             continue;
                         }
+                        HeadVerdict::TooLarge | HeadVerdict::TooManyFields => {
+                            reject(&mut this.phase, HEAD_TOO_LARGE_RESPONSE);
+                            continue;
+                        }
                         HeadVerdict::Clean => {}
                         // A truncated head cannot be parsed as a request; hand it over so
                         // the server sees the same end of stream.
@@ -412,6 +440,86 @@ mod tests {
         let mut got = Vec::new();
         io.read_to_end(&mut got).await.unwrap();
         assert_eq!(got, [&head[..], b"bodyPIPELINED"].concat());
+    }
+
+    /// A head of exactly `total` bytes: request line, one padded field, blank line.
+    fn head_of(total: usize) -> Vec<u8> {
+        let prefix = b"POST / HTTP/1.1\r\nX: ";
+        let suffix = b"\r\n\r\n";
+        let pad = total.saturating_sub(prefix.len().saturating_add(suffix.len()));
+        let mut out = prefix.to_vec();
+        out.extend(std::iter::repeat_n(b'a', pad));
+        out.extend_from_slice(suffix);
+        assert_eq!(out.len(), total);
+        out
+    }
+
+    /// `n` header fields after the request line.
+    fn head_with_fields(n: usize) -> Vec<u8> {
+        let mut out = b"POST / HTTP/1.1\r\n".to_vec();
+        for _ in 0..n {
+            out.extend_from_slice(b"X: 1\r\n");
+        }
+        out.extend_from_slice(b"\r\n");
+        out
+    }
+
+    #[test]
+    fn scan_bounds_are_exact_on_both_sides() {
+        // Head length: the bound itself passes, one byte more does not.
+        assert_eq!(inspect_head(&head_of(MAX_HEAD_BYTES)), HeadVerdict::Clean);
+        assert_eq!(
+            inspect_head(&head_of(MAX_HEAD_BYTES + 1)),
+            HeadVerdict::TooLarge
+        );
+        // Bytes after the blank line (a body) are not part of the head.
+        let mut with_body = head_of(MAX_HEAD_BYTES);
+        with_body.extend_from_slice(&[b'b'; 4096]);
+        assert_eq!(inspect_head(&with_body), HeadVerdict::Clean);
+        // Field count: the bound itself passes, one more does not.
+        assert_eq!(
+            inspect_head(&head_with_fields(MAX_HEAD_FIELDS)),
+            HeadVerdict::Clean
+        );
+        assert_eq!(
+            inspect_head(&head_with_fields(MAX_HEAD_FIELDS + 1)),
+            HeadVerdict::TooManyFields
+        );
+        // Detected before the head ends.
+        let mut open = head_with_fields(MAX_HEAD_FIELDS + 1);
+        open.truncate(open.len() - 2);
+        assert_eq!(inspect_head(&open), HeadVerdict::TooManyFields);
+        // Ambiguity is judged first when both apply.
+        let mut both =
+            b"POST / HTTP/1.1\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n".to_vec();
+        both.extend_from_slice(&head_with_fields(MAX_HEAD_FIELDS + 1)[17..]);
+        assert_eq!(inspect_head(&both), HeadVerdict::Ambiguous);
+    }
+
+    /// The outcome for a head over the bound does not depend on how its bytes were split
+    /// across reads: a head that ends within the last read of the bound is refused, one at
+    /// the bound is released byte-exact.
+    #[tokio::test]
+    async fn the_head_bound_does_not_depend_on_read_splitting() {
+        for (total, refused) in [(MAX_HEAD_BYTES, false), (MAX_HEAD_BYTES + 1, true)] {
+            let head = head_of(total);
+            let (near, mut far) = duplex(256 * 1024);
+            let mut io = HeadGuardIo::new(near, Duration::from_secs(30));
+            far.write_all(&head).await.unwrap();
+            if refused {
+                let error = io.read(&mut [0_u8; 8]).await.unwrap_err();
+                assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                drop(io);
+                let mut answer = Vec::new();
+                far.read_to_end(&mut answer).await.unwrap();
+                assert_eq!(answer, HEAD_TOO_LARGE_RESPONSE);
+            } else {
+                far.shutdown().await.unwrap();
+                let mut got = Vec::new();
+                io.read_to_end(&mut got).await.unwrap();
+                assert_eq!(got, head);
+            }
+        }
     }
 
     #[tokio::test]

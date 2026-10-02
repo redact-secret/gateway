@@ -104,6 +104,19 @@ Interaction with `resources.capacity.receipt` and the other classes. Connections
 
 Health. Not exempt, and not reserved: the decision happens before any byte is read, so a reserve for health would be open to any peer. At the bound a probe is closed without a response and succeeds as soon as a slot frees. Per-peer limits are not implemented: the listener is loopback and every peer shares one address (ADR 0021).
 
+## Request head bounds (#41; measured SDK sizes, provisional caps)
+
+Mechanism, measurements, and rationale: [ADR 0023](../decisions/0023-header-size-measurement-and-size-classes.md). The values were measured against the pinned SDKs (openai Node 7.27.0, Python 3.24.0) and modelled intermediary headers, and **confirmed unchanged**; they stay provisional in the sense of ADR 0008 because intermediary sizes are modelled, not captured.
+
+| Limit | Value | Where | Measured need |
+| --- | --- | --- | --- |
+| Header names plus values | 16,384 bytes | route (`431 limit_exceeded`) | 437 to 1,013 (SDK alone), about 2.5 KiB typical deployment, 14.9 KiB stacked extreme |
+| One header value | 8,192 bytes | route (`431 limit_exceeded`) | 519 largest SDK value (512-byte token), 8,192 for W3C `baggage` at its limit |
+| Header fields | 100 | head guard (fixed `431`); equals the HTTP server's own limit | 17 to 19 SDK alone, 31 in the stacked cases |
+| Head, request line through blank line | 65,536 bytes | head guard (fixed `431`) | 543 to 1,127 SDK alone, 15,086 stacked extreme; the largest head the route can admit is under 17 KiB |
+
+Memory. A connection holds at most the head bound plus one read chunk (4 KiB) before its head is judged; that is the figure measured in ADR 0022 (about 71 KiB per connection with a nearly full head, about 17 MiB at 256 connections), unchanged here. No permit is held until the head is complete and judged.
+
 ## Known gaps
 
 - Connection count is bounded since #40 (`max_connections`, above); the remaining gaps are that the default is provisional, that a refused connection is neither counted nor logged yet, that a local peer can still occupy every slot until its silent connections hit the head deadline (the bound makes that finite, not impossible), and that there is no per-peer bound (loopback peers share an address). The request head is bounded since #25: absolute head deadline, 64 KiB hold bound, then the route's 16 KiB total / 8 KiB per value header limits (`431`). The header sizes are not measured values (ADR 0008).
