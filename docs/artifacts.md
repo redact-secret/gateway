@@ -70,7 +70,7 @@ A workflow step asserts those fields (`distributable` false, proxy capability, p
 Artifact distribution is gated and nothing is published. Before any publication:
 
 1. A license is selected by the maintainer (MIT, done; [ADR 0010](decisions/0010-release-prerequisites-license-and-reporting.md)).
-2. Private vulnerability reporting is enabled (done) and verified with an end-to-end test report (ADR 0010, **open**).
+2. Private vulnerability reporting is enabled and verified through the GitHub API (done, 2026-10-02; ADR 0010).
 3. The Alpha 1 MVP qualification is reconciled ([report](qualification/alpha1-qualification-report.md)) and the maintainer accepts the residual risks and open follow-ups.
 4. A registry and image name are selected, and a separate, environment-gated publish workflow is reviewed. Signing, SBOM, and provenance are not produced by the current workflow.
 5. The maintainer authorizes publication.

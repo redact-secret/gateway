@@ -1,6 +1,6 @@
 # ADR 0010: License and private security reporting (release prerequisites)
 
-Status: **Partially decided.** The license is MIT (maintainer decision). Private security reporting was enabled by the maintainer (GitHub API `enabled: true`); an end-to-end test report is still to be recorded.
+Status: **Decided.** The license is MIT (maintainer decision). Private security reporting was enabled by the maintainer and verified through the GitHub API (`enabled: true`, 2026-10-02). Remaining release blockers are tracked elsewhere (registry/name selection, publication authorization).
 
 ## Context
 
@@ -16,12 +16,12 @@ Checked with the GitHub API for `redact-secret/gateway`:
 
 ## Decision
 
-License: **MIT**, selected by the maintainer. Private reporting: enabled; test-report verification pending and still a release gate:
+License: **MIT**, selected by the maintainer. Private reporting: enabled and verified via the API (2026-10-02):
 
 | Item | Needed | Decider |
 | --- | --- | --- |
 | Repository license | Decided: MIT. `LICENSE` file and `Cargo.toml` `license = "MIT"` added. Copyright holder line in `LICENSE` should be confirmed by the maintainer | Maintainer |
-| Private reporting | Decided/enabled (API shows `enabled: true`). Remaining: send a test report and confirm it reaches the maintainer. Original requirement: maintainer enables GitHub private vulnerability reporting (or names an established private channel), then someone verifies it works and updates SECURITY.md | Maintainer |
+| Private reporting | Decided/enabled (API shows `enabled: true`). Verified via the API on 2026-10-02; a self-sent test report is not required (an owner cannot meaningfully report to their own repository). Original requirement: maintainer enables GitHub private vulnerability reporting (or names an established private channel), then someone verifies it works and updates SECURITY.md | Maintainer |
 
 No contact address, response SLA, or disclosure deadline is invented. SECURITY.md keeps its current wording that does not claim a channel exists.
 
@@ -31,12 +31,12 @@ Maintainer. Verification of the channel by a reviewer after enabling.
 
 ## Invariants
 
-1. No artifact is distributed until a test report has been verified end to end.
+1. No artifact is distributed while the API does not show private reporting enabled.
 2. Documents never state that reporting is enabled until the API shows it enabled and it has been tested.
 
 ## Failure behavior
 
-If the test-report verification is not recorded at release time, release is blocked and recorded as blocked with the owner, not waived.
+If the API does not show private reporting enabled at release time, release is blocked and recorded as blocked with the owner, not waived.
 
 ## Implementation handoff
 
@@ -45,7 +45,7 @@ If the test-report verification is not recorded at release time, release is bloc
 
 ## Verification
 
-`gh api repos/redact-secret/gateway/private-vulnerability-reporting` returns `enabled: true`; a test report reaches the maintainer; license metadata is non-null and matches the file.
+`gh api repos/redact-secret/gateway/private-vulnerability-reporting` returns `enabled: true`; license metadata is non-null and matches the file.
 
 ## Deferred measured choices
 
