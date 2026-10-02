@@ -11,10 +11,12 @@
 
 pub mod admission;
 pub mod boundary;
+pub mod cli;
 pub mod config;
 pub mod core_bridge;
 pub mod health;
 pub mod protocol;
+pub mod server;
 pub mod telemetry;
 pub mod transport;
 

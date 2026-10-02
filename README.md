@@ -78,7 +78,7 @@ Gateway releases have an independent version. Each release records its exact cor
 
 ## Development
 
-The Rust scaffold exists (issue #2): a private binary crate with the module skeleton, a pinned toolchain (`rust-toolchain.toml`, Rust 1.98.1, MSRV 1.88), a committed `Cargo.lock`, and an exact core pin (`redact-secret =0.1.0-beta.12`). Selected versions and features are in [ADR 0011](docs/decisions/0011-dependency-and-toolchain-selection.md). The executable only reports its version. It is not a working proxy: there is no configuration, no listener, and no forwarding route.
+The Rust scaffold exists (issue #2): a private binary crate with the module skeleton, a pinned toolchain (`rust-toolchain.toml`, Rust 1.98.1, MSRV 1.88), a committed `Cargo.lock`, and an exact core pin (`redact-secret =0.1.0-beta.12`). Selected versions and features are in [ADR 0011](docs/decisions/0011-dependency-and-toolchain-selection.md). The executable reports its version, validates a static configuration, and serves loopback health endpoints (issue #4). It is not a working proxy: every other route is rejected locally and nothing is forwarded. See [docs/configuration.md](docs/configuration.md).
 
 Commands that work today (install Rust through `rustup`; the toolchain file selects the compiler):
 
@@ -88,13 +88,15 @@ cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked          # unit, API-boundary (trybuild), dependency-policy, and version smoke tests
 cargo run --locked -- --version
+cargo run --locked -- validate-config examples/config.skeleton.json
+cargo run --locked -- serve examples/config.skeleton.json   # 127.0.0.1:8787, /healthz, /readyz; SIGINT/SIGTERM to stop
 cargo deny check             # requires cargo-deny; policy in deny.toml
 cargo run --locked --example perf_workloads -- --smoke   # synthetic workload scaffold (measurement tool, no performance claim)
 ```
 
 The same commands run in CI (`.github/workflows/ci.yml`, required aggregate check `CI passed`) against the committed lockfile and the pinned toolchain. Ordinary CI uses no secrets, no provider credentials, and no provider network calls: tests talk only to the loopback fake upstream in `tests/support/` with synthetic data. See [CONTRIBUTION.md](CONTRIBUTION.md#test-harness-and-ci) for the harness.
 
-Planned, not implemented yet: configuration validation, serving, health endpoints (#4), the core probe (#5), and release builds and images (#7).
+Planned, not implemented yet: the core probe (#5) and release builds and images (#7).
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md), [CONVENTIONS.md](CONVENTIONS.md), [CONTRIBUTION.md](CONTRIBUTION.md), and [SECURITY.md](SECURITY.md) before implementation.
 

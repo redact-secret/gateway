@@ -26,7 +26,7 @@ The gateway does not inherit core's workspace or toolchain file; it matches core
 | Crate | Requirement | Locked | Features (default features off) | Why |
 | --- | --- | --- | --- | --- |
 | `redact-secret` | `=0.1.0-beta.12` | 0.1.0-beta.12 | none (core has no features) | Core pin, see below |
-| `tokio` | `1` | 1.53.1 | `sync` (`rt`, `macros` in dev only) | `admission` uses `tokio::sync::Semaphore` as the permit primitive. Axum and hyper additionally enable `net`, `rt`, `time`, `macros`, `io-util` in the normal graph by feature unification. |
+| `tokio` | `1` | 1.53.1 | `sync`, `net`, `rt`, `signal`, `macros` (#4: listener, current-thread runtime, SIGINT/SIGTERM; dev adds `io-util`, `time`; adds `signal-hook-registry` and `errno` to the lock) | `admission` uses `tokio::sync::Semaphore` as the permit primitive. Axum and hyper additionally enable `net`, `rt`, `time`, `macros`, `io-util` in the normal graph by feature unification. |
 | `axum` | `0.8` | 0.8.9 | `http1`, `tokio` | HTTP server and routing for `health` and later routes. No `json`, `query`, `form`, `multipart`, `ws`, `http2`, or `tower-log`. |
 | `reqwest` | `0.13` | 0.13.5 | `rustls` | Single upstream client, held only by `transport`. `rustls` uses the platform certificate verifier, so server certificates are verified. Excluded: `system-proxy` (no proxy inherited from the environment), `charset`, `http2`, `json`, `cookies`, compression, `native-tls`, `socks`. Client built with redirects disabled and `no_proxy()`. |
 | `serde` | `1` | 1.0.229 | `std` | Visitor traits for the strict JSON path. No `derive`. |
