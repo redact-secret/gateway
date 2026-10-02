@@ -1,0 +1,70 @@
+# Deployment-chain evidence (issue #44, follow-up of #25).
+#
+# Executes the environment-specific controls that the gateway's own tests cannot prove, against the
+# shipped candidate image built from this commit (the same `cargo build --locked --release` and
+# scripts/build-image.sh path as the candidate-artifacts workflow, no features, no cfg, no test
+# seam; the qualification build of ADR 0020 is not used):
+#   - egress: a default-deny `--internal` Docker network blocks direct provider connections while
+#     gateway-routed traffic works (docs/qualification/deployment-chain-evidence.md, control 1);
+#   - intermediary: pinned nginx and pinned HAProxy in front of the gateway, a 36-case framing
+#     conformance set recorded per case (control 2);
+#   - resolver/trust: private, loopback, link-local and metadata answers refused with zero connection
+#     attempts, and a throwaway-CA TLS-interception demonstration (control 3).
+#
+# Not part of the required `CI passed` aggregate (ci.yml); it needs Docker and pulls digest-pinned
+# helper images. It uses no secrets, no provider key, and no network beyond Docker Hub pulls: every
+# container network is internal or `--network none`, and every payload is synthetic. Only text
+# evidence is uploaded (no binary, no key material: certificates are generated in a temp directory
+# that is never part of the evidence directory).
+name: Deployment-chain evidence (Docker, unpublished)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/deployment-evidence.yml"
+      - "scripts/deployment-evidence/**"
+      - "docs/qualification/deployment-chain-evidence.md"
+  workflow_dispatch:
+
+# Deny everything by default; the job re-grants the minimum it needs.
+permissions: {}
+
+concurrency:
+  group: deployment-evidence-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "3"
+  RUST_BACKTRACE: "0"
+
+jobs:
+  evidence:
+    name: Egress, intermediary, resolver and trust evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: Build the candidate binary (x86_64-unknown-linux-gnu, --locked --release)
+        run: cargo build --locked --release
+      - name: Build the candidate image from those exact bytes (linux/amd64)
+        run: sh scripts/build-image.sh target/release/redact-secret-gateway redact-secret-gateway:candidate
+      - name: Run the deployment-chain evidence procedures
+        run: bash scripts/deployment-evidence/run-all.sh redact-secret-gateway:candidate evidence
+      - name: Upload text evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deployment-chain-evidence-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
