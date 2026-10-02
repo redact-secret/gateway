@@ -1,14 +1,18 @@
-# Release-candidate build for the VERIFIED SKELETON (issue #7, ADR 0012).
+# Alpha 1 release-candidate build (issues #7 and #22, ADR 0012).
 #
-# The skeleton serves /healthz and /readyz and rejects everything else. It is not a
-# sanitizing proxy. This workflow builds each candidate artifact ONCE from the candidate
-# commit, smoke-tests those exact bytes on their own platform, and records a manifest.
+# The candidate is the Alpha 1 MVP: health endpoints plus the Chat Completions text-subset
+# proxy (JSON and SSE relay). This workflow builds each candidate artifact ONCE from the
+# candidate commit with `cargo build --locked --release` (no features, no cfg), smoke-tests
+# those exact bytes on their own platform (startup, config validation, health, proxy-route
+# rejections that never forward, the seam-absence check, and for the image: non-root, read-only,
+# the Compose example), and records a manifest with the source, toolchain, core, config, and SDK
+# pins and checksums.
 #
 # It does NOT publish, create a release, push to any registry, sign, generate an SBOM, or
 # produce provenance. It uses no secrets and no registry credentials. Artifacts are plain
 # workflow artifacts for inspection; distribution is gated (ADR 0010, README "Release
-# gating").
-name: Candidate artifacts (skeleton, unpublished)
+# gating"). The manifest says `distributable: false`.
+name: Candidate artifacts (Alpha 1, unpublished)
 
 on:
   pull_request:
@@ -21,7 +25,10 @@ on:
       - "src/**"
       - "container/**"
       - "scripts/**"
-      - "examples/config.skeleton.json"
+      - "examples/config*.json"
+      - "examples/compose/**"
+      - "examples/node/package-lock.json"
+      - "examples/python/requirements.txt"
   workflow_dispatch:
 
 # Deny everything by default; each job re-grants the minimum it needs.
@@ -68,8 +75,10 @@ jobs:
       - name: Smoke-test the candidate bytes on this platform
         run: |
           set -eu
+          mkdir -p stage/evidence/linux-x86_64
+          rustc -vV > stage/evidence/linux-x86_64/rustc.txt
           sh scripts/smoke-binary.sh stage/redact-secret-gateway-x86_64-unknown-linux-gnu \
-            examples/config.skeleton.json stage/evidence/linux-x86_64
+            examples/config.openai.json stage/evidence/linux-x86_64
       - name: Confirm the tested file is unchanged
         env:
           WANT: ${{ steps.build.outputs.sha256 }}
@@ -118,8 +127,10 @@ jobs:
       - name: Smoke-test the candidate bytes on this platform
         run: |
           set -eu
+          mkdir -p stage/evidence/macos-arm64
+          rustc -vV > stage/evidence/macos-arm64/rustc.txt
           sh scripts/smoke-binary.sh stage/redact-secret-gateway-aarch64-apple-darwin \
-            examples/config.skeleton.json stage/evidence/macos-arm64
+            examples/config.openai.json stage/evidence/macos-arm64
       - name: Confirm the tested file is unchanged
         env:
           WANT: ${{ steps.build.outputs.sha256 }}
@@ -166,6 +177,8 @@ jobs:
         env:
           WANT: ${{ needs.linux-x86_64.outputs.sha256 }}
         run: sh scripts/smoke-image.sh redact-secret-gateway:candidate "$WANT" stage/evidence/image-linux-amd64
+      - name: Smoke-test the Compose example against the candidate image
+        run: sh scripts/smoke-compose.sh examples/compose/compose.yaml stage/evidence/compose-linux-amd64
       - name: Save the image and record its identity
         env:
           WANT: ${{ needs.linux-x86_64.outputs.sha256 }}
@@ -223,13 +236,27 @@ jobs:
           set -eu
           cd bundle
           sha256sum -c SHA256SUMS
+      - name: Check the manifest states the truth (not distributable, proxy capability, pins)
+        run: |
+          set -eu
+          jq -e '.distributable == false
+            and .status == "alpha1-release-candidate-unpublished"
+            and (.capabilities.proxy.endpoint == "POST /v1/chat/completions")
+            and (.capabilities.proxy.response_redaction == false)
+            and (.distribution_blockers | length) >= 4
+            and (.core.pin == "=0.1.0-beta.12")
+            and (.sdk_pins.node.version | length) > 0
+            and (.sdk_pins.python.version | length) > 0
+            and (.artifacts | length) == 3
+            and (.signing == "not produced" and .sbom == "not produced" and .provenance == "not produced")' \
+            bundle/manifest.json
       - name: Show the manifest and checksums
         run: |
           set -eu
           {
-            echo '## Skeleton release candidate (not published)'
+            echo '## Alpha 1 release candidate (not published)'
             echo
-            echo 'Signing, SBOM, and provenance: not produced. Not distributable (ADR 0010).'
+            echo 'Signing, SBOM, and provenance: not produced. Not distributable (ADR 0010, manifest distribution_blockers).'
             echo
             echo '```json'
             cat bundle/manifest.json
@@ -244,7 +271,7 @@ jobs:
       - name: Upload the candidate bundle (binaries, image archive, manifest, checksums, evidence)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: skeleton-candidate-${{ github.sha }}
+          name: alpha1-candidate-${{ github.sha }}
           path: bundle/
           if-no-files-found: error
           retention-days: 14

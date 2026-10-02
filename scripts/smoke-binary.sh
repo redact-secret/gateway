@@ -1,9 +1,10 @@
 #!/bin/sh
 # Smoke-test an ACTUAL candidate binary on the platform it was built for.
 # usage: smoke-binary.sh <binary> <config.json> <evidence-dir>
-# Runs: --version, validate-config, serve (loopback) + health/proxy-route probes,
-# then SIGTERM and requires a clean exit. Logs contain only gateway output for the
-# synthetic skeleton config (no payloads, no credentials).
+# Runs: the qualification-seam absence check, --version, validate-config, serve (loopback) +
+# the documented MVP probes (health, and proxy-route rejections that never forward), then
+# SIGTERM and requires a clean exit. The probes send only synthetic, locally rejected requests
+# (see probe-endpoints.sh), so even a config with an upstream cannot reach a provider.
 set -eu
 bin="$1"
 config="$2"
@@ -11,6 +12,8 @@ out="$3"
 here="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$out"
 test -x "$bin"
+
+sh "$here/check-no-qualification-seam.sh" "$bin" | tee "$out/seam-check.txt"
 
 ver="$("$bin" --version)"
 printf '%s\n' "$ver" | tee "$out/version.txt"
@@ -32,7 +35,7 @@ until grep -q '^listening ' "$out/serve.out" 2>/dev/null; do
   fi
   sleep 0.1
 done
-sh "$here/probe-skeleton.sh" "http://127.0.0.1:8787" "$out" | tee "$out/probe.txt"
+sh "$here/probe-endpoints.sh" "http://127.0.0.1:8787" "$out" | tee "$out/probe.txt"
 kill -TERM "$pid"
 status=0
 wait "$pid" || status=$?
