@@ -1,0 +1,149 @@
+# Ordinary CI (issue #6). Every step runs a real, implemented command against the
+# committed Cargo.lock and the toolchain pinned in rust-toolchain.toml.
+#
+# Credential and cost boundary: this workflow uses no secrets and no provider credentials,
+# and makes no provider network calls. Tests talk only to the loopback fake upstream in
+# tests/support/ with synthetic data. The only network use is fetching crates and the
+# cargo-deny advisory database. Any future live-provider qualification must be a separate,
+# manual, environment-gated workflow (CONVENTIONS.md, "Code, tests, and changes").
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Deny everything by default; each job re-grants the minimum it needs.
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "3"
+  RUST_BACKTRACE: "0"
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+  clippy:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: cargo clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      # Unit, API-boundary (trybuild), dependency-policy, harness, permit, parser, and
+      # no-forward/leakage tests. All inputs are synthetic; no provider credentials.
+      - name: cargo test
+        run: cargo test --locked
+
+  build:
+    name: Build and startup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: cargo build
+        run: cargo build --locked
+      # Skeleton startup check: the real binary starts, reports versions, exits 0.
+      - name: Startup check (--version)
+        run: |
+          set -eu
+          out="$(cargo run --locked --quiet -- --version)"
+          printf '%s\n' "$out"
+          case "$out" in
+            "redact-secret-gateway "*" (core redact-secret "*")") ;;
+            *) echo "unexpected version line" >&2; exit 1 ;;
+          esac
+      # TODO(#4): when config validation and health land, add real startup checks here
+      # (validate a synthetic config, start `serve` on loopback, probe liveness/readiness).
+      # Only add commands that exist on main; do not stub them.
+      - name: Perf workload scaffold smoke (tiny sizes, no payloads in output)
+        run: cargo run --locked --quiet --example perf_workloads -- --smoke
+
+  deny:
+    name: Dependency policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+          log-level: warn
+
+  # Stable aggregate for branch protection: require only this check name ("CI passed").
+  # It fails when any needed job failed, was cancelled, or was skipped.
+  ci-passed:
+    name: CI passed
+    if: ${{ always() }}
+    needs: [fmt, clippy, test, build, deny]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every job to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -eu
+          printf '%s' "$NEEDS_JSON" | grep -o '"result": *"[a-z_]*"' | sort | uniq -c
+          if printf '%s' "$NEEDS_JSON" | grep -E '"result": *"(failure|cancelled|skipped)"' >/dev/null; then
+            echo "one or more required jobs did not succeed" >&2
+            exit 1
+          fi

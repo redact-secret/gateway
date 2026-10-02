@@ -1,0 +1,5 @@
+error[E0599]: no associated function or constant named `default` found for struct `SanitizedRequest` in the current scope
+ --> tests/ui/fail_sanitized_default.rs:6:23
+  |
+6 |     SanitizedRequest::default()
+  |                       ^^^^^^^ associated function or constant not found in `SanitizedRequest`

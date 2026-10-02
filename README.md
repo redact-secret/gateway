@@ -89,9 +89,12 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked          # unit, API-boundary (trybuild), dependency-policy, and version smoke tests
 cargo run --locked -- --version
 cargo deny check             # requires cargo-deny; policy in deny.toml
+cargo run --locked --example perf_workloads -- --smoke   # synthetic workload scaffold (measurement tool, no performance claim)
 ```
 
-Planned, not implemented yet: configuration validation, serving, health endpoints (#4), the core probe (#5), the fake-upstream harness and CI (#6), and release builds and images (#7).
+The same commands run in CI (`.github/workflows/ci.yml`, required aggregate check `CI passed`) against the committed lockfile and the pinned toolchain. Ordinary CI uses no secrets, no provider credentials, and no provider network calls: tests talk only to the loopback fake upstream in `tests/support/` with synthetic data. See [CONTRIBUTION.md](CONTRIBUTION.md#test-harness-and-ci) for the harness.
+
+Planned, not implemented yet: configuration validation, serving, health endpoints (#4), the core probe (#5), and release builds and images (#7).
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md), [CONVENTIONS.md](CONVENTIONS.md), [CONTRIBUTION.md](CONTRIBUTION.md), and [SECURITY.md](SECURITY.md) before implementation.
 
