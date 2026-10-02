@@ -15,7 +15,7 @@ Checked in this order; each failure is a fixed local response and reserves nothi
 | Target | No query string (an empty `?` also counts), no absolute-form target, no `Upgrade`. | `400 unsupported_input` |
 | `Content-Type` | Exactly one header: `application/json`, case-insensitive, optional `charset=utf-8` and nothing else. | `415 unsupported_input` |
 | Compression | Any `Content-Encoding` (even `identity`) and any transfer coding other than a lone `chunked`. | `415 unsupported_input` |
-| Framing | One all-digit `Content-Length` or `Transfer-Encoding: chunked`, not both; absent or zero length. Malformed framing the HTTP layer itself refuses is a bare `400` from the HTTP layer. | `400 malformed_input` |
+| Framing | One all-digit `Content-Length` or `Transfer-Encoding: chunked`, not both (both is refused by a connection-level guard before the HTTP layer, with the connection closed and no response; ADR 0019); absent or zero length. Malformed framing the HTTP layer itself refuses is a bare `400` from the HTTP layer. | `400 malformed_input` |
 | Size | Declared `Content-Length` over the effective maximum body (see limits). | `413 limit_exceeded` |
 
 Then receipt capacity and a conservative memory reservation are taken (ADR 0003), the body is collected under a deadline and a hard byte bound, and the body is parsed. `Content-Length` is only ever an upper bound that collection enforces; it never decides how much memory is reserved beyond what the limits already cap.

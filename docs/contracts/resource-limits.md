@@ -40,7 +40,7 @@ Configured under optional `resources.limits` ([configuration](../configuration.m
 | `max_messages` | 256 | 4,096 | Long agent histories fit; unbounded arrays do not. |
 | `admission_wait_ms` | 250 | 60,000 | How long a request may wait for capacity before `overload`. Short, so a local caller sees backpressure quickly and the SDK retry decides. `0` means never wait. |
 | `admission_queue` | 16 | 1,024 | Most requests waiting at once for capacity. A full queue fails immediately, so waiters are bounded in number and time. `0` means no queue. |
-| `body_deadline_ms` | 10,000 | 300,000 | Time to receive the whole body after capacity is reserved. A 1 MiB body takes milliseconds on loopback; ten seconds tolerates a slow client while bounding how long a stalled one holds its reservation. |
+| `body_deadline_ms` | 10,000 | 300,000 | Time to receive the whole body after capacity is reserved. Since #25 it is also the absolute deadline for the request head, from accept to the blank line (`head_guard`, [ADR 0019](../decisions/0019-request-head-guard-and-one-request-per-connection.md)). A 1 MiB body takes milliseconds on loopback; ten seconds tolerates a slow client while bounding how long a stalled one holds its reservation. |
 
 ## Upstream deadlines and response bounds (#20; provisional pending quiet-host measurement)
 
@@ -91,9 +91,9 @@ Parsing runs on the request task (no `spawn_blocking`), bounded by `max_body_byt
 
 ## Known gaps
 
-- Connection count is not yet limited before headers are parsed, and there is no header-read timeout, so a connection that never finishes its headers holds a socket but no reservation. Header and idle-connection bounds belong with transport hardening (#25, Alpha 2 #10).
+- Connection count is still not limited. A peer that opens many sockets holds a file descriptor and a connection task each until the head deadline (`body_deadline_ms`) closes it; no receipt or memory is reserved for a connection that has not finished its head. Connection-count and per-peer limits belong to transport hardening (#10, Alpha 2; tracked in a #25 follow-up issue). The request head is bounded since #25: absolute head deadline, 64 KiB hold bound, then the route's 16 KiB total / 8 KiB per value header limits (`431`). The header sizes are not measured values (ADR 0008).
 - Stream limits (#21) and upstream deadlines and response bounds (#20) are provisional.
-- The write-stall deadline bounds a response write that stops making progress; it does not bound read-side stalls (a request header or body that stops arriving), which remain the gap in the first bullet. The HTTP server's own write buffer per connection is bounded by the library and is not part of `stream_buffer_bytes`.
+- The write-stall deadline bounds a response write that stops making progress; read-side stalls are bounded separately: the head by the head deadline (#25) and the body by `body_deadline_ms` (#18); only the connection count remains the gap in the first bullet. The HTTP server's own write buffer per connection is bounded by the library and is not part of `stream_buffer_bytes`.
 - Idle connection pooling to the provider is off, so every request pays a connection setup; revisit with measurement (ADR 0017).
 - The request-wide finding bound (`content.max_findings`, default 1024, ceiling 50,000) and the inspection pool sizing (workers `min(inspection permits, CPUs, 16)`, queue `min(inspection permits, 1024)`) are provisional (#19), not measured on a quiet host (ADR 0008). The transformed-output bound is `min(max_body_bytes, bytes covered by the request's reservation)`; the reservation already budgets one output copy.
 

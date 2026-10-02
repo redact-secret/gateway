@@ -32,6 +32,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0016](0016-header-allowlists-and-request-local-credentials.md) | Header allowlists and request-local provider credentials | Accepted; implemented (inbound vetting, credential type, wire headers, JSON and SSE response relay) | #24 |
 | [0017](0017-json-forwarding-deadlines-and-cancellation.md) | Ordinary JSON forwarding, deadlines, response bounds, and cancellation | Accepted; implemented (JSON relay, deadlines, bounds, cancellation, drain); SSE relay in ADR 0018; SDK qualification planned (#22); numbers provisional | #20 |
 | [0018](0018-sse-relay-termination-and-stream-bounds.md) | SSE relay, stream termination contract, and stream bounds | Accepted; implemented (incremental relay, stream permit, idle/lifetime/buffer/write-stall bounds, termination contract, cancellation, stream telemetry); SDK qualification planned (#22); numbers provisional | #21 |
+| [0019](0019-request-head-guard-and-one-request-per-connection.md) | Request-head guard and one request per connection | Accepted; implemented (framing-ambiguity guard, head deadline, `Connection: close` on every response); connection-count limits planned (#10) | #25 |
 
 ## Contracts
 
