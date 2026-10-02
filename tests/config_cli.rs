@@ -178,7 +178,13 @@ fn serve_runs_health_rejects_proxy_routes_and_exits_cleanly_on_sigterm() {
     assert!(s.addr.starts_with("127.0.0.1:"));
     assert_eq!(http_get(&s.addr, "/healthz").0, 200);
     assert_eq!(http_get(&s.addr, "/readyz").0, 200);
+    // The chat route is wired (#18): a GET is a local 405, still without any forwarding.
     let (status, text) = http_get(&s.addr, &format!("/v1/chat/completions?x={MARKER}"));
+    assert_eq!(status, 405);
+    assert!(text.contains("unsupported_input"));
+    assert!(!text.contains(MARKER));
+    // Every other route stays a local 404.
+    let (status, text) = http_get(&s.addr, &format!("/v1/models/{MARKER}"));
     assert_eq!(status, 404);
     assert!(text.contains("unsupported_input"));
     assert!(!text.contains(MARKER));

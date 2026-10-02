@@ -4,8 +4,10 @@
 //! and validated exactly once at startup into an immutable [`RuntimePlan`]; nothing rereads
 //! it later and there is no hot reload. Unknown fields are rejected at every depth, every
 //! value is validated, and the plan has three separate authorities so a content-policy
-//! change cannot alter deployment authority. Resource limits have no numeric defaults:
-//! every value must be present in the file (docs/contracts/resource-limits.md).
+//! change cannot alter deployment authority. Capacities have no numeric defaults: every
+//! value must be present in the file. The optional `resources.limits` object carries the
+//! per-request limits, whose provisional values are finite and justified in
+//! docs/contracts/resource-limits.md.
 //!
 //! Diagnostics ([`ConfigError`]) carry a fixed kind and a static schema location only.
 //! They never echo file content, key names found in the file, values, or paths.
@@ -16,7 +18,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroU32;
 use std::path::Path;
 
-use crate::admission::CapacityPlan;
+use crate::admission::{CapacityPlan, RequestLimits};
 use crate::core_bridge;
 use crate::protocol::json::{self, Json};
 use crate::telemetry::SafeCode;
@@ -205,12 +207,29 @@ impl ContentPolicy {
 #[derive(Debug)]
 pub struct ResourcePolicy {
     capacity: CapacityPlan,
+    limits: RequestLimits,
 }
 
 impl ResourcePolicy {
+    /// Capacities with the provisional per-request limits.
     #[must_use]
     pub const fn new(capacity: CapacityPlan) -> Self {
-        Self { capacity }
+        Self {
+            capacity,
+            limits: RequestLimits::provisional(),
+        }
+    }
+
+    /// Replace the per-request limits.
+    #[must_use]
+    pub const fn with_limits(mut self, limits: RequestLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    #[must_use]
+    pub const fn limits(&self) -> &RequestLimits {
+        &self.limits
     }
 
     #[must_use]
@@ -464,7 +483,7 @@ fn parse_content(obj: &Obj<'_>) -> Result<ContentPolicy, ConfigError> {
 }
 
 fn parse_resources(obj: &Obj<'_>) -> Result<ResourcePolicy, ConfigError> {
-    obj.only(&["capacity"])?;
+    obj.only(&["capacity", "limits"])?;
     let cap = Obj::new(
         obj.require("capacity", "resources.capacity")?,
         "resources.capacity",
@@ -479,13 +498,102 @@ fn parse_resources(obj: &Obj<'_>) -> Result<ResourcePolicy, ConfigError> {
     let n = |key: &str, loc: &'static str| -> Result<NonZeroU32, ConfigError> {
         cap.require(key, loc)?.as_nonzero_u32(loc)
     };
-    Ok(ResourcePolicy::new(CapacityPlan::new(
+    let capacity = CapacityPlan::new(
         n("receipt", "resources.capacity.receipt")?,
         n("memory_units", "resources.capacity.memory_units")?,
         n("inspection", "resources.capacity.inspection")?,
         n("upstream", "resources.capacity.upstream")?,
         n("stream", "resources.capacity.stream")?,
-    )))
+    );
+    let limits = match obj.get("limits") {
+        None => RequestLimits::provisional(),
+        Some(value) => parse_limits(&Obj::new(value, "resources.limits")?)?,
+    };
+    Ok(ResourcePolicy::new(capacity).with_limits(limits))
+}
+
+/// Ceiling that keeps every body-derived product computable in `u32`/`usize`.
+const MAX_BODY_CEILING: u32 = 16 * 1024 * 1024;
+
+/// Optional `resources.limits`. Absent fields keep the provisional value
+/// ([`RequestLimits::provisional`]); present fields must be within their ceilings.
+fn parse_limits(obj: &Obj<'_>) -> Result<RequestLimits, ConfigError> {
+    obj.only(&[
+        "max_body_bytes",
+        "max_depth",
+        "max_nodes",
+        "max_string_bytes",
+        "max_messages",
+        "admission_wait_ms",
+        "admission_queue",
+        "body_deadline_ms",
+    ])?;
+    let mut limits = RequestLimits::provisional();
+    let read = |key: &str, loc: &'static str, lo: u32, hi: u32, slot: &mut u32| {
+        if let Some(value) = obj.get(key) {
+            *slot = value.as_u32_in(loc, lo, hi)?;
+        }
+        Ok::<(), ConfigError>(())
+    };
+    read(
+        "max_body_bytes",
+        "resources.limits.max_body_bytes",
+        1,
+        MAX_BODY_CEILING,
+        &mut limits.max_body_bytes,
+    )?;
+    read(
+        "max_depth",
+        "resources.limits.max_depth",
+        1,
+        64,
+        &mut limits.max_depth,
+    )?;
+    read(
+        "max_nodes",
+        "resources.limits.max_nodes",
+        1,
+        1_048_576,
+        &mut limits.max_nodes,
+    )?;
+    read(
+        "max_string_bytes",
+        "resources.limits.max_string_bytes",
+        1,
+        MAX_BODY_CEILING,
+        &mut limits.max_string_bytes,
+    )?;
+    read(
+        "max_messages",
+        "resources.limits.max_messages",
+        1,
+        4096,
+        &mut limits.max_messages,
+    )?;
+    read(
+        "admission_wait_ms",
+        "resources.limits.admission_wait_ms",
+        0,
+        60_000,
+        &mut limits.admission_wait_ms,
+    )?;
+    read(
+        "admission_queue",
+        "resources.limits.admission_queue",
+        0,
+        1024,
+        &mut limits.admission_queue,
+    )?;
+    read(
+        "body_deadline_ms",
+        "resources.limits.body_deadline_ms",
+        1,
+        300_000,
+        &mut limits.body_deadline_ms,
+    )?;
+    // A string cannot exceed the body it came from, so `max_string_bytes` above
+    // `max_body_bytes` is harmless and needs no cross-field rule.
+    Ok(limits)
 }
 
 /// Borrowed view of a JSON object with strict-schema helpers.
@@ -528,12 +636,24 @@ impl<'a> Obj<'a> {
 trait JsonExt {
     fn as_str(&self, loc: &'static str) -> Result<&str, ConfigError>;
     fn as_nonzero_u32(&self, loc: &'static str) -> Result<NonZeroU32, ConfigError>;
+    fn as_u32_in(&self, loc: &'static str, lo: u32, hi: u32) -> Result<u32, ConfigError>;
 }
 
 impl JsonExt for Json {
     fn as_str(&self, loc: &'static str) -> Result<&str, ConfigError> {
         match self {
             Self::String(s) => Ok(s),
+            _ => Err(ConfigError::new(ConfigErrorKind::InvalidType, loc)),
+        }
+    }
+
+    fn as_u32_in(&self, loc: &'static str, lo: u32, hi: u32) -> Result<u32, ConfigError> {
+        match self {
+            Self::Number(n) => n
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok())
+                .filter(|v| *v >= lo && *v <= hi)
+                .ok_or(ConfigError::new(ConfigErrorKind::InvalidValue, loc)),
             _ => Err(ConfigError::new(ConfigErrorKind::InvalidType, loc)),
         }
     }
@@ -611,6 +731,47 @@ mod tests {
         assert_eq!(e.kind(), ConfigErrorKind::InvalidValue);
         let e = err(&VALID.replace("\"receipt\": 1", "\"receipt\": -1"));
         assert_eq!(e.kind(), ConfigErrorKind::InvalidValue);
+    }
+
+    #[test]
+    fn limits_are_optional_provisional_and_bounded() {
+        let plan = parse(VALID.as_bytes()).expect("valid");
+        assert_eq!(*plan.resources().limits(), RequestLimits::provisional());
+
+        let with = |limits: &str| {
+            VALID.replace(
+                "\"stream\": 1\n        }}",
+                &format!("\"stream\": 1\n        }}, \"limits\": {limits}}}"),
+            )
+        };
+        let plan = parse(with(r#"{"max_body_bytes": 2048, "admission_wait_ms": 0}"#).as_bytes())
+            .expect("valid limits");
+        assert_eq!(plan.resources().limits().max_body_bytes, 2048);
+        assert_eq!(plan.resources().limits().admission_wait_ms, 0);
+        assert_eq!(
+            plan.resources().limits().max_depth,
+            RequestLimits::provisional().max_depth
+        );
+
+        for bad in [
+            r#"{"max_body_bytes": 0}"#,
+            r#"{"max_body_bytes": 16777217}"#,
+            r#"{"max_depth": 65}"#,
+            r#"{"max_nodes": 0}"#,
+            r#"{"max_messages": 4097}"#,
+            r#"{"body_deadline_ms": 0}"#,
+            r#"{"admission_wait_ms": 60001}"#,
+            r#"{"admission_queue": -1}"#,
+            r#"{"max_depth": "8"}"#,
+            r#"{"SYNTH_KEY": 1}"#,
+            "[]",
+        ] {
+            assert!(parse(with(bad).as_bytes()).is_err(), "{bad}");
+        }
+        assert_eq!(
+            err(&with(r#"{"SYNTH_KEY": 1}"#)).kind(),
+            ConfigErrorKind::UnknownField
+        );
     }
 
     #[test]

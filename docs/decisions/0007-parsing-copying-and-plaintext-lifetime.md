@@ -1,6 +1,6 @@
 # ADR 0007: Parsing, copying, and plaintext lifetime
 
-Status: Accepted (design); parser selection deferred to measured need. Implementation status: planned. Covers issue #3 section F.
+Status: Accepted (design); parser selection deferred to measured need. Implementation status: baseline implemented in #18 (budgeted duplicate-key-rejecting parse, one working structure moved into the typed request, original buffer released after parsing; [ADR 0014](0014-chat-completions-admission.md)); borrowed/SIMD parsing and measured budgets remain deferred. Covers issue #3 section F.
 
 ## Context
 

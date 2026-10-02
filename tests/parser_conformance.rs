@@ -9,7 +9,7 @@
 mod support;
 
 use redact_secret_gateway::admission::Admission;
-use redact_secret_gateway::protocol::json::parse_strict;
+use redact_secret_gateway::protocol::json::{Budget, parse_budgeted, parse_strict};
 use redact_secret_gateway::protocol::{self, Protocol, ProtocolError};
 use support::leak::Markers;
 use support::parser_cases::{Expect, cases, run_conformance};
@@ -17,6 +17,21 @@ use support::parser_cases::{Expect, cases, run_conformance};
 #[test]
 fn baseline_parser_conforms_to_the_shared_table() {
     let mismatches = run_conformance(|bytes| parse_strict(bytes).is_ok());
+    assert!(mismatches.is_empty(), "parser mismatches: {mismatches:?}");
+}
+
+/// The parser used on request bodies (budgeted, #18) passes the same table as the
+/// baseline: budgets may only reject more, never accept something the table rejects.
+#[test]
+fn budgeted_request_parser_conforms_to_the_shared_table() {
+    let limits = redact_secret_gateway::admission::RequestLimits::provisional();
+    let budget = Budget {
+        max_depth: limits.max_depth,
+        max_nodes: limits.max_nodes,
+        max_string_bytes: limits.max_string_bytes as usize,
+        max_total_string_bytes: limits.max_body_bytes as usize,
+    };
+    let mismatches = run_conformance(|bytes| parse_budgeted(bytes, &budget).is_ok());
     assert!(mismatches.is_empty(), "parser mismatches: {mismatches:?}");
 }
 
@@ -37,13 +52,18 @@ fn receipt_path_agrees_with_the_parser_on_every_case() {
             .complete(case.bytes.clone())
             .unwrap();
         let outcome = protocol::validate(received, Protocol::ChatCompletionsText);
-        // Rejected by the parser => Malformed. Accepted by the parser => reaches the
-        // skeleton's Unsupported stage. Nothing is ever accepted until #18/#19.
-        let expected = match case.expect {
-            Expect::Reject => ProtocolError::Malformed,
-            Expect::Accept => ProtocolError::Unsupported,
-        };
-        assert_eq!(outcome.unwrap_err(), expected, "case {}", case.name);
+        // Rejected by the parser => Malformed (or LimitExceeded when a budget fires first,
+        // e.g. deep nesting). Accepted by the parser => the document is not a Chat
+        // Completions request, so the matrix rejects it as Unsupported.
+        let err = outcome.unwrap_err();
+        match case.expect {
+            Expect::Reject => assert!(
+                matches!(err, ProtocolError::Malformed | ProtocolError::LimitExceeded),
+                "case {}",
+                case.name
+            ),
+            Expect::Accept => assert_eq!(err, ProtocolError::Unsupported, "case {}", case.name),
+        }
     }
 }
 

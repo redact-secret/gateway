@@ -12,10 +12,13 @@ use std::sync::Arc;
 
 use tokio::net::TcpListener;
 
-use crate::config::{ConfigError, RuntimePlan};
+use crate::admission::Admission;
+use crate::chat_route::{self, ChatRoute};
+use crate::config::{ConfigError, RouteId, RuntimePlan};
 use crate::health::{self, HealthState};
 use crate::telemetry::SafeCode;
 use crate::transport::Upstream;
+use crate::transport::destination;
 
 /// Safe startup failure. Fixed stage only; no paths, addresses, or OS error text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +72,8 @@ impl From<ConfigError> for StartupError {
 pub struct Services {
     #[expect(dead_code, reason = "used by forwarding in #19/#23")]
     upstream: Upstream,
+    admission: Arc<Admission>,
+    chat: Arc<ChatRoute>,
 }
 
 impl Services {
@@ -80,7 +85,30 @@ impl Services {
     /// [`StartupError::Init`] when the transport client cannot be built.
     pub fn init(plan: &RuntimePlan) -> Result<Self, StartupError> {
         let upstream = Upstream::from_plan(plan).map_err(|_| StartupError::Init)?;
-        Ok(Self { upstream })
+        let admission = Arc::new(Admission::new(plan.resources().capacity()));
+        // The route id is the reviewed one from the static table, never from a request.
+        let chat = Arc::new(ChatRoute::new(
+            Arc::clone(&admission),
+            *plan.resources().limits(),
+            RouteId::new(destination::OPENAI_CHAT_COMPLETIONS_ROUTE),
+        ));
+        Ok(Self {
+            upstream,
+            admission,
+            chat,
+        })
+    }
+
+    /// The shared capacity owner (receipt, memory, inspection, upstream, stream).
+    #[must_use]
+    pub fn admission(&self) -> Arc<Admission> {
+        Arc::clone(&self.admission)
+    }
+
+    /// The `POST /v1/chat/completions` admission route.
+    #[must_use]
+    pub fn chat(&self) -> Arc<ChatRoute> {
+        Arc::clone(&self.chat)
     }
 }
 
@@ -124,6 +152,12 @@ impl BoundServer {
         self.listener.local_addr().map_err(|_| StartupError::Bind)
     }
 
+    /// The chat admission route, for tests that observe capacity.
+    #[must_use]
+    pub fn chat(&self) -> Arc<ChatRoute> {
+        self.services.chat()
+    }
+
     #[must_use]
     pub fn health(&self) -> Arc<HealthState> {
         Arc::clone(&self.state)
@@ -144,7 +178,7 @@ impl BoundServer {
             state,
             services,
         } = self;
-        let app = health::router(Arc::clone(&state));
+        let app = chat_route::mount(health::router(Arc::clone(&state)), services.chat());
         state.set_accepting(true);
         let on_shutdown = Arc::clone(&state);
         let result = axum::serve(listener, app)

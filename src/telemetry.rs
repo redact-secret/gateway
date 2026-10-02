@@ -18,6 +18,9 @@ pub enum SafeCode {
     InvalidConfig,
     /// Readiness is false: validated plan or required initialization is missing.
     NotReady,
+    /// The request passed admission and validation, but forwarding does not exist yet
+    /// (until #19/#20). Never forwarded; replaced by the real outcome when wired.
+    NotImplemented,
 }
 
 impl SafeCode {
@@ -33,6 +36,7 @@ impl SafeCode {
             Self::TransportFailure => "transport_failure",
             Self::InvalidConfig => "invalid_config",
             Self::NotReady => "not_ready",
+            Self::NotImplemented => "not_implemented",
         }
     }
 }

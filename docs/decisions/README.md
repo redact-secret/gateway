@@ -27,6 +27,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0011](0011-dependency-and-toolchain-selection.md) | Toolchain, dependency, and core pin selection | Accepted (design); implemented (scaffold) | #2, #4, #5, #6, #7 |
 | [0012](0012-release-candidate-artifact-build.md) | Release-candidate artifact build for the skeleton | Accepted (design); implemented (scaffold) | #7 |
 | [0013](0013-fixed-https-destinations-and-outbound-authority.md) | Fixed HTTPS destinations and outbound authority | Accepted (design); implemented (destination, client, address policy); body forwarding planned | #23 |
+| [0014](0014-chat-completions-admission.md) | Chat Completions request admission and provisional limits | Accepted; implemented (admission, strict budgeted parse, field matrix); forwarding planned | #18 |
 
 ## Contracts
 
@@ -35,7 +36,8 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [request-state](../contracts/request-state.md) | ReceivedRequest, ValidatedRequest, SanitizedRequest; sealed final type |
 | [core-completeness](../contracts/core-completeness.md) | What counts as complete core inspection; blocker handling |
 | [field-classification](../contracts/field-classification.md) | Initial classification rules and rejected forms |
-| [resource-limits](../contracts/resource-limits.md) | Resource-limit categories with no numeric defaults |
+| [chat-completions-request](../contracts/chat-completions-request.md) | Endpoint field matrix for the Alpha 1 Chat Completions text subset, admission rules |
+| [resource-limits](../contracts/resource-limits.md) | Resource-limit categories; provisional request limits and memory composition |
 | [errors-and-telemetry](../contracts/errors-and-telemetry.md) | Safe error code taxonomy and telemetry exclusions |
 | [upstream-destinations](../contracts/upstream-destinations.md) | Fixed HTTPS destinations, client hardening, address policy, test-seam isolation |
 
