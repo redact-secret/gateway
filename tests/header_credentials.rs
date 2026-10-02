@@ -379,9 +379,9 @@ async fn ambiguous_framing_and_header_forms_are_rejected() {
     // `Content-Length` together with `Transfer-Encoding`: the HTTP parser alone resolves
     // this itself (RFC 9112 section 6.3), discarding the length before any handler runs, so
     // the route could not see the conflict. The connection-level head guard (#25, ADR 0019)
-    // judges the first request head before the parser: the connection is failed, nothing is
-    // parsed, no response is written, and no handler runs. Both orders and an invalid length
-    // are covered.
+    // judges the first request head before the parser: nothing is parsed, a fixed local
+    // `400 malformed_input` is written (#43), the connection is closed, and no handler
+    // runs. Both orders and an invalid length are covered.
     for fields in [
         format!("Transfer-Encoding: chunked\r\nContent-Length: {len}\r\n"),
         format!("Content-Length: {len}\r\nTransfer-Encoding: chunked\r\n"),
@@ -393,9 +393,10 @@ async fn ambiguous_framing_and_header_forms_are_rejected() {
         ]
         .concat();
         let (resp, raw) = gw.raw(&both).await;
-        assert!(
-            resp.is_none() && raw.is_empty(),
-            "closed without a response"
+        assert_eq!(
+            outcome(resp, &raw),
+            (400, "malformed_input".to_owned()),
+            "answered with the local refusal"
         );
     }
     // Control: the same head without the defect is admitted.

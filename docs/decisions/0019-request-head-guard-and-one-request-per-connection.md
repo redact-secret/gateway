@@ -1,6 +1,6 @@
 # ADR 0019: Request-head guard and one request per connection
 
-Status: Accepted; implemented (#25). Implements the Alpha 1 minimum slice of the "slowloris on headers" and "`Content-Length` with `Transfer-Encoding` is invisible to the handler" known gaps recorded by #24 and #21. Wider transport hardening (connection-count limits, per-peer limits, header-size measurement, HTTP/2 policy) remains #10 (Alpha 2). Date: 2026-10-02.
+Status: Accepted; implemented (#25). Implements the Alpha 1 minimum slice of the "slowloris on headers" and "`Content-Length` with `Transfer-Encoding` is invisible to the handler" known gaps recorded by #24 and #21. Wider transport hardening (connection-count limits, per-peer limits, header-size measurement, HTTP/2 policy) remains #10 (Alpha 2). Date: 2026-10-02. Amended by [ADR 0021](0021-framing-ambiguity-parser-level-investigation.md) (#43): the guard now answers an ambiguous head with a local `400 malformed_input` (and an over-long head with `431`) instead of closing silently; the "no response" statements below describe the original decision. The pinned stack cannot expose the ambiguity itself (evidence in ADR 0021).
 
 ## Context
 

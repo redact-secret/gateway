@@ -198,7 +198,7 @@ fn real_binary_resists_routing_framing_and_slow_head_attacks() {
         markers.assert_clean(&format!("routing case {i}"), &wire);
     }
 
-    // Framing: ambiguity is closed without a response, never admitted.
+    // Framing: ambiguity is answered with the local 400 and closed, never admitted.
     let ch = format!("{:x}\r\n{GOOD}\r\n0\r\n\r\n", GOOD.len());
     for (label, fields) in [
         (
@@ -211,7 +211,13 @@ fn real_binary_resists_routing_framing_and_slow_head_attacks() {
         ),
     ] {
         let wire = gateway.exchange(&post(PATH, "", &fields, &ch));
-        assert!(wire.is_empty(), "{label}: closed without a response");
+        assert_eq!(status_of(&wire), Some(400), "{label}: local refusal");
+        let text = String::from_utf8_lossy(&wire).to_ascii_lowercase();
+        assert!(text.contains("connection: close"), "{label}");
+        assert!(
+            text.contains(r#"{"error":{"code":"malformed_input"}}"#),
+            "{label}"
+        );
     }
 
     // One request per connection: every response says so, and a pipelined second request
