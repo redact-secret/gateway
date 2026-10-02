@@ -60,7 +60,7 @@ Health/readiness must reveal no secrets and must not issue credentialed upstream
 
 ## Security release gates
 
-Before Alpha 1 distribution: private reporting flow verified, license selected, foundational threat model and upstream/credential contracts reviewed, synthetic no-forward and diagnostic-leak tests passed, and published artifacts smoke-tested.
+Before Alpha 1 distribution: private reporting flow verified, license selected (MIT, done), foundational threat model and upstream/credential contracts reviewed, synthetic no-forward and diagnostic-leak tests passed, and published artifacts smoke-tested.
 
 Before stable 0.1.0: protocol coverage and unknown-field gates, core completion/failure evidence, header/SSRF tests, stream failure/cancellation/backpressure tests, measured aggregate resource bounds, pinned SDK compatibility, dependency/artifact review, and documented upgrade/rollback are complete. Beta 3 owns final reconciliation; unresolved blockers prevent stable promotion.
 

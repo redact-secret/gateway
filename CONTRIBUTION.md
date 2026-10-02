@@ -72,4 +72,4 @@ Agents follow the same requirements as human contributors. Read the five baselin
 
 ## Licensing
 
-The repository must select and add a license before distributing artifacts. Until then, do not assume the gateway inherits a dependency's license. Contributors should confirm the repository licensing decision before submitting code intended for public distribution.
+The repository is licensed under the MIT License (see `LICENSE`). By submitting a contribution you agree it is provided under the same license.
