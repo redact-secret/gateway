@@ -48,6 +48,8 @@ Harness tests: `tests/harness_fake_upstream.rs` (harness self-tests), `tests/no_
 
 Performance workloads are a measurement tool (ADR 0008): `cargo run --locked --release --example perf_workloads` prints JSON lines with coarse p50/p95/p99 timings and resident memory per phase, with no payloads or credential labels. Numbers from it are not performance claims and may not become defaults without recorded pins.
 
+Candidate artifacts: `.github/workflows/artifacts.yml` (`workflow_dispatch`, and pull requests touching build files) builds the skeleton once per target, smoke-tests the exact bytes on their platform, builds the image from the Linux binary, and uploads a manifest with `SHA256SUMS`. It publishes nothing and has no secrets or registry credentials. Local helpers live in `scripts/`; see [docs/artifacts.md](docs/artifacts.md).
+
 CI (`CI passed` aggregates `Format`, `Lint`, `Test`, `Build and startup`, `Dependency policy`) uses no secrets and no provider credentials, and makes no provider calls. Workflow rules: every `uses:` pinned to a full commit SHA, `permissions: {}` at top level with per-job `contents: read`, `persist-credentials: false`, no event data inside `run:`, toolchain from `rust-toolchain.toml`. Live-provider qualification, when it exists, is a separate manual, cost-bounded, environment-gated workflow. Extension point for #4 (config validation, health) is marked `TODO(#4)` in the workflow.
 
 ## Pull request requirements

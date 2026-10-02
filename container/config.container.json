@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "deployment": {
+    "listener": {
+      "address": "0.0.0.0:8787",
+      "allow_non_loopback": true
+    }
+  },
+  "content": {
+    "profile": "common"
+  },
+  "resources": {
+    "capacity": {
+      "receipt": 1,
+      "memory_units": 1,
+      "inspection": 1,
+      "upstream": 1,
+      "stream": 1
+    }
+  }
+}

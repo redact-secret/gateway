@@ -96,7 +96,7 @@ cargo run --locked --example perf_workloads -- --smoke   # synthetic workload sc
 
 The same commands run in CI (`.github/workflows/ci.yml`, required aggregate check `CI passed`) against the committed lockfile and the pinned toolchain. Ordinary CI uses no secrets, no provider credentials, and no provider network calls: tests talk only to the loopback fake upstream in `tests/support/` with synthetic data. See [CONTRIBUTION.md](CONTRIBUTION.md#test-harness-and-ci) for the harness.
 
-Planned, not implemented yet: the core probe (#5) and release builds and images (#7).
+Unpublished release-candidate builds of the skeleton (Linux x86_64, macOS ARM64, a Linux amd64 image, manifest, checksums, smoke evidence) are produced by `.github/workflows/artifacts.yml`; see [docs/artifacts.md](docs/artifacts.md) and [ADR 0012](docs/decisions/0012-release-candidate-artifact-build.md). Nothing is published, signed, or distributable until the gates in that document are met (license and private reporting, ADR 0010; Alpha 1 MVP qualification).
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md), [CONVENTIONS.md](CONVENTIONS.md), [CONTRIBUTION.md](CONTRIBUTION.md), and [SECURITY.md](SECURITY.md) before implementation.
 

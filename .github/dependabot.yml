@@ -11,6 +11,14 @@ updates:
       actions:
         patterns: ["*"]
 
+  - package-ecosystem: docker
+    directory: /container
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+
   - package-ecosystem: cargo
     directory: /
     schedule:
