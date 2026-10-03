@@ -187,12 +187,11 @@ fn exec_probe_refuses_false_health_responses_and_oversize() {
             socket
                 .set_read_timeout(Some(Duration::from_secs(3)))
                 .expect("timeout");
-            let mut request = [0; 256];
-            let n = socket.read(&mut request).expect("read");
-            assert!(
-                String::from_utf8_lossy(request.get(..n).expect("slice"))
-                    .starts_with("GET /readyz ")
-            );
+            let mut request = String::new();
+            BufReader::new(&mut socket)
+                .read_line(&mut request)
+                .expect("request line");
+            assert_eq!(request, "GET /readyz HTTP/1.1\r\n");
             let _ = socket.write_all(response.as_bytes());
         });
         let result = bin()

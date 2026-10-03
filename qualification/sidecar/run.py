@@ -76,7 +76,7 @@ def pod_spec(name, image, qualified=False, enforced=False, cpu='1', memory='256M
              'timeoutSeconds': 3, 'periodSeconds': 2, 'failureThreshold': 60}
     gateway = {'name': 'gateway', 'image': image, 'imagePullPolicy': 'Never', 'restartPolicy': 'Always',
                'args': ['serve-observed', '/etc/gateway/config.json'], 'securityContext': context,
-               'resources': {'requests': {'cpu': '250m', 'memory': '128Mi'}, 'limits': {'cpu': cpu, 'memory': memory}},
+               'resources': {'requests': {'cpu': '250m', 'memory': memory if memory in ('4Mi','8Mi') else '128Mi'}, 'limits': {'cpu': cpu, 'memory': memory}},
                'startupProbe': probe, 'readinessProbe': probe,
                'livenessProbe': {**probe, 'periodSeconds': 10, 'failureThreshold': 6},
                'volumeMounts': [{'name': 'config', 'mountPath': '/etc/gateway', 'readOnly': True},
@@ -152,6 +152,84 @@ def restart(pod, signal):
             return {'signal': signal, 'restarts': after['restartCount'], 'last_termination': after.get('lastState', {}).get('terminated')}
         time.sleep(1)
     raise RuntimeError('gateway restart deadline exceeded')
+
+
+def tls_cases():
+    # Operator-controlled TLS/DNS stand-in. Uses the exact candidate's fixed origin,
+    # system hosts resolution and trust store; no product routing/CA test flag.
+    rows=[]
+    with tempfile.TemporaryDirectory() as temp:
+        work=Path(temp)
+        certs=work/'certs'
+        command('bash','-c','. scripts/deployment-evidence/lib.sh; gen_certs "$1"','--',str(certs))
+        command('openssl','req','-new','-key',str(certs/'leaf.key'),'-subj','/CN=synthetic-wrong.example','-out',str(certs/'wrong.csr'))
+        (certs/'wrong.ext').write_text('basicConstraints=CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:synthetic-wrong.example\n')
+        command('openssl','x509','-req','-in',str(certs/'wrong.csr'),'-CA',str(certs/'ca.pem'),'-CAkey',str(certs/'ca.key'),'-CAcreateserial','-days','2','-sha256','-extfile',str(certs/'wrong.ext'),'-out',str(certs/'wrong.pem'))
+        cid=command('docker','create','rsg-beta2-candidate:local')
+        command('docker','cp',cid+':/etc/ssl/certs/ca-certificates.crt',str(work/'system.crt'))
+        command('docker','rm',cid)
+        bundle=(work/'system.crt').read_text()+(certs/'ca.pem').read_text()
+        apply({'apiVersion':'v1','kind':'ConfigMap','metadata':{'name':'tls-tools'},'data':{
+            'tls_stand_in.py':(ROOT/'scripts/deployment-evidence/tools/tls_stand_in.py').read_text()}})
+        public='93.184.216.34'
+        cases=[
+            ('loopback-v4',['127.0.0.1'],'system','upstream_unavailable',0,0,0),
+            ('loopback-v6',['::1'],'system','upstream_unavailable',0,0,0),
+            ('private-10',['10.77.0.1'],'system','upstream_unavailable',0,0,0),
+            ('private-172',['172.31.0.1'],'system','upstream_unavailable',0,0,0),
+            ('private-192',['192.168.77.1'],'system','upstream_unavailable',0,0,0),
+            ('metadata-v4',['169.254.169.254'],'system','upstream_unavailable',0,0,0),
+            ('metadata-v6',['fd00:ec2::254'],'system','upstream_unavailable',0,0,0),
+            ('cgnat',['100.64.0.1'],'system','upstream_unavailable',0,0,0),
+            ('benchmark',['198.18.0.1'],'system','upstream_unavailable',0,0,0),
+            ('mixed',[public,'10.77.0.1'],'system','upstream_unavailable',0,0,0),
+            ('public-untrusted',[public],'system','upstream_tls_failure',1,1,0),
+            ('public-operator-ca',[public],'operator',None,1,0,1),
+            ('hostname-mismatch',[public],'wrong','upstream_tls_failure',1,1,0),
+        ]
+        for label,addresses,trust,code,accepted,tls_failed,requests in cases:
+            name='tls-'+label
+            certificate='wrong.pem' if trust=='wrong' else 'leaf.pem'
+            apply({'apiVersion':'v1','kind':'Secret','metadata':{'name':name+'-cert'},'stringData':{
+                'leaf.pem':(certs/certificate).read_text(),'leaf.key':(certs/'leaf.key').read_text(),'bundle.crt':bundle}})
+            pod=pod_spec(name,'rsg-beta2-candidate:local')
+            spec=pod['spec']
+            spec['hostAliases']=[{'ip':ip,'hostnames':['api.openai.com']} for ip in addresses]
+            context=spec['initContainers'][0]['securityContext']
+            # Addresses exist only on Pod loopback. Installer is a trusted lab
+            # control, never a requirement of basic Gateway installation.
+            aliases='; '.join('ip addr add '+ip+'/32 dev lo' for ip in [public,'10.77.0.1','172.31.0.1','192.168.77.1','169.254.169.254','100.64.0.1','198.18.0.1'])+'; ip -6 addr add fd00:ec2::254/128 dev lo'
+            installer={'name':'operator-addresses','image':'rsg-beta2-operator:local','imagePullPolicy':'Never',
+                'command':['/bin/sh','-ec',aliases],
+                'securityContext':{**context,'runAsNonRoot':False,'runAsUser':0,'runAsGroup':0,'capabilities':{'drop':['ALL'],'add':['NET_ADMIN']}}}
+            provider={'name':'synthetic-tls-provider','image':HELPER,'restartPolicy':'Always',
+                'command':['python','/tls-tools/tls_stand_in.py','serve','--cert','/certs/leaf.pem','--key','/certs/leaf.key','--ipv6'],
+                'securityContext':{**context,'runAsUser':20001,'runAsGroup':20001,'capabilities':{'drop':['ALL'],'add':['NET_BIND_SERVICE']}},
+                'startupProbe':{'exec':{'command':['python','/tls-tools/tls_stand_in.py','sync']},'periodSeconds':1,'timeoutSeconds':3,'failureThreshold':30},
+                'volumeMounts':[{'name':'certs','mountPath':'/certs','readOnly':True},{'name':'tls-tools','mountPath':'/tls-tools','readOnly':True}]}
+            gateway=spec['initContainers'][0]
+            if trust!='system':
+                gateway['volumeMounts'].append({'name':'certs','mountPath':'/etc/ssl/certs/ca-certificates.crt','subPath':'bundle.crt','readOnly':True})
+            spec['initContainers']=[installer,provider,gateway]
+            spec['containers'][0]['volumeMounts'].append({'name':'tls-tools','mountPath':'/tls-tools','readOnly':True})
+            spec['volumes'] += [{'name':'certs','secret':{'secretName':name+'-cert','defaultMode':0o440}},
+                                {'name':'tls-tools','configMap':{'name':'tls-tools'}}]
+            apply(pod)
+            wait_pod(name)
+            before=json.loads(kube('exec',name,'-c','app','--','python','/tls-tools/tls_stand_in.py','sync'))
+            # Print only fixed status/error, never the response/body/key.
+            result=json.loads(kube('exec',name,'-c','app','--','python','-c',
+                'import http.client,json,pathlib;c=http.client.HTTPConnection("127.0.0.1",8787,timeout=10);c.request("POST","/v1/chat/completions",json.dumps({"model":"synthetic-model","messages":[{"role":"user","content":"synthetic evidence ping"}]}),{"Content-Type":"application/json","Authorization":"Bearer sk-SYNTHETIC-REVOKED-BETA2-NOT-A-KEY","X-Gateway-Local-Token":pathlib.Path("/run/secrets/gateway-local-token").read_text().strip()});r=c.getresponse();d=json.loads(r.read(65536));print(json.dumps({"status":r.status,"code":d.get("error",{}).get("code"),"relayed":d.get("id")=="synthetic-stand-in"}))'))
+            after=json.loads(kube('exec',name,'-c','app','--','python','/tls-tools/tls_stand_in.py','sync'))
+            delta={key:after[key]-before[key] for key in ['accepted','tls_failed','requests']}
+            assert result['code']==code and delta=={'accepted':accepted,'tls_failed':tls_failed,'requests':requests}
+            assert result['relayed']==(requests==1)
+            rows.append({'case':label,'host_answers':addresses,'trust':trust,'result':result,'provider_delta':delta,
+                         'candidate_sha256':hashlib.sha256((ROOT/'target/release/redact-secret-gateway').read_bytes()).hexdigest()})
+            evidence('resolver-tls',rows)
+            kube('delete','pod',name,'--wait=true')
+            kube('delete','secret',name+'-cert')
+    return rows
 
 
 def main():
@@ -233,10 +311,21 @@ def main():
                 row={'cpu_limit':cpu,'load':load,'before':before,'after':after,'provisional':True}
                 all_rows.append(row)
                 evidence('load',all_rows)
+        for shape in ['findings','dense']:
+            before={'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')}
+            load=actor(name,'load',10,8,16384,shape,timeout=60)
+            after={'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')}
+            assert after['metrics']['provider']['body']['synthetic_plaintext_received']==0
+            all_rows.append({'cpu_limit':cpu,'load':load,'before':before,'after':after,'provisional':True})
+            evidence('load',all_rows)
         if cpu != '1':
             kube('delete','pod',name,'--wait=true')
     name='quota-1'
     duration=int(os.environ.get('BETA2_SOAK_SECONDS','600'))
+    stalls=actor(name,'stall',timeout=60)
+    assert stalls['json']['status']==502 and stalls['sse']['terminal'] is False
+    evidence('stalled-provider',stalls)
+    time.sleep(20)
     warm=runtime_sample(name)
     cycles=[]
     started=time.monotonic()
@@ -278,9 +367,28 @@ def main():
     assert actor('replacement','direct',replacement['status']['podIP'])['direct_reachable'] is False
     assert actor('replacement','load',3,1,1024)['statuses'].get('200',0)>0
     evidence('replacement',{'direct_egress_denied':True,'mediated_traffic_succeeded':True})
+    apply(pod_spec('oom','rsg-beta2-candidate:local',memory='4Mi'))
+    deadline=time.monotonic()+120
+    while time.monotonic()<deadline:
+        data=json.loads(kube('get','pod','oom','-o','json'))
+        statuses=data.get('status',{}).get('initContainerStatuses',[])
+        last=next((s.get('lastState',{}).get('terminated',s.get('state',{}).get('terminated')) for s in statuses if s['name']=='gateway'),None)
+        if last and last.get('reason')=='OOMKilled':
+            assert not any('running' in s.get('state',{}) for s in data.get('status',{}).get('containerStatuses',[]))
+            evidence('oom',{'gateway_exit':last['exitCode'],'reason':'OOMKilled','app_started':False,'cleanup_promised':False})
+            break
+        time.sleep(1)
+    else: raise RuntimeError('OOM evidence deadline exceeded')
+    kube('delete','pod','oom','--wait=true')
+    apply(pod_spec('oom-recovery','rsg-beta2-qualification:local',qualified=True,enforced=True))
+    recovered=wait_pod('oom-recovery')
+    assert actor('oom-recovery','direct',recovered['status']['podIP'])['direct_reachable'] is False
+    assert actor('oom-recovery','load',3,1,1024)['statuses'].get('200',0)>0
+    evidence('oom-recovery',{'ready':True,'direct_egress_denied':True,'mediated_traffic_succeeded':True})
+    tls_cases()
     evidence('verdict',{'passed':True,'architecture':arch,'publication':False,
         'scope':'native sidecar startup/security, UID egress, cgroup load, bounded soak and restart/replacement',
-        'remaining':'TLS/resolver attack matrix and explicit OOM/active-stream shutdown evidence require reconciliation'})
+        'remaining':'reconcile archived datasets, measured versus provisional support and final candidate handoff to #15'})
 
 
 if __name__=='__main__':
