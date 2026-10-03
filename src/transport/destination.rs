@@ -326,6 +326,10 @@ impl Destination {
 /// Operator-visible route identifier for Chat Completions on the first provider.
 pub const OPENAI_CHAT_COMPLETIONS_ROUTE: &str = "openai.chat_completions";
 
+/// Operator-visible route identifier for Responses on the first provider (#86). Equal to
+/// `Protocol::ResponsesText.route_name()`.
+pub const OPENAI_RESPONSES_ROUTE: &str = "openai.responses";
+
 /// One reviewed route in the static table.
 #[derive(Clone, Debug)]
 pub struct RouteBinding {
@@ -359,11 +363,19 @@ pub fn reviewed_routes(provider: Provider) -> Result<Vec<RouteBinding>, OriginEr
     match provider {
         Provider::OpenAi => {
             let origin = Origin::parse("https://api.openai.com")?;
-            let destination = Destination::new(origin, "/v1/chat/completions", RouteMethod::Post)?;
-            Ok(vec![RouteBinding {
-                id: RouteId::new(OPENAI_CHAT_COMPLETIONS_ROUTE),
-                destination,
-            }])
+            let destination =
+                Destination::new(origin.clone(), "/v1/chat/completions", RouteMethod::Post)?;
+            let responses = Destination::new(origin, "/v1/responses", RouteMethod::Post)?;
+            Ok(vec![
+                RouteBinding {
+                    id: RouteId::new(OPENAI_CHAT_COMPLETIONS_ROUTE),
+                    destination,
+                },
+                RouteBinding {
+                    id: RouteId::new(OPENAI_RESPONSES_ROUTE),
+                    destination: responses,
+                },
+            ])
         }
     }
 }
@@ -458,10 +470,19 @@ mod tests {
     #[test]
     fn destination_is_fixed_exact_https() {
         let routes = reviewed_routes(Provider::OpenAi).expect("routes");
-        let [route] = routes.as_slice() else {
-            panic!("one reviewed route");
+        let [route, responses] = routes.as_slice() else {
+            panic!("two reviewed routes");
         };
         assert_eq!(route.id().as_str(), OPENAI_CHAT_COMPLETIONS_ROUTE);
+        assert_eq!(responses.id().as_str(), OPENAI_RESPONSES_ROUTE);
+        assert_eq!(
+            responses.destination().url().as_str(),
+            "https://api.openai.com/v1/responses"
+        );
+        assert_eq!(
+            responses.destination().origin(),
+            route.destination().origin()
+        );
         let d = route.destination();
         assert_eq!(
             d.url().as_str(),

@@ -796,13 +796,17 @@ fn routes_in_the_schema_match_the_reviewed_route_table() {
         status("implemented"),
         in_code,
         "x-gateway.routes.openai `implemented` must equal the reviewed route table; when #86 \
-         lands openai.responses, flip its status here and in docs/contracts/config-schema.md"
+         adds a route, flip its status here and in docs/contracts/config-schema.md"
     );
     assert_eq!(
-        status("planned"),
-        BTreeSet::from(["openai.responses".to_owned()]),
-        "the one planned route is the Responses route (ADR 0031)"
+        in_code,
+        BTreeSet::from([
+            "openai.chat_completions".to_owned(),
+            "openai.responses".to_owned()
+        ]),
+        "the reviewed table is exactly Chat and Responses (#86, ADR 0031)"
     );
+    assert!(status("planned").is_empty(), "no planned route remains");
     // The route is fixed by the provider profile: no config key can name or add one.
     for rel in [
         "tests/fixtures/config/invalid/deployment-unknown-routes.json",

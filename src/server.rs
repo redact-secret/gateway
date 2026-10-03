@@ -17,7 +17,7 @@ use tokio::sync::Notify;
 use crate::admission::Admission;
 use crate::admission::RequestLimits;
 use crate::boundary::Inspection;
-use crate::chat_route::{self, ChatRoute};
+use crate::chat_route::{self, ChatRoute, ResponsesRoute};
 use crate::config::{ConfigError, RouteId, RuntimePlan};
 use crate::head_guard::{HeadGuardListener, close_after_response};
 use crate::health::{self, HealthState};
@@ -82,6 +82,9 @@ impl From<ConfigError> for StartupError {
 pub struct Services {
     pub(crate) admission: Arc<Admission>,
     pub(crate) chat: Arc<ChatRoute>,
+    /// The `POST /v1/responses` endpoint (#86). `None` leaves the path unrouted (tests that
+    /// build `Services` by hand); production always sets it.
+    pub(crate) responses: Option<Arc<ResponsesRoute>>,
     /// How long shutdown drains in-flight requests before cancelling them (ADR 0017).
     pub(crate) drain: Duration,
 }
@@ -112,6 +115,8 @@ impl Services {
             .with_metrics(Arc::clone(&metrics)),
         );
         // The route id is the reviewed one from the static table, never from a request.
+        let inspection_for_responses = Arc::clone(&inspection);
+        let upstream_for_responses = Arc::clone(&upstream);
         let chat = Arc::new(
             ChatRoute::new(
                 Arc::clone(&admission),
@@ -121,11 +126,25 @@ impl Services {
             .with_inspection(inspection)
             .with_upstream(upstream)
             .with_local_auth(plan.deployment().local_auth().clone())
+            .with_metrics(Arc::clone(&metrics)),
+        );
+        // The same orchestration bound to the Responses protocol and its own fixed route id
+        // (#86): one pipeline, two reviewed endpoints, one shared capacity owner.
+        let responses = Arc::new(
+            ResponsesRoute::responses(
+                Arc::clone(&admission),
+                *plan.resources().limits(),
+                RouteId::new(destination::OPENAI_RESPONSES_ROUTE),
+            )
+            .with_inspection(inspection_for_responses)
+            .with_upstream(upstream_for_responses)
+            .with_local_auth(plan.deployment().local_auth().clone())
             .with_metrics(metrics),
         );
         Ok(Self {
             admission,
             chat,
+            responses: Some(responses),
             drain: plan.resources().limits().shutdown_drain(),
         })
     }
@@ -134,6 +153,12 @@ impl Services {
     #[must_use]
     pub fn admission(&self) -> Arc<Admission> {
         Arc::clone(&self.admission)
+    }
+
+    /// The `POST /v1/responses` admission route, when served.
+    #[must_use]
+    pub fn responses(&self) -> Option<Arc<ResponsesRoute>> {
+        self.responses.as_ref().map(Arc::clone)
     }
 
     /// The `POST /v1/chat/completions` admission route.
@@ -183,6 +208,12 @@ impl BoundServer {
         self.listener.local_addr().map_err(|_| StartupError::Bind)
     }
 
+    /// The responses admission route, for tests that observe capacity.
+    #[must_use]
+    pub fn responses(&self) -> Option<Arc<ResponsesRoute>> {
+        self.services.responses()
+    }
+
     /// The chat admission route, for tests that observe capacity.
     #[must_use]
     pub fn chat(&self) -> Arc<ChatRoute> {
@@ -214,10 +245,12 @@ impl BoundServer {
             services,
         } = self;
         let chat = services.chat();
-        let app = guarded_app(chat_route::mount(
-            health::router(Arc::clone(&state)),
-            Arc::clone(&chat),
-        ));
+        let responses = services.responses();
+        let mut router = chat_route::mount(health::router(Arc::clone(&state)), Arc::clone(&chat));
+        if let Some(responses) = &responses {
+            router = chat_route::mount(router, Arc::clone(responses));
+        }
+        let app = guarded_app(router);
         state.set_accepting(true);
         let on_shutdown = Arc::clone(&state);
         let draining = Arc::new(Notify::new());
@@ -240,6 +273,9 @@ impl BoundServer {
                 tokio::time::sleep(services.drain).await;
             } => {
                 chat.cancel_in_flight();
+                if let Some(responses) = &responses {
+                    responses.cancel_in_flight();
+                }
                 // Cancelled requests answer and close promptly; do not wait on idle or
                 // stuck peers beyond the grace.
                 tokio::time::timeout(CANCEL_GRACE, &mut server)

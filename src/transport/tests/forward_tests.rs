@@ -753,6 +753,7 @@ async fn graceful_shutdown_is_bounded_by_the_drain_deadline() {
     let services = crate::server::Services {
         admission: Arc::clone(&rig.admission),
         chat: Arc::clone(&rig.route),
+        responses: None,
         drain: Duration::from_millis(200),
     };
     let bound = crate::server::bind(plan, move |_| Ok(services))

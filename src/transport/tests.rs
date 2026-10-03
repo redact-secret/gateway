@@ -57,6 +57,7 @@ mod header_cap_tests;
 mod leak;
 mod lifecycle_tests;
 mod local_auth_tests;
+mod responses_route_tests;
 mod slot_coverage_tests;
 mod stream_tests;
 mod tool_history_tests;
@@ -401,7 +402,7 @@ fn profile_variation_cannot_change_destination_or_tls() {
         assert!(d.origin().is_https());
         assert_eq!(d.origin().port(), 443);
         seen.push(d.url().as_str().to_owned());
-        assert_eq!(up.routes.len(), 1);
+        assert_eq!(up.routes.len(), 2, "Chat and Responses");
     }
     assert_eq!(seen[0], seen[1]);
     assert_eq!(seen[0], "https://api.openai.com/v1/chat/completions");
@@ -618,7 +619,7 @@ fn production_resolver_policy_is_public_only() {
     // Built by the production path; its policy cannot be loopback-permissive because the
     // permissive variant is a cfg(test) enum arm that production construction never names.
     let up = Upstream::new(Some(&authority)).expect("client");
-    assert_eq!(up.routes.len(), 1);
+    assert_eq!(up.routes.len(), 2, "Chat and Responses");
     let r = PolicyResolver::system(vec!["api.openai.com".into()]);
     assert!(format!("{r:?}").contains("Public"));
     assert!(!format!("{r:?}").contains("Loopback"));

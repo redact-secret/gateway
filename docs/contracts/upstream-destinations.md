@@ -10,6 +10,7 @@ Status: implemented for destination selection, client construction, and address 
    | Route id | Method | URL |
    | --- | --- | --- |
    | `openai.chat_completions` | `POST` | `https://api.openai.com/v1/chat/completions` |
+   | `openai.responses` | `POST` | `https://api.openai.com/v1/responses` (#86; same origin, its own fixed path) |
 
 3. A destination is obtained only by `RouteId` (`Upstream::destination`, `Upstream::post`). Request path, query, headers (including `Host`, `Forwarded`, `X-Forwarded-*`, `X-Original-URL`), body, and absolute-form targets never influence origin, path, or method. Unknown route ids fail closed with `TransportError::UnknownRoute`; with no upstream configured every route is unknown.
 4. Origin spelling is strict and not normalized: `https://<lowercase-ascii-host>[:443]` and nothing else (no userinfo, path, query, fragment, backslash, percent escape, IP literal in any notation, IDN/`xn--`, trailing dot, other port). Accepted hosts: `api.openai.com`.
