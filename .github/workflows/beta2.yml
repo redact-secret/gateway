@@ -1,6 +1,14 @@
 # Separate non-release workload build; never uploaded as a candidate or published.
 name: Beta 2 sidecar evidence (native, unpublished)
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/beta2.yml"
+      - "qualification/sidecar/**"
+      - "scripts/kubernetes/**"
+      - "examples/kubernetes/**"
+      - "src/**"
   workflow_dispatch:
     inputs:
       soak_seconds:
@@ -50,7 +58,7 @@ jobs:
         run: sh qualification/build.sh --release
       - name: Execute native sidecar, egress, load and recovery evidence
         env:
-          BETA2_SOAK_SECONDS: ${{ inputs.soak_seconds }}
+          BETA2_SOAK_SECONDS: ${{ inputs.soak_seconds || '600' }}
         run: |
           set -eu
           python3 -c 'import os; n=int(os.environ["BETA2_SOAK_SECONDS"]); assert 600 <= n <= 1800'
