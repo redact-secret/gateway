@@ -42,4 +42,6 @@ wait "$pid" || status=$?
 echo "exit status after SIGTERM: $status" | tee -a "$out/probe.txt"
 test "$status" -eq 0
 grep -q 'shutdown complete' "$out/serve.out"
+# Configuration, local-auth, readiness, migration and rollback lifecycle of the same bytes (#65).
+sh "$here/smoke-local-auth.sh" "$bin" "$out"
 echo "binary smoke OK"

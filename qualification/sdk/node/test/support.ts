@@ -13,6 +13,8 @@ function env(name: string): string {
 
 export const synthetic = JSON.parse(readFileSync(env("QUAL_SYNTHETIC"), "utf8")) as {
   api_key: string;
+  local_token: string;
+  local_token_decoy: string;
   secret_prefix: string;
   prompt_marker_prefix: string;
   stream_text: string;
@@ -27,6 +29,8 @@ export const gateways = {
   policyForward: env("GATEWAY_POLICYFORWARD"),
   policyCommon: env("GATEWAY_POLICYCOMMON"),
   concurrent: env("GATEWAY_CONCURRENT"),
+  authFile: env("GATEWAY_AUTHFILE"),
+  authEnv: env("GATEWAY_AUTHENV"),
 };
 
 const admin = env("QUAL_ADMIN");
@@ -42,6 +46,7 @@ export interface Call {
   authorization_sha256: string | null;
   content_type: string | null;
   user_agent: string | null;
+  local_token_seen: boolean;
   body: string;
   body_bytes: number;
   scenario: string;
@@ -127,7 +132,7 @@ export async function closedPort(): Promise<number> {
 }
 
 export function leaks(text: string): string[] {
-  return [synthetic.secret_prefix, "ghp_SYNTH", synthetic.prompt_marker_prefix, synthetic.api_key, "hunter2xyz", "U1lOVEhFVElDUkVWT0tFRFNZTlRIRVRJQ0tFWQ"].filter((m) =>
+  return [synthetic.local_token, synthetic.local_token_decoy, synthetic.secret_prefix, "ghp_SYNTH", synthetic.prompt_marker_prefix, synthetic.api_key, "hunter2xyz", "U1lOVEhFVElDUkVWT0tFRFNZTlRIRVRJQ0tFWQ"].filter((m) =>
     text.includes(m),
   );
 }

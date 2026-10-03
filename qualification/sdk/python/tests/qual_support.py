@@ -34,6 +34,8 @@ GATEWAYS = {
     "policy_forward": _env("GATEWAY_POLICYFORWARD"),
     "policy_common": _env("GATEWAY_POLICYCOMMON"),
     "concurrent": _env("GATEWAY_CONCURRENT"),
+    "auth_file": _env("GATEWAY_AUTHFILE"),
+    "auth_env": _env("GATEWAY_AUTHENV"),
 }
 _ADMIN = _env("QUAL_ADMIN")
 DIRECT_PROVIDER = _env("QUAL_PROVIDER")  # control path that bypasses the gateway
@@ -70,7 +72,8 @@ class provider:  # noqa: N801 - namespace, mirrors the Node helper
 
 def client(base: str, **kwargs: Any) -> OpenAI:
     kwargs.setdefault("max_retries", 0)
-    return OpenAI(base_url=f"{base}/v1", api_key=SYN["api_key"], **kwargs)
+    kwargs.setdefault("api_key", SYN["api_key"])
+    return OpenAI(base_url=f"{base}/v1", **kwargs)
 
 
 def counting_http_client() -> tuple[httpx2.Client, list[int]]:
@@ -94,7 +97,7 @@ def auth_sha() -> str:
 
 
 def leaks(text: str) -> list[str]:
-    return [m for m in (SYN["secret_prefix"], "ghp_SYNTH", SYN["prompt_marker_prefix"], SYN["api_key"], "hunter2xyz", "U1lOVEhFVElDUkVWT0tFRFNZTlRIRVRJQ0tFWQ") if m in text]
+    return [m for m in (SYN["local_token"], SYN["local_token_decoy"], SYN["secret_prefix"], "ghp_SYNTH", SYN["prompt_marker_prefix"], SYN["api_key"], "hunter2xyz", "U1lOVEhFVElDUkVWT0tFRFNZTlRIRVRJQ0tFWQ") if m in text]
 
 
 def assert_nothing_upstream(test: Any, why: str) -> None:
