@@ -20,9 +20,10 @@ Status: transport framing, the frozen status mapping, and the SDK retry, duplica
 | `invalid_config` | Startup only: static configuration failed validation. Never a request outcome. |
 | `not_ready` | Readiness is false: validated plan or required initialization is missing. |
 | `missing_credential` | No usable provider `Authorization` on a request (#24). The provider credential, not a local-auth result. |
+| `local_auth_required` | The local caller token (`X-Gateway-Local-Token`) is absent, or removed by `Connection`, while `deployment.local_auth.mode` is `token` (#63). `401`, before any body read. Distinct from the provider-credential `missing_credential`. Spec: [local-caller-auth](local-caller-auth.md). |
+| `local_auth_invalid` | The local caller token is present but duplicate, malformed, out of bounds, or not equal to the configured token (#63). `401`, same body and headers as `local_auth_required`. |
 | `not_implemented` | The request cannot be served by this build or deployment: no `deployment.upstream` is configured (#20). Never forwarded. |
 
-**Planned codes (not yet in `SafeCode`, so not in the table above).** `local_auth_required` and `local_auth_invalid` (#61, enforced by #63): the local caller token is absent, or present but duplicate, malformed, out of bounds, or wrong. `401`, before any body read, distinct from the provider-credential `missing_credential`. Spec: [local-caller-auth](local-caller-auth.md). #63 moves them into the table when it adds the `SafeCode` variants.
 
 Errors never echo payload fragments, credentials, or offending text. Provider response and error bodies are relayed under the response contract and may contain sensitive data. Document status mappings and SDK-retry implications. After response bytes start, errors cannot change the HTTP status; terminate per the stream error contract without fabricating completion events.
 
@@ -151,6 +152,8 @@ Column meanings. `Provider bytes sent`: `no` means nothing of this request reach
 | `Reject::NotImplemented` | 501 | `not_implemented` | - | no | yes | No retry helps (no upstream configured); retries are wasted work. |
 | `Reject::ShuttingDown` | 503 | `not_ready` | - | no | yes | Retry against another instance; this one is draining. |
 | `Reject::MissingCredential` | 401 | `missing_credential` | - | no | no | Supply a provider `Authorization`. |
+| `Reject::LocalAuthRequired` | 401 | `local_auth_required` | - | no | no | Send the configured local token in `X-Gateway-Local-Token` (SDK `default_headers`); a retry without it fails again. |
+| `Reject::LocalAuthInvalid` | 401 | `local_auth_invalid` | - | no | no | Fix the local token or send exactly one well-formed header; the response never says which. |
 | `Reject::Header` | 400 | `malformed_input` | - | no | no | Fix the header (duplicate or malformed credential, organization, project, or `Connection`). |
 | `Reject::HeaderTooLarge` | 431 | `limit_exceeded` | - | no | no | Shrink the headers. |
 | `Reject::Expectation` | 417 | `unsupported_input` | - | no | no | Drop `Expect`, or use `100-continue`. |

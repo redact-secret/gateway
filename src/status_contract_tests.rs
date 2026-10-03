@@ -89,6 +89,8 @@ fn reject_id(reject: Reject) -> String {
         Reject::NotImplemented => "Reject::NotImplemented".into(),
         Reject::ShuttingDown => "Reject::ShuttingDown".into(),
         Reject::MissingCredential => "Reject::MissingCredential".into(),
+        Reject::LocalAuthRequired => "Reject::LocalAuthRequired".into(),
+        Reject::LocalAuthInvalid => "Reject::LocalAuthInvalid".into(),
         Reject::Header => "Reject::Header".into(),
         Reject::HeaderTooLarge => "Reject::HeaderTooLarge".into(),
         Reject::Expectation => "Reject::Expectation".into(),
@@ -125,6 +127,8 @@ fn all_rejects() -> Vec<Reject> {
         Reject::NotImplemented,
         Reject::ShuttingDown,
         Reject::MissingCredential,
+        Reject::LocalAuthRequired,
+        Reject::LocalAuthInvalid,
         Reject::Header,
         Reject::HeaderTooLarge,
         Reject::Expectation,
@@ -170,6 +174,8 @@ fn is_request_outcome(code: SafeCode) -> bool {
         | SafeCode::NotReady
         | SafeCode::NotImplemented
         | SafeCode::MissingCredential
+        | SafeCode::LocalAuthRequired
+        | SafeCode::LocalAuthInvalid
         | SafeCode::UpstreamTimeout
         | SafeCode::UpstreamUnavailable
         | SafeCode::UpstreamTls
@@ -179,7 +185,7 @@ fn is_request_outcome(code: SafeCode) -> bool {
     }
 }
 
-const ALL_CODES: [SafeCode; 15] = [
+const ALL_CODES: [SafeCode; 17] = [
     SafeCode::MalformedInput,
     SafeCode::UnsupportedInput,
     SafeCode::LimitExceeded,
@@ -190,6 +196,8 @@ const ALL_CODES: [SafeCode; 15] = [
     SafeCode::NotReady,
     SafeCode::NotImplemented,
     SafeCode::MissingCredential,
+    SafeCode::LocalAuthRequired,
+    SafeCode::LocalAuthInvalid,
     SafeCode::UpstreamTimeout,
     SafeCode::UpstreamUnavailable,
     SafeCode::UpstreamTls,

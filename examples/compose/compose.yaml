@@ -6,12 +6,21 @@
 #
 #   cargo build --locked --release
 #   sh scripts/build-image.sh target/release/redact-secret-gateway redact-secret-gateway:candidate
-#   docker compose -f examples/compose/compose.yaml up -d
-#   curl -s http://127.0.0.1:8787/readyz            # {"status":"ready"}
+#
+# The gateway enforces a local caller token (#63) and does not start without one. Create it once,
+# outside the repository, as a regular file readable by the image's user (uid 65532) and by nobody
+# else (the gateway rejects a file readable by "other"), then start the service:
+#
+#   umask 077; head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n' > "$HOME/gateway-local-token"
+#   sudo chown 65532:65532 "$HOME/gateway-local-token"; sudo chmod 0400 "$HOME/gateway-local-token"
+#   GATEWAY_LOCAL_TOKEN_FILE="$HOME/gateway-local-token" docker compose -f examples/compose/compose.yaml up -d
+#   curl -s http://127.0.0.1:8787/readyz            # {"status":"ready"}; probes need no token
 #
 # Then point your SDK at http://127.0.0.1:8787/v1 (see examples/node and examples/python). Your
-# application supplies its own provider key per request; this file holds no key, env var, or
-# volume. The image's static config (container/config.container.json) fixes the provider
+# application sends the local token in X-Gateway-Local-Token (the SDK's default headers) and,
+# independently, its own provider key per request. This file holds no key and no token value; the
+# token is a Compose secret mounted read-only at /run/secrets/gateway-local-token. Anyone who can
+# read that file is inside the trust boundary. The image's static config (container/config.container.json) fixes the provider
 # (api.openai.com) and its capacity numbers, which are provisional and unmeasured (ADR 0008). To
 # change it, validate your file with `redact-secret-gateway validate-config`, then mount it:
 #
@@ -36,4 +45,10 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
+    secrets:
+      - source: gateway_local_token
+        target: gateway-local-token
     restart: "no"
+secrets:
+  gateway_local_token:
+    file: ${GATEWAY_LOCAL_TOKEN_FILE:?set GATEWAY_LOCAL_TOKEN_FILE to a local token file (see the top of this file)}

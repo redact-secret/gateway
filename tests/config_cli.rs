@@ -155,14 +155,33 @@ fn invalid_config_fails_before_binding() {
 }
 
 #[test]
-fn non_loopback_with_explicit_setting_validates() {
-    let path = temp_file(
-        "nonloop-ack.json",
-        &config_with(r#""address": "0.0.0.0:0", "allow_non_loopback": true"#, ""),
-    );
+fn non_loopback_with_explicit_setting_requires_a_local_token() {
+    let address = r#""address": "0.0.0.0:0", "allow_non_loopback": true"#;
+    // The acknowledgement alone is rejected (#63, ADR 0030).
+    let path = temp_file("nonloop-ack.json", &config_with(address, ""));
     let out = bin()
         .args(["validate-config"])
         .arg(&path)
+        .output()
+        .expect("run");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("invalid_config: invalid_combination at deployment.local_auth.mode")
+    );
+    // With a token source it validates; the token comes from the environment here.
+    let doc = config_with(address, "").replace(
+        "\"deployment\": {",
+        r#""deployment": {"local_auth": {"mode": "token", "token": {"env": "RSG_SYNTH_LOCAL_TOKEN"}},"#,
+    );
+    let path = temp_file("nonloop-token.json", &doc);
+    let out = bin()
+        .args(["validate-config"])
+        .arg(&path)
+        .env(
+            "RSG_SYNTH_LOCAL_TOKEN",
+            "SYNTHETIC-config-cli-local-token-0123456789",
+        )
         .output()
         .expect("run");
     assert!(out.status.success());

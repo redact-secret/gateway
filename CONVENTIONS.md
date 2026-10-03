@@ -28,7 +28,7 @@ Numerical defaults need measured justification and boundary tests. A finite per-
 
 Receive complete bounded requests, classify fields, inspect decoded text, validate transformed output, then forward. Reject unsupported inputs rather than forwarding them unchanged. Unknown nested fields require the same classification discipline as top-level fields.
 
-Recompute outbound lengths after transformation. Define header allowlists and hop-by-hop behavior explicitly. Disable redirects and gateway retries. Provider headers and local caller tokens follow separate handling rules. Do not log requests before sanitization or assume sanitization makes body logging safe.
+Recompute outbound lengths after transformation. Define header allowlists and hop-by-hop behavior explicitly. Disable redirects and gateway retries. Provider headers and local caller tokens follow separate handling rules (`transport::local_auth` owns the token: no `Clone`, `Display`, `Serialize` or equality operator, a redacted `Debug`, constant-time comparison, never in request state). Do not log requests before sanitization or assume sanitization makes body logging safe.
 
 Gateway-generated errors use stable safe codes; preserve no offending text in error messages. Once response delivery begins, failure follows the documented termination contract. Do not fabricate provider SSE completion events to disguise an interrupted response.
 

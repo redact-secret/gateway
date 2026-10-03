@@ -1,6 +1,6 @@
 # Contract: headers, framing, and provider credentials
 
-Status: implemented for inbound vetting, the request-local credential, outbound wire-header construction, and the response-header allowlist (#24, [ADR 0016](../decisions/0016-header-allowlists-and-request-local-credentials.md)). Sending the request and relaying ordinary JSON responses is implemented (#20, [ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md)). **Planned:** the local caller token (Beta 1 #12), frozen in [local-caller-auth](local-caller-auth.md) ([ADR 0030](../decisions/0030-local-caller-auth-listener-health.md), #61) and enforced by #63. Code: `src/transport/headers.rs`, `src/transport/credential.rs`, `Upstream::outbound`.
+Status: implemented for inbound vetting, the request-local credential, outbound wire-header construction, and the response-header allowlist (#24, [ADR 0016](../decisions/0016-header-allowlists-and-request-local-credentials.md)). Sending the request and relaying ordinary JSON responses is implemented (#20, [ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md)). The local caller token (Beta 1 #12) is implemented in #63 and specified in [local-caller-auth](local-caller-auth.md) ([ADR 0030](../decisions/0030-local-caller-auth-listener-health.md)). Code: `src/transport/headers.rs`, `src/transport/credential.rs`, `src/transport/local_auth.rs`, `Upstream::outbound`.
 
 ## Principles
 
@@ -28,7 +28,7 @@ Status: implemented for inbound vetting, the request-local credential, outbound 
 | `Accept` | Ignored. Outbound is `application/json, text/event-stream` | Fixed; streaming relay is #21 ([ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md)) |
 | `Accept-Encoding` | Ignored. Outbound is `identity` | The gateway does not decode provider responses, so it must not ask for a coding |
 | `TE`, `Trailer`, `Keep-Alive`, `Proxy-*`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `Via`, `Cookie`, `X-Api-Key`, `api-key`, SDK telemetry (`X-Stainless-*`, ...), `OpenAI-Beta`, any other header | Ignored (not forwarded) | Strip is safer for SDK and proxy compatibility than reject, and an allowlist cannot forward what it does not name |
-| `X-Gateway-Local-*` (reserved) | Ignored and never forwarded | Local-authority namespace, see below |
+| `X-Gateway-Local-*` (reserved), including `X-Gateway-Local-Token` | Consumed or ignored locally, never forwarded | Local-authority namespace, see below |
 | Header bytes | Total names+values over 16,384 bytes, or any value over 8,192 bytes: `431 limit_exceeded` | Bounded before reservation. Confirmed against measured SDK and modelled intermediary headers, with the size-class table: [ADR 0023](../decisions/0023-header-size-measurement-and-size-classes.md) |
 
 Query strings and absolute-form targets are rejected (`400`); the path is fixed. The only caller-controlled metadata that intentionally reaches the provider are the credential, the optional organization/project ids, and the request body.
@@ -48,9 +48,9 @@ There is no `Transfer-Encoding`, `Connection`, `Expect`, `Upgrade`, `TE`, `Trail
 - It is forwarded only to the destination chosen by `RouteId` from the reviewed table. Content-profile changes cannot alter header policy, `Host`, TLS, or origin (tested).
 - Secure erasure is **not** promised (SECURITY.md, ADR 0007): copies may remain in allocator, HTTP, and TLS buffers.
 
-## Local gateway authority (frozen design, planned: #63)
+## Local gateway authority (#63)
 
-A caller token proving the caller may use the gateway is a separate concept and is specified in [local-caller-auth](local-caller-auth.md) ([ADR 0030](../decisions/0030-local-caller-auth-listener-health.md)). The header is `X-Gateway-Local-Token` inside the reserved `X-Gateway-Local-*` namespace (`LOCAL_AUTHORITY_PREFIX`); it has its own type and module, is never accepted as the provider credential, is consumed locally, and is never forwarded. It does not use `Authorization`, which stays the provider credential. **Today nothing enforces it:** every `X-Gateway-Local-*` header, including `X-Gateway-Local-Token`, is ignored and cannot reach the wire (the outbound set is an allowlist). When #63 lands, a missing or invalid token is `401 local_auth_required` / `local_auth_invalid` before any body read, and `vet_inbound` runs only for authenticated requests.
+A caller token proving the caller may use the gateway is a separate concept and is specified in [local-caller-auth](local-caller-auth.md) ([ADR 0030](../decisions/0030-local-caller-auth-listener-health.md)). The header is `X-Gateway-Local-Token` inside the reserved `X-Gateway-Local-*` namespace (`LOCAL_AUTHORITY_PREFIX`); it has its own type and module, is never accepted as the provider credential, is consumed locally, and is never forwarded. It does not use `Authorization`, which stays the provider credential. When `deployment.local_auth.mode` is `token`, the gateway authenticates every `POST` to a proxy route first: a missing or invalid token is `401 local_auth_required` / `local_auth_invalid` before any body read, `Expect: 100-continue` is not acknowledged, nothing is reserved, and `vet_inbound` runs only for authenticated requests. The token is compared in constant time and is never stored in request state, never copied into `VettedHeaders`, and never on the wire: the outbound set is an allowlist (`WIRE_HEADER_NAMES`) and the fake-upstream tests inspect the exact bytes the provider receives, with mixed-case, duplicate and `Connection`-nominated variants. In `disabled` mode (or with no `local_auth`, supported on loopback only) every `X-Gateway-Local-*` header is ignored and still never forwarded.
 
 ## Framing and malformed-header outcomes
 

@@ -25,7 +25,8 @@ use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 
 use super::credential::ProviderCredential;
 
-/// Reserved prefix for local gateway authority headers (Beta 1 #12, not implemented).
+/// Reserved prefix for local gateway authority headers (Beta 1 #12; the token header is
+/// [`super::local_auth::LOCAL_TOKEN_HEADER`], #63).
 ///
 /// A caller token proving the caller may use the gateway is *not* the provider
 /// credential, travels in a different header (name fixed by #12 under this prefix), and
@@ -242,6 +243,18 @@ fn connection_nominated(headers: &HeaderMap) -> Result<Vec<HeaderName>, HeaderRe
         }
     }
     Ok(out)
+}
+
+/// Whether a `Connection` header nominates `name` as hop-by-hop (so an intermediary would
+/// have removed it). Used by local authentication (#63): a nominated token header is absent.
+///
+/// # Errors
+/// [`HeaderReject::Connection`] when `Connection` itself is malformed or ambiguous.
+pub(crate) fn connection_nominates(
+    headers: &HeaderMap,
+    name: &HeaderName,
+) -> Result<bool, HeaderReject> {
+    Ok(connection_nominated(headers)?.iter().any(|n| n == name))
 }
 
 /// Zero or one identifier of `[A-Za-z0-9_.-]{1,128}`; a nominated header is absent.

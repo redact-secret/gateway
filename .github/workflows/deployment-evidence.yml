@@ -12,7 +12,7 @@
 #     attempts, and a throwaway-CA TLS-interception demonstration (control 3).
 #
 # Not part of the required `CI passed` aggregate (ci.yml); it needs Docker and pulls digest-pinned
-# helper images. It uses no secrets, no provider key, and no network beyond Docker Hub pulls: every
+# helper images. It uses no secrets (the per-run local caller token is a throwaway value generated on the runner and never leaves it), no provider key, and no network beyond Docker Hub pulls: every
 # container network is internal or `--network none`, and every payload is synthetic. Only text
 # evidence is uploaded (no binary, no key material: certificates are generated in a temp directory
 # that is never part of the evidence directory).

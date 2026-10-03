@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use redact_secret_gateway::admission::RequestLimits;
 use redact_secret_gateway::config::{self, ConfigError, Provider};
 use redact_secret_gateway::transport::destination::reviewed_routes;
+use redact_secret_gateway::transport::local_auth::{LocalToken, TokenReference};
 use serde_json::{Value, json};
 
 fn root() -> PathBuf {
@@ -36,12 +37,22 @@ fn schema() -> Value {
     serde_json::from_str(&read("docs/schema/gateway-config.v1.schema.json")).expect("schema JSON")
 }
 
+/// A committed fixture cannot carry a secret or the required file mode, so fixtures resolve
+/// their `local_auth.token` reference to this synthetic value instead of touching the real
+/// environment or filesystem (that path is covered by `tests/local_auth_startup.rs`).
+fn synthetic_token(_: &TokenReference) -> Result<LocalToken, ConfigError> {
+    LocalToken::from_bytes(b"SYNTHETIC-local-token-0123456789-abcdefghij")
+}
+
 fn load(rel: &str) -> Result<config::RuntimePlan, ConfigError> {
-    config::load_from_path(&root().join(rel))
+    config::load_from_path_with(&root().join(rel), &synthetic_token)
 }
 
 fn parse_value(v: &Value) -> Result<config::RuntimePlan, ConfigError> {
-    config::parse(serde_json::to_string(v).expect("json").as_bytes())
+    config::parse_with(
+        serde_json::to_string(v).expect("json").as_bytes(),
+        &synthetic_token,
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -62,6 +73,9 @@ const SUPPORTED: &[&str] = &[
     "items",
     "minLength",
     "maxLength",
+    "pattern",
+    "minProperties",
+    "maxProperties",
 ];
 const ANNOTATIONS: &[&str] = &[
     "$schema",
@@ -76,8 +90,8 @@ fn is_annotation(key: &str) -> bool {
     ANNOTATIONS.contains(&key) || key.starts_with("x-")
 }
 
-/// Fail on any keyword the validator does not implement. Skips `$defs` (the planned,
-/// documentation-only definitions) and `x-*` extensions.
+/// Fail on any keyword the validator does not implement. Skips `$defs` and `x-*`
+/// extensions.
 fn assert_supported(node: &Value, at: &str) {
     let Some(map) = node.as_object() else { return };
     for (k, v) in map {
@@ -108,6 +122,22 @@ fn type_ok(ty: &str, v: &Value) -> bool {
         "boolean" => v.is_boolean(),
         "integer" => v.is_i64() || v.is_u64(),
         _ => panic!("unsupported type {ty}"),
+    }
+}
+
+/// The only two regular expressions the schema uses, matched by hand so the validator needs
+/// no regex dependency and fails loudly on any new pattern.
+fn pattern_ok(pattern: &str, s: &str) -> bool {
+    match pattern {
+        "^/" => s.starts_with('/'),
+        "^[A-Z_][A-Z0-9_]{0,63}$" => {
+            let b = s.as_bytes();
+            (1..=64).contains(&b.len())
+                && b.iter().enumerate().all(|(i, c)| {
+                    c.is_ascii_uppercase() || *c == b'_' || (i > 0 && c.is_ascii_digit())
+                })
+        }
+        other => panic!("unsupported pattern {other}"),
     }
 }
 
@@ -162,6 +192,11 @@ fn check(node: &Value, v: &Value, at: &str, out: &mut Vec<String>) {
         {
             out.push(format!("{at}: maxLength"));
         }
+        if let Some(p) = map.get("pattern").and_then(Value::as_str)
+            && !pattern_ok(p, s)
+        {
+            out.push(format!("{at}: pattern"));
+        }
     }
     if let Some(items) = v.as_array() {
         let len = items.len() as u64;
@@ -186,6 +221,21 @@ fn check(node: &Value, v: &Value, at: &str, out: &mut Vec<String>) {
         }
     }
     if let Some(obj) = v.as_object() {
+        let size = obj.len() as u64;
+        if map
+            .get("minProperties")
+            .and_then(Value::as_u64)
+            .is_some_and(|m| size < m)
+        {
+            out.push(format!("{at}: minProperties"));
+        }
+        if map
+            .get("maxProperties")
+            .and_then(Value::as_u64)
+            .is_some_and(|m| size > m)
+        {
+            out.push(format!("{at}: maxProperties"));
+        }
         let props = map.get("properties").and_then(Value::as_object);
         if let Some(req) = map.get("required").and_then(Value::as_array) {
             for r in req {
@@ -242,8 +292,8 @@ fn schema_is_well_formed_closed_and_uses_only_checked_keywords() {
     closed_objects(&s, "$", &mut objs);
     assert_eq!(
         objs.len(),
-        8,
-        "root, deployment, listener, upstream, content, resources, capacity, limits"
+        10,
+        "root, deployment, listener, upstream, local_auth, token, content, resources, capacity, limits"
     );
     // The schema must be internally valid against its own claims: every default is allowed.
     fn defaults(node: &Value, at: &str) {
@@ -385,7 +435,7 @@ fn every_shipped_example_and_valid_fixture_loads_and_matches_the_schema() {
         "container/config.container.json".into(),
     ];
     let valid = json_files("tests/fixtures/config/valid");
-    assert!(valid.len() >= 8, "valid fixtures went missing");
+    assert!(valid.len() >= 12, "valid fixtures went missing");
     files.extend(
         valid
             .iter()
@@ -481,7 +531,6 @@ fn fixtures_carry_no_credential_shaped_text() {
     for dir in [
         "tests/fixtures/config/valid",
         "tests/fixtures/config/invalid",
-        "tests/fixtures/config/planned",
         "examples",
     ] {
         for n in json_files(dir) {
@@ -765,63 +814,74 @@ fn routes_in_the_schema_match_the_reviewed_route_table() {
 }
 
 #[test]
-fn planned_local_auth_is_rejected_everywhere_until_it_is_implemented() {
+fn local_auth_is_implemented_in_the_schema_and_the_loader() {
     let s = schema();
-    // Honest labelling: planned, defined for reference, not reachable from `properties`.
-    assert_eq!(
-        s["$defs"]["planned_local_auth"]["x-gateway-status"],
-        "planned"
-    );
+    // The planned placeholder is gone: the definition lives in deployment.properties.
+    assert!(s.get("$defs").is_none(), "no planned definitions remain");
+    assert!(s["x-gateway"].get("planned").is_none());
     assert!(
-        s["properties"]["deployment"]["properties"]
-            .get("local_auth")
-            .is_none()
+        !std::path::Path::new(&root().join("tests/fixtures/config/planned")).exists(),
+        "planned fixtures moved into valid/ and invalid/"
     );
+    let la = &s["properties"]["deployment"]["properties"]["local_auth"];
+    assert_eq!(la["required"], json!(["mode"]));
     assert_eq!(
-        s["x-gateway"]["planned"]["deployment.local_auth"],
-        "#/$defs/planned_local_auth"
+        la["properties"]["mode"]["enum"],
+        json!(["disabled", "token"])
     );
-
-    let index: Value =
-        serde_json::from_str(&read("tests/fixtures/config/planned/index.json")).expect("index");
-    let cases = index["cases"].as_array().expect("cases");
-    let listed: BTreeSet<String> = cases
-        .iter()
-        .map(|c| c["file"].as_str().expect("f").to_owned())
-        .collect();
-    let on_disk: BTreeSet<String> = json_files("tests/fixtures/config/planned")
-        .into_iter()
-        .collect();
+    let token = &la["properties"]["token"];
     assert_eq!(
-        listed, on_disk,
-        "planned/index.json must list exactly the planned fixtures"
+        (
+            token["minProperties"].as_u64(),
+            token["maxProperties"].as_u64()
+        ),
+        (Some(1), Some(1))
     );
-    assert!(
-        cases.iter().any(|c| c["intended"] == "valid")
-            && cases.iter().any(|c| c["intended"] == "invalid")
-    );
-    for c in cases {
-        let rel = format!(
-            "tests/fixtures/config/planned/{}",
-            c["file"].as_str().expect("f")
-        );
-        // Fail closed: the key is unknown to the loader, so neither a good nor a bad
-        // local_auth object can start the gateway (#63 changes this and moves the fixtures).
-        let err = load(&rel).expect_err(
-            "local_auth is not implemented: #63 must move this fixture into valid/ or invalid/ \
-             and the schema definition into deployment.properties",
-        );
-        assert_eq!(
-            (err.kind().as_str(), err.location()),
-            ("unknown_field", "deployment"),
-            "{rel}"
-        );
-        let doc: Value = serde_json::from_str(&read(&rel)).expect("json");
-        assert!(
-            !schema_errors(&doc).is_empty(),
-            "{rel}: the schema must reject it as well"
-        );
+    // The schema and the loader agree on every local_auth fixture.
+    for (name, valid) in [
+        ("local-auth-disabled-explicit.json", true),
+        ("local-auth-token-env.json", true),
+        ("local-auth-token-file.json", true),
+        ("local-auth-non-loopback-with-token.json", true),
+    ] {
+        let rel = format!("tests/fixtures/config/valid/{name}");
+        assert_eq!(load(&rel).is_ok(), valid, "{name}");
     }
+}
+
+#[test]
+fn local_auth_token_is_a_reference_and_never_a_value() {
+    for token in [
+        json!({"value": "SYNTHETIC-local-token-0123456789-abcdefghij"}),
+        json!({"env": "GATEWAY_LOCAL_TOKEN", "value": "x"}),
+        json!({"literal": "x"}),
+    ] {
+        let mut doc = base();
+        doc["deployment"]["local_auth"] = json!({"mode": "token", "token": token});
+        let err = parse_value(&doc).expect_err("a value key is not accepted");
+        assert_eq!(err.kind().as_str(), "unknown_field");
+        assert!(!schema_errors(&doc).is_empty());
+        assert!(!err.to_string().contains("SYNTHETIC"));
+    }
+    let mut doc = base();
+    doc["deployment"]["local_auth"] = json!({"mode": "token", "token": "SYNTHETIC-direct-string"});
+    assert!(parse_value(&doc).is_err());
+    assert!(!schema_errors(&doc).is_empty());
+}
+
+#[test]
+fn container_config_enforces_a_token_from_a_mounted_file() {
+    let doc: Value = serde_json::from_str(&read("container/config.container.json")).expect("json");
+    let la = &doc["deployment"]["local_auth"];
+    assert_eq!(la["mode"], "token");
+    assert_eq!(
+        la["token"],
+        json!({"file": "/run/secrets/gateway-local-token"})
+    );
+    assert_eq!(
+        doc["deployment"]["listener"]["allow_non_loopback"],
+        json!(true)
+    );
 }
 
 #[test]

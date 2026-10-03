@@ -69,6 +69,7 @@ use crate::protocol::chat::ChatRequest;
 use crate::protocol::{self, Protocol, ProtocolError, ValidatedRequest};
 use crate::telemetry::{Metrics, SafeCode, Stage};
 use crate::transport::headers::{HeaderReject, VettedHeaders, vet_inbound};
+use crate::transport::local_auth::{AuthReject, LocalAuth};
 use crate::transport::{Forwarded, StreamResponse, TransportError, Upstream, UpstreamResponse};
 
 /// The one exact route served by this module.
@@ -112,6 +113,10 @@ pub enum Reject {
     Inspection(BoundaryError),
     /// No usable provider `Authorization` header (#24).
     MissingCredential,
+    /// Local caller token (`X-Gateway-Local-Token`) absent or removed by `Connection` (#63).
+    LocalAuthRequired,
+    /// Local caller token duplicate, malformed, out of bounds, or wrong (#63).
+    LocalAuthInvalid,
     /// Duplicate or malformed `Authorization`, organization/project, or `Connection` (#24).
     Header,
     /// Request headers over the byte limits (#24).
@@ -156,6 +161,8 @@ impl Reject {
                 code => (StatusCode::INTERNAL_SERVER_ERROR, code),
             },
             Self::MissingCredential => (StatusCode::UNAUTHORIZED, SafeCode::MissingCredential),
+            Self::LocalAuthRequired => (StatusCode::UNAUTHORIZED, SafeCode::LocalAuthRequired),
+            Self::LocalAuthInvalid => (StatusCode::UNAUTHORIZED, SafeCode::LocalAuthInvalid),
             Self::Header => (StatusCode::BAD_REQUEST, SafeCode::MalformedInput),
             Self::HeaderTooLarge => (
                 StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
@@ -191,6 +198,15 @@ impl IntoResponse for Reject {
             _ => {}
         }
         response
+    }
+}
+
+impl From<AuthReject> for Reject {
+    fn from(error: AuthReject) -> Self {
+        match error {
+            AuthReject::Required => Self::LocalAuthRequired,
+            AuthReject::Invalid => Self::LocalAuthInvalid,
+        }
     }
 }
 
@@ -287,6 +303,8 @@ pub struct ChatRoute {
     inspection: Option<Arc<Inspection>>,
     upstream: Option<Arc<Upstream>>,
     metrics: Arc<Metrics>,
+    /// Local caller authentication, the first decision for a `POST` (#63).
+    local_auth: LocalAuth,
     /// Flipped once by [`Self::cancel_in_flight`]; every request future selects on it.
     cancel: watch::Sender<bool>,
 }
@@ -306,6 +324,7 @@ impl ChatRoute {
             inspection: None,
             upstream: None,
             metrics: Arc::new(Metrics::new()),
+            local_auth: LocalAuth::Disabled,
             cancel: watch::channel(false).0,
         }
     }
@@ -330,6 +349,14 @@ impl ChatRoute {
     #[must_use]
     pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
         self.metrics = metrics;
+        self
+    }
+
+    /// Attach the startup-built local caller authentication (#63). Without it the route is
+    /// the Alpha behavior (`Disabled`), which the plan allows on a loopback listener only.
+    #[must_use]
+    pub fn with_local_auth(mut self, local_auth: LocalAuth) -> Self {
+        self.local_auth = local_auth;
         self
     }
 
@@ -372,6 +399,13 @@ impl ChatRoute {
     /// and relay. The returned future owns every permit and buffer the request holds;
     /// dropping it (caller disconnect) or [`Self::cancel_in_flight`] ends them all.
     pub async fn handle(&self, request: Request) -> Response {
+        // Local caller authentication is the first decision (#63, ADR 0030): before the
+        // head checks below, any `100 Continue`, reservation, body read, or upstream
+        // contact. The body is never polled on this path.
+        if let Err(rejected) = self.local_auth.screen(request.method(), request.headers()) {
+            self.metrics.record_local_auth_rejection(rejected.code());
+            return Reject::from(rejected).into_response();
+        }
         let mut cancel = self.cancel.subscribe();
         let work = async {
             match self.admit(request).await {
@@ -712,6 +746,8 @@ mod tests {
             Reject::Inspection(BoundaryError::Core(CoreBridgeError::Incomplete)),
             Reject::Inspection(BoundaryError::Core(CoreBridgeError::Overload)),
             Reject::MissingCredential,
+            Reject::LocalAuthRequired,
+            Reject::LocalAuthInvalid,
             Reject::Header,
             Reject::HeaderTooLarge,
             Reject::Expectation,

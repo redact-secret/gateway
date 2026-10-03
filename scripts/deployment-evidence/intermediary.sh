@@ -21,14 +21,17 @@ out="$2"
 mkdir -p "$out/framing"
 out="$(cd "$out" && pwd)" # absolute: used as a docker bind-mount source
 work="$out/framing"
-trap 'cleanup_run' EXIT
+tokdir="$(mktemp -d)"
+make_local_token "$tokdir"
+trap 'cleanup_run; rm -rf "$tokdir"' EXIT
 net="$RUN_ID-net"
 docker network create --internal "$net" >/dev/null
 # The exact intermediary configurations used are part of the evidence.
 cp "$DE_DIR/conf/nginx.conf" "$DE_DIR/conf/haproxy.cfg" "$work/"
 
 gw="$RUN_ID-gateway"
-docker run -d --name "$gw" --network "$net" --network-alias gateway "${HARDEN[@]}" "$gimage" >/dev/null
+docker run -d --name "$gw" --network "$net" --network-alias gateway "${HARDEN[@]}" \
+  --mount "$(local_token_mount)" "$gimage" >/dev/null
 wait_log "$gw" listening
 
 ng="$RUN_ID-nginx"
@@ -39,7 +42,7 @@ docker run -d --name "$hp" --network "$net" --network-alias haproxy --user 99:99
   -v "$DE_DIR/conf/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro" "$HAPROXY_IMAGE" >/dev/null
 
 # Readiness: each intermediary answers its own sentinel (served by the intermediary itself).
-runner() { docker run --rm --network "$net" --user "$(id -u):$(id -g)" "${HARDEN[@]}" -v "$DE_DIR/tools:/tools:ro" -v "$work:/out" "$PY_IMAGE" python /tools/framing_cases.py "$@"; }
+runner() { docker run --rm --network "$net" --user "$(id -u):$(id -g)" "${HARDEN[@]}" -e LOCAL_TOKEN="$GATEWAY_LOCAL_TOKEN" -v "$DE_DIR/tools:/tools:ro" -v "$work:/out" "$PY_IMAGE" python /tools/framing_cases.py "$@"; }
 ready() { # <container> <host> <port>
   local i=0
   until docker run --rm --network "$net" "${HARDEN[@]}" "$PY_IMAGE" python -c \

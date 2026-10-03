@@ -22,6 +22,7 @@ use crate::admission::{CapacityPlan, RequestLimits};
 use crate::core_bridge;
 use crate::protocol::json::{self, Json};
 use crate::telemetry::SafeCode;
+use crate::transport::local_auth::{self, LocalAuth, LocalToken, TokenReference};
 
 /// The only schema version this build accepts.
 pub const SCHEMA_VERSION: u64 = 1;
@@ -141,6 +142,7 @@ impl UpstreamAuthority {
 pub struct DeploymentAuthority {
     listener: ListenerAuthority,
     upstream: Option<UpstreamAuthority>,
+    local_auth: LocalAuth,
 }
 
 impl DeploymentAuthority {
@@ -151,6 +153,7 @@ impl DeploymentAuthority {
         Self {
             listener,
             upstream: None,
+            local_auth: LocalAuth::Disabled,
         }
     }
 
@@ -158,6 +161,30 @@ impl DeploymentAuthority {
     pub const fn with_upstream(mut self, upstream: UpstreamAuthority) -> Self {
         self.upstream = Some(upstream);
         self
+    }
+
+    /// Set the local caller authentication authority (#63, ADR 0030).
+    ///
+    /// # Errors
+    /// [`ConfigErrorKind::InvalidCombination`] at `deployment.local_auth.mode` when the
+    /// listener is the acknowledged non-loopback kind and no token is enforced: an
+    /// acknowledgement alone never opens an unauthenticated listener.
+    pub fn with_local_auth(mut self, local_auth: LocalAuth) -> Result<Self, ConfigError> {
+        if self.listener.non_loopback_acknowledged() && !local_auth.is_enforced() {
+            return Err(ConfigError::new(
+                ConfigErrorKind::InvalidCombination,
+                "deployment.local_auth.mode",
+            ));
+        }
+        self.local_auth = local_auth;
+        Ok(self)
+    }
+
+    /// The immutable local caller authentication authority. Separate from profiles,
+    /// actions, and limits: nothing outside `deployment` can change it.
+    #[must_use]
+    pub const fn local_auth(&self) -> &LocalAuth {
+        &self.local_auth
     }
 
     #[must_use]
@@ -175,6 +202,7 @@ impl DeploymentAuthority {
                 non_loopback_acknowledged: false,
             },
             upstream: None,
+            local_auth: LocalAuth::Disabled,
         }
     }
 
@@ -434,6 +462,20 @@ impl std::error::Error for ConfigError {}
 /// # Errors
 /// [`ConfigError`] for any read, size, syntax, schema, or value problem.
 pub fn load_from_path(path: &Path) -> Result<RuntimePlan, ConfigError> {
+    load_from_path_with(path, &local_auth::resolve_reference)
+}
+
+/// Like [`load_from_path`] with the token-reference resolver supplied. Production resolves
+/// the real environment or file ([`local_auth::resolve_reference`]); the schema and fixture
+/// tests supply a synthetic resolver because a committed fixture cannot carry the required
+/// file mode or a secret.
+///
+/// # Errors
+/// [`ConfigError`] for any read, size, syntax, schema, or value problem.
+pub fn load_from_path_with(
+    path: &Path,
+    resolve: &TokenResolver<'_>,
+) -> Result<RuntimePlan, ConfigError> {
     const LOC: &str = "file";
     let file = std::fs::File::open(path)
         .map_err(|_| ConfigError::new(ConfigErrorKind::Unreadable, LOC))?;
@@ -447,8 +489,11 @@ pub fn load_from_path(path: &Path) -> Result<RuntimePlan, ConfigError> {
     if bytes.len() > MAX_CONFIG_BYTES {
         return Err(ConfigError::new(ConfigErrorKind::TooLarge, LOC));
     }
-    parse(&bytes)
+    parse_with(&bytes, resolve)
 }
+
+/// Resolves a validated `deployment.local_auth.token` reference into the token.
+pub type TokenResolver<'a> = dyn Fn(&TokenReference) -> Result<LocalToken, ConfigError> + 'a;
 
 #[cfg(test)]
 thread_local! {
@@ -467,6 +512,16 @@ pub(crate) fn parses_on_this_thread() -> usize {
 /// # Errors
 /// [`ConfigError`] for any syntax, schema, or value problem.
 pub fn parse(bytes: &[u8]) -> Result<RuntimePlan, ConfigError> {
+    parse_with(bytes, &local_auth::resolve_reference)
+}
+
+/// Like [`parse`] with the token-reference resolver supplied (see [`load_from_path_with`]).
+/// The resolver runs only for a fully validated `mode: "token"` reference, so every static
+/// structural failure is reported before any environment or file access.
+///
+/// # Errors
+/// [`ConfigError`] for any syntax, schema, or value problem.
+pub fn parse_with(bytes: &[u8], resolve: &TokenResolver<'_>) -> Result<RuntimePlan, ConfigError> {
     #[cfg(test)]
     PARSES.with(|c| c.set(c.get().saturating_add(1)));
     let doc = json::parse_strict(bytes)
@@ -491,10 +546,10 @@ pub fn parse(bytes: &[u8]) -> Result<RuntimePlan, ConfigError> {
     }
     root.only(&["schema_version", "deployment", "content", "resources"])?;
 
-    let deployment = parse_deployment(&Obj::new(
-        root.require("deployment", "deployment")?,
-        "deployment",
-    )?)?;
+    let deployment = parse_deployment(
+        &Obj::new(root.require("deployment", "deployment")?, "deployment")?,
+        resolve,
+    )?;
     let content = parse_content(&Obj::new(root.require("content", "content")?, "content")?)?;
     let resources = parse_resources(&Obj::new(
         root.require("resources", "resources")?,
@@ -503,8 +558,11 @@ pub fn parse(bytes: &[u8]) -> Result<RuntimePlan, ConfigError> {
     Ok(RuntimePlan::new(deployment, content, resources))
 }
 
-fn parse_deployment(obj: &Obj<'_>) -> Result<DeploymentAuthority, ConfigError> {
-    obj.only(&["listener", "upstream"])?;
+fn parse_deployment(
+    obj: &Obj<'_>,
+    resolve: &TokenResolver<'_>,
+) -> Result<DeploymentAuthority, ConfigError> {
+    obj.only(&["listener", "upstream", "local_auth"])?;
     let upstream = match obj.get("upstream") {
         None => None,
         Some(v) => Some(parse_upstream(&Obj::new(v, "deployment.upstream")?)?),
@@ -532,10 +590,78 @@ fn parse_deployment(obj: &Obj<'_>) -> Result<DeploymentAuthority, ConfigError> {
         }
     };
     let authority = DeploymentAuthority::new(ListenerAuthority::new(addr, allow)?);
-    Ok(match upstream {
+    let authority = match upstream {
         Some(u) => authority.with_upstream(u),
         None => authority,
-    })
+    };
+    let local_auth = match obj.get("local_auth") {
+        None => None,
+        Some(v) => Some(parse_local_auth(
+            &Obj::new(v, "deployment.local_auth")?,
+            resolve,
+        )?),
+    };
+    // Absent means `disabled`, which an acknowledged non-loopback listener rejects.
+    authority.with_local_auth(local_auth.unwrap_or(LocalAuth::Disabled))
+}
+
+/// `deployment.local_auth` (#63, ADR 0030). The token is a reference (`env` or `file`),
+/// never a value; the reference is resolved here, once, so a bad source stops startup.
+fn parse_local_auth(obj: &Obj<'_>, resolve: &TokenResolver<'_>) -> Result<LocalAuth, ConfigError> {
+    const MODE: &str = "deployment.local_auth.mode";
+    const TOKEN: &str = "deployment.local_auth.token";
+    obj.only(&["mode", "token"])?;
+    let token = obj.get("token");
+    match obj.require("mode", MODE)?.as_str(MODE)? {
+        "disabled" => {
+            if token.is_some() {
+                return Err(ConfigError::new(ConfigErrorKind::InvalidCombination, TOKEN));
+            }
+            Ok(LocalAuth::Disabled)
+        }
+        "token" => {
+            let source = Obj::new(obj.require("token", TOKEN)?, TOKEN)?;
+            source.only(&["env", "file"])?;
+            let reference = match (source.get("env"), source.get("file")) {
+                (Some(env), None) => {
+                    let name = env.as_str(TOKEN)?;
+                    if !is_env_name(name) {
+                        return Err(ConfigError::new(ConfigErrorKind::InvalidValue, TOKEN));
+                    }
+                    TokenReference::Env(name.to_owned())
+                }
+                (None, Some(file)) => {
+                    let path = file.as_str(TOKEN)?;
+                    if !is_absolute_path(path) {
+                        return Err(ConfigError::new(ConfigErrorKind::InvalidValue, TOKEN));
+                    }
+                    TokenReference::File(path.into())
+                }
+                // Both or neither source.
+                _ => {
+                    return Err(ConfigError::new(ConfigErrorKind::InvalidCombination, TOKEN));
+                }
+            };
+            Ok(LocalAuth::Token(std::sync::Arc::new(resolve(&reference)?)))
+        }
+        _ => Err(ConfigError::new(ConfigErrorKind::InvalidValue, MODE)),
+    }
+}
+
+/// `[A-Z_][A-Z0-9_]{0,63}`.
+fn is_env_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    (1..=64).contains(&bytes.len())
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| b.is_ascii_uppercase() || *b == b'_' || (i > 0 && b.is_ascii_digit()))
+}
+
+/// An absolute path: leading `/`, no NUL, bounded. No `~`, variable, or URL expansion
+/// exists, so the string is used verbatim.
+fn is_absolute_path(path: &str) -> bool {
+    path.starts_with('/') && path.len() <= 4096 && !path.contains('\0')
 }
 
 fn parse_upstream(obj: &Obj<'_>) -> Result<UpstreamAuthority, ConfigError> {
@@ -1170,8 +1296,17 @@ mod tests {
             "\"address\": \"0.0.0.0:0\"",
             "\"address\": \"0.0.0.0:0\", \"allow_non_loopback\": true",
         );
-        let plan = parse(acked.as_bytes()).expect("acknowledged");
+        // An acknowledgement alone is not enough: a token is required too (#63).
+        let e = err(&acked);
+        assert_eq!(e.kind(), ConfigErrorKind::InvalidCombination);
+        assert_eq!(e.location(), "deployment.local_auth.mode");
+        let with_token = acked.replace(
+            "\"listener\":",
+            "\"local_auth\": {\"mode\": \"token\", \"token\": {\"env\": \"SYNTH_TOKEN\"}}, \"listener\":",
+        );
+        let plan = parse_with(with_token.as_bytes(), &synthetic_resolver).expect("acknowledged");
         assert!(plan.deployment().listener().non_loopback_acknowledged());
+        assert!(plan.deployment().local_auth().is_enforced());
         let pointless = VALID.replace(
             "\"address\": \"127.0.0.1:0\"",
             "\"address\": \"127.0.0.1:0\", \"allow_non_loopback\": true",
@@ -1260,5 +1395,174 @@ mod tests {
         let e = err(&doc);
         assert_eq!(e.kind(), ConfigErrorKind::UnknownField);
         assert!(!e.to_string().contains("SYNTH"));
+    }
+
+    const SYNTHETIC_TOKEN: &str = "SYNTH-local-token-0123456789-abcdefghij";
+
+    fn synthetic_resolver(_: &TokenReference) -> Result<LocalToken, ConfigError> {
+        LocalToken::from_bytes(SYNTHETIC_TOKEN.as_bytes())
+    }
+
+    fn with_local_auth(object: &str) -> String {
+        VALID.replace(
+            "\"listener\":",
+            &format!("\"local_auth\": {object}, \"listener\":"),
+        )
+    }
+
+    #[test]
+    fn local_auth_absent_means_disabled_and_explicit_disabled_is_accepted() {
+        let plan = parse(VALID.as_bytes()).expect("valid");
+        assert!(!plan.deployment().local_auth().is_enforced());
+        let plan = parse(with_local_auth(r#"{"mode": "disabled"}"#).as_bytes()).expect("valid");
+        assert!(!plan.deployment().local_auth().is_enforced());
+    }
+
+    #[test]
+    fn local_auth_token_references_are_validated_before_any_resolution() {
+        let resolved = std::cell::Cell::new(0_u32);
+        let counting = |r: &TokenReference| {
+            resolved.set(resolved.get() + 1);
+            synthetic_resolver(r)
+        };
+        let run = |obj: &str| parse_with(with_local_auth(obj).as_bytes(), &counting);
+        for (obj, kind, loc) in [
+            (
+                r#"{"mode": "token"}"#,
+                ConfigErrorKind::MissingField,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"token": {"env": "SYNTH_T"}}"#,
+                ConfigErrorKind::MissingField,
+                "deployment.local_auth.mode",
+            ),
+            (
+                r#"{"mode": "disabled", "token": {"env": "SYNTH_T"}}"#,
+                ConfigErrorKind::InvalidCombination,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"mode": "token", "token": {}}"#,
+                ConfigErrorKind::InvalidCombination,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"mode": "token", "token": {"env": "SYNTH_T", "file": "/x"}}"#,
+                ConfigErrorKind::InvalidCombination,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"mode": "token", "token": {"value": "SYNTH"}}"#,
+                ConfigErrorKind::UnknownField,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"mode": "token", "token": {"env": "lower"}}"#,
+                ConfigErrorKind::InvalidValue,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"mode": "token", "token": {"env": "1BAD"}}"#,
+                ConfigErrorKind::InvalidValue,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"mode": "token", "token": {"env": "A_VERY_LONG_NAME_OVER_SIXTY_FOUR_CHARACTERS_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}"#,
+                ConfigErrorKind::InvalidValue,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"mode": "token", "token": {"file": "relative/path"}}"#,
+                ConfigErrorKind::InvalidValue,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"mode": "token", "token": {"file": "~/token"}}"#,
+                ConfigErrorKind::InvalidValue,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"mode": "token", "token": {"file": 1}}"#,
+                ConfigErrorKind::InvalidType,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"mode": "token", "token": "SYNTH"}"#,
+                ConfigErrorKind::InvalidType,
+                "deployment.local_auth.token",
+            ),
+            (
+                r#"{"mode": "Token", "token": {"env": "SYNTH_T"}}"#,
+                ConfigErrorKind::InvalidValue,
+                "deployment.local_auth.mode",
+            ),
+            (
+                r#"{"mode": true}"#,
+                ConfigErrorKind::InvalidType,
+                "deployment.local_auth.mode",
+            ),
+            (
+                r#"{"mode": "disabled", "extra": 1}"#,
+                ConfigErrorKind::UnknownField,
+                "deployment.local_auth",
+            ),
+            ("[]", ConfigErrorKind::InvalidType, "deployment.local_auth"),
+        ] {
+            let e = run(obj).expect_err(obj);
+            assert_eq!((e.kind(), e.location()), (kind, loc), "{obj}");
+            assert!(!e.to_string().contains("SYNTH"), "{obj}");
+        }
+        assert_eq!(resolved.get(), 0, "no reference resolved for a bad shape");
+        for ok in [
+            r#"{"mode": "token", "token": {"env": "SYNTH_T"}}"#,
+            r#"{"mode": "token", "token": {"file": "/run/secrets/synthetic-token"}}"#,
+        ] {
+            let plan = run(ok).expect(ok);
+            assert!(plan.deployment().local_auth().is_enforced());
+        }
+        assert_eq!(resolved.get(), 2);
+    }
+
+    #[test]
+    fn local_auth_resolution_failures_are_static_and_do_not_echo_the_reference() {
+        let failing = |_: &TokenReference| {
+            Err::<LocalToken, _>(ConfigError::new(
+                ConfigErrorKind::Unreadable,
+                "deployment.local_auth.token",
+            ))
+        };
+        let doc = with_local_auth(
+            r#"{"mode": "token", "token": {"file": "/run/secrets/SYNTH-secret-path"}}"#,
+        );
+        let e = parse_with(doc.as_bytes(), &failing).expect_err("unreadable");
+        assert_eq!(
+            e.to_string(),
+            "invalid_config: unreadable at deployment.local_auth.token"
+        );
+        // The real resolver fails the same way for a missing file and an unset variable.
+        for obj in [
+            r#"{"mode": "token", "token": {"file": "/nonexistent/SYNTH-secret-path"}}"#,
+            r#"{"mode": "token", "token": {"env": "SYNTH_UNSET_TOKEN_VARIABLE_63"}}"#,
+        ] {
+            let e = parse(with_local_auth(obj).as_bytes()).expect_err(obj);
+            assert_eq!(
+                e.to_string(),
+                "invalid_config: unreadable at deployment.local_auth.token"
+            );
+        }
+    }
+
+    #[test]
+    fn local_auth_cannot_be_set_from_content_or_resources() {
+        for doc in [
+            VALID.replace(
+                "{\"profile\": \"common\"}",
+                "{\"profile\": \"common\", \"local_auth\": {\"mode\": \"disabled\"}}",
+            ),
+            VALID.replace("\"stream\": 1", "\"stream\": 1, \"local_auth\": 1"),
+        ] {
+            assert_eq!(err(&doc).kind(), ConfigErrorKind::UnknownField);
+        }
     }
 }

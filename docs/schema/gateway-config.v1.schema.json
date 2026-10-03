@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:redact-secret:gateway:config:v1",
   "title": "RedactSecret Gateway configuration, schema_version 1",
-  "description": "Machine-readable shape of the static configuration the implementation accepts today. The Rust loader (src/config.rs) is authoritative: it additionally enforces the constraints listed under x-gateway.loader_only_constraints, which JSON Schema cannot express. Keys that are planned but not implemented are NOT accepted here; they are listed under x-gateway.planned. See docs/contracts/config-schema.md.",
+  "description": "Machine-readable shape of the static configuration the implementation accepts today. The Rust loader (src/config.rs) is authoritative: it additionally enforces the constraints listed under x-gateway.loader_only_constraints, which JSON Schema cannot express. See docs/contracts/config-schema.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,7 +22,7 @@
       "required": [
         "listener"
       ],
-      "description": "Deployment authority: listener and upstream provider profile. Nothing under content or resources can change it.",
+      "description": "Deployment authority: listener, upstream provider profile, and local caller authentication. Nothing under content or resources can change it.",
       "properties": {
         "listener": {
           "type": "object",
@@ -55,6 +55,43 @@
                 "openai"
               ],
               "description": "Reviewed profile name, exact case. No URL, host, port, proxy, TLS or route key exists."
+            }
+          }
+        },
+        "local_auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "description": "Optional. Local caller authentication (#63, ADR 0030, docs/contracts/local-caller-auth.md). Absent means mode disabled, which is supported only on a loopback listener. The token is a reference to a secret, never a value; it is resolved once at startup.",
+          "properties": {
+            "mode": {
+              "enum": [
+                "disabled",
+                "token"
+              ],
+              "description": "disabled forbids token; token requires it (loader-enforced). Exact case."
+            },
+            "token": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 1,
+              "additionalProperties": false,
+              "description": "Exactly one of env or file (both or neither is invalid_combination). The resolved token must be 32 to 128 bytes of A-Za-z0-9-._~ (loader-enforced at startup).",
+              "properties": {
+                "env": {
+                  "type": "string",
+                  "pattern": "^[A-Z_][A-Z0-9_]{0,63}$",
+                  "description": "Environment variable name, read once at startup. The environment is visible to same-user processes; file is the recommended delivery."
+                },
+                "file": {
+                  "type": "string",
+                  "pattern": "^/",
+                  "maxLength": 4096,
+                  "description": "Absolute path of a regular file of at most 256 bytes, not readable, writable or executable by other (mode 0o007 clear), opened once at startup. One trailing newline is removed."
+                }
+              }
             }
           }
         }
@@ -322,53 +359,12 @@
       }
     }
   },
-  "$defs": {
-    "planned_local_auth": {
-      "x-gateway-status": "planned",
-      "description": "NOT part of schema_version 1 as implemented. Frozen design from ADR 0030 / docs/contracts/local-caller-auth.md; enforcement is #63. Deliberately not referenced from deployment.properties, so the loader and this schema both reject deployment.local_auth until #63 moves it there.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "mode"
-      ],
-      "properties": {
-        "mode": {
-          "enum": [
-            "disabled",
-            "token"
-          ]
-        },
-        "token": {
-          "type": "object",
-          "minProperties": 1,
-          "maxProperties": 1,
-          "additionalProperties": false,
-          "properties": {
-            "env": {
-              "type": "string",
-              "pattern": "^[A-Z_][A-Z0-9_]{0,63}$"
-            },
-            "file": {
-              "type": "string",
-              "pattern": "^/"
-            }
-          }
-        }
-      },
-      "x-gateway-planned-constraints": [
-        "mode disabled forbids token; mode token requires token",
-        "token has exactly one of env or file; it is a reference, never a value",
-        "allow_non_loopback true additionally requires mode token",
-        "token source is resolved at startup (length 32..128, alphabet A-Za-z0-9-._~, file mode and size checks); failures are invalid_config at deployment.local_auth.token"
-      ]
-    }
-  },
   "x-gateway": {
     "freeze": {
       "status": "frozen",
       "schema_version": 1,
-      "base_revision": "f7936fe000b7c6c1a5675d98675c39fae29b01d7",
-      "base_revision_description": "main after #82 (PR #97); the #62 freeze commit is the one that adds this file.",
+      "base_revision": "bde57af98a64c9fe3bb55e2fa50d3572f554b82f",
+      "base_revision_description": "main after #84 (PR #100); the #63 change adds deployment.local_auth to the implemented schema on top of it (additive to schema_version 1 while unreleased).",
       "provisional": [
         "resources.capacity.* (no defaults, unmeasured)",
         "resources.limits.* defaults and ceilings (ADR 0008)",
@@ -393,9 +389,6 @@
         }
       ]
     },
-    "planned": {
-      "deployment.local_auth": "#/$defs/planned_local_auth"
-    },
     "loader_only_constraints": [
       "schema_version is checked first; unknown versions and fields are rejected at every depth",
       "duplicate keys, trailing bytes, invalid UTF-8 and files over 64 KiB are rejected before schema evaluation",
@@ -404,7 +397,11 @@
       "content.profile and content.pii are validated by the pinned core, and the whole profile plus PII activation must build",
       "resources.limits.stream_idle_ms <= stream_lifetime_ms",
       "resources.limits.upstream_header_ms <= upstream_total_ms",
-      "resources.capacity.stream * stream_buffer_bytes <= 4 GiB (invalid_combination)"
+      "resources.capacity.stream * stream_buffer_bytes <= 4 GiB (invalid_combination)",
+      "deployment.local_auth.mode disabled forbids token; mode token requires token (invalid_combination / missing_field at deployment.local_auth.token)",
+      "deployment.local_auth.token: both or neither of env and file is invalid_combination",
+      "allow_non_loopback true requires local_auth.mode token (invalid_combination at deployment.local_auth.mode)",
+      "the token reference is resolved at startup: variable unset or empty, or file missing or unreadable is unreadable; not a regular file, over 256 bytes, mode check failed, or a token outside 32..128 bytes of A-Za-z0-9-._~ is invalid_value; all at deployment.local_auth.token with no echo of the name, path or content"
     ]
   }
 }

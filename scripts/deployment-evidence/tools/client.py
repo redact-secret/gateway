@@ -13,6 +13,7 @@ Every subcommand prints ONE JSON line and never prints a request or response bod
 """
 import errno
 import json
+import os
 import socket
 import sys
 import urllib.error
@@ -20,6 +21,9 @@ import urllib.request
 
 # Synthetic and unmistakably fake (the same shape the shipped probes use).
 KEY = "sk-SYNTHETIC-REVOKED-CI-NOT-A-KEY"
+# The gateway enforces a local caller token (#63): a per-run throwaway value passed in the
+# environment by the orchestrating script. Never printed, and not a provider credential.
+LOCAL_TOKEN = os.environ.get("LOCAL_TOKEN")
 BODY = json.dumps(
     {"model": "synthetic-model", "messages": [{"role": "user", "content": "synthetic evidence ping"}]}
 ).encode()
@@ -32,6 +36,8 @@ def post(url):
         method="POST",
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + KEY},
     )
+    if LOCAL_TOKEN:
+        req.add_header("X-Gateway-Local-Token", LOCAL_TOKEN)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             status, raw = r.status, r.read(65536)

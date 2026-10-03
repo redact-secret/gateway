@@ -215,10 +215,20 @@ fn environment_cannot_enable_a_test_upstream_in_the_real_binary() {
     assert!(out.status.success());
     let mut files = Vec::new();
     files_under(&root().join("src"), &mut files);
-    for path in files
-        .iter()
-        .filter(|p| !p.ends_with("src/transport/tests.rs"))
-    {
+    // The one reviewed environment read: the local caller token reference
+    // (`deployment.local_auth.token.env`, #63) is resolved once at startup by this file. The
+    // variable name comes only from validated configuration, the value is only ever a token,
+    // and nothing about a destination, proxy, or TLS rule is read from the environment.
+    let local_auth = fs::read_to_string(root().join("src/transport/local_auth.rs")).expect("read");
+    let prod = local_auth
+        .split("#[cfg(test)]\nmod tests")
+        .next()
+        .expect("production part");
+    assert_eq!(prod.matches("std::env::var_os").count(), 1);
+    assert!(!prod.contains("std::env::var("));
+    for path in files.iter().filter(|p| {
+        !p.ends_with("src/transport/tests.rs") && !p.ends_with("src/transport/local_auth.rs")
+    }) {
         let text = fs::read_to_string(path).expect("read");
         assert!(
             !text.contains("std::env::var") && !text.contains("env::var_os"),

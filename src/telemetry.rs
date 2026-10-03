@@ -32,6 +32,11 @@ pub enum SafeCode {
     /// The caller supplied no usable provider `Authorization` (#24). Distinct from every
     /// local-authentication outcome (Beta 1 #12): this credential is the provider's.
     MissingCredential,
+    /// The local caller token (`X-Gateway-Local-Token`) is absent or was removed by
+    /// `Connection` (#63). Not the provider credential: see [`Self::MissingCredential`].
+    LocalAuthRequired,
+    /// The local caller token is duplicate, malformed, out of bounds, or wrong (#63).
+    LocalAuthInvalid,
     /// The provider did not answer within a connect, response-header, or total deadline (#20).
     UpstreamTimeout,
     /// The provider could not be reached: resolution, address policy, refused, or reset
@@ -61,6 +66,8 @@ impl SafeCode {
             Self::NotReady => "not_ready",
             Self::NotImplemented => "not_implemented",
             Self::MissingCredential => "missing_credential",
+            Self::LocalAuthRequired => "local_auth_required",
+            Self::LocalAuthInvalid => "local_auth_invalid",
             Self::UpstreamTimeout => "upstream_timeout",
             Self::UpstreamUnavailable => "upstream_unavailable",
             Self::UpstreamTls => "upstream_tls_failure",
@@ -216,6 +223,8 @@ pub struct Metrics {
     stream_bytes: AtomicU64,
     stream_buffered: AtomicU64,
     stream_buffered_peak: AtomicU64,
+    /// Local-auth rejections by code: `[required, invalid]`. Counts only (#63).
+    local_auth_rejections: [AtomicU64; 2],
 }
 
 impl Metrics {
@@ -237,6 +246,32 @@ impl Metrics {
             Stage::StreamUpstreamWait => &self.stream_upstream_wait,
             Stage::StreamDownstreamWait => &self.stream_downstream_wait,
         }
+    }
+
+    /// Count one local-authentication rejection. Only the two fixed codes are accepted, and
+    /// nothing about the caller (address, header length, value) is recorded (#63).
+    pub fn record_local_auth_rejection(&self, code: SafeCode) {
+        let slot = match code {
+            SafeCode::LocalAuthRequired => 0,
+            SafeCode::LocalAuthInvalid => 1,
+            _ => return,
+        };
+        if let Some(counter) = self.local_auth_rejections.get(slot) {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Local-auth rejections counted for `code` (`0` for any other code).
+    #[must_use]
+    pub fn local_auth_rejections(&self, code: SafeCode) -> u64 {
+        let slot = match code {
+            SafeCode::LocalAuthRequired => 0,
+            SafeCode::LocalAuthInvalid => 1,
+            _ => return 0,
+        };
+        self.local_auth_rejections
+            .get(slot)
+            .map_or(0, |c| c.load(Ordering::Relaxed))
     }
 
     /// Record one observation of `stage`.

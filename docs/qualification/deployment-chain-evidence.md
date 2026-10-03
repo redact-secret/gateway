@@ -32,7 +32,7 @@ Recorded by `scripts/deployment-evidence/lib.sh` (`record_environment`) into `en
 
 The scripts also ran, with identical results for every check and an identical per-case framing table, on a developer machine (macOS, Darwin 25.5.0 / Docker Desktop 28.3.3, `linux/arm64`, gateway built for arm64 from the same source). That run is a development cross-check, not recorded evidence.
 
-Nothing in the evidence directory contains a payload, credential, certificate private key, or the candidate binary. Clients print only a status code, the gateway's fixed error code, and counters. The intermediary logs hold request lines of synthetic cases and status codes; `intermediary.sh` fails the run if the synthetic key string appears in them.
+The shipped image enforces a local caller token (#63), so each run generates a throwaway token (`scripts/lib-local-token.sh`: 43 random base64url characters in a temp directory, mounted read-only at `/run/secrets/gateway-local-token`, owned by uid 65532, never printed or recorded) and its clients send it in `X-Gateway-Local-Token`; the framing and egress expectations below are unchanged because the token is accepted. Nothing in the evidence directory contains a payload, credential, certificate private key, or the candidate binary. Clients print only a status code, the gateway's fixed error code, and counters. The intermediary logs hold request lines of synthetic cases and status codes; `intermediary.sh` fails the run if the synthetic key string appears in them.
 
 ## Reproducing
 

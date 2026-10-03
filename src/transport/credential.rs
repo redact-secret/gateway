@@ -16,7 +16,7 @@
 //! Secure erasure is **not** promised (SECURITY.md, ADR 0007): the bytes may be copied by
 //! the allocator, the HTTP stack, and the TLS layer, and are not zeroized on drop.
 //!
-//! This is the *provider* credential. The Beta 1 local caller token (#12) is a different
+//! This is the *provider* credential. The local caller token (#63, `transport::local_auth`) is a different
 //! concept with a different header and a different type; it must never be accepted here
 //! and never be forwarded (see `headers::LOCAL_AUTHORITY_PREFIX`).
 

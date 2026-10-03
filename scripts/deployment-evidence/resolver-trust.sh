@@ -28,6 +28,7 @@ CHECK_LOG="$log"
 say() { echo "$*" | tee -a "$log"; }
 
 gen_certs "$work/certs"
+make_local_token "$work/token"
 holder="$RUN_ID-holder"
 FAKE_V4=93.184.216.34 # a public address per the gateway policy; exists only on the holder's lo
 
@@ -50,7 +51,7 @@ cat "$work/system-bundle.crt" "$work/certs/ca.pem" >"$work/bundle-with-throwaway
 chmod 0644 "$work/bundle-with-throwaway-ca.crt"
 
 sync_stat() { docker exec "$holder" python /tools/tls_stand_in.py sync; }
-post() { docker exec "$holder" python /tools/client.py post http://127.0.0.1:8787/v1/chat/completions; }
+post() { docker exec -e LOCAL_TOKEN="$GATEWAY_LOCAL_TOKEN" "$holder" python /tools/client.py post http://127.0.0.1:8787/v1/chat/completions; }
 
 # run_case <label> <hosts-ips (space separated)> <trust: system|with-ca> <want-code> <want-accept-delta> <want-tls-failed-delta> <want-requests-delta>
 run_case() {
@@ -60,7 +61,7 @@ run_case() {
   echo "127.0.0.1 localhost" >>"$hosts"
   local ip
   for ip in $ips; do echo "$ip api.openai.com" >>"$hosts"; done
-  local mounts=(-v "$hosts:/etc/hosts:ro")
+  local mounts=(-v "$hosts:/etc/hosts:ro" --mount "$(local_token_mount)")
   if [ "$trust" = with-ca ]; then
     mounts+=(-v "$work/bundle-with-throwaway-ca.crt:/etc/ssl/certs/ca-certificates.crt:ro")
   fi

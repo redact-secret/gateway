@@ -13,16 +13,16 @@
       "location": "resources.capacity.inspection"
     },
     {
-      "file": "capacity-missing.json",
-      "stage": "structure",
-      "kind": "missing_field",
-      "location": "resources.capacity"
-    },
-    {
       "file": "capacity-missing-class.json",
       "stage": "structure",
       "kind": "missing_field",
       "location": "resources.capacity.stream"
+    },
+    {
+      "file": "capacity-missing.json",
+      "stage": "structure",
+      "kind": "missing_field",
+      "location": "resources.capacity"
     },
     {
       "file": "capacity-negative.json",
@@ -239,6 +239,66 @@
       "stage": "semantic",
       "kind": "invalid_combination",
       "location": "deployment.listener"
+    },
+    {
+      "file": "local-auth-bad-env-name.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "deployment.local_auth.token"
+    },
+    {
+      "file": "local-auth-disabled-with-token.json",
+      "stage": "semantic",
+      "kind": "invalid_combination",
+      "location": "deployment.local_auth.token"
+    },
+    {
+      "file": "local-auth-inline-value.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "deployment.local_auth.token"
+    },
+    {
+      "file": "local-auth-non-loopback-absent.json",
+      "stage": "semantic",
+      "kind": "invalid_combination",
+      "location": "deployment.local_auth.mode"
+    },
+    {
+      "file": "local-auth-non-loopback-without-token.json",
+      "stage": "semantic",
+      "kind": "invalid_combination",
+      "location": "deployment.local_auth.mode"
+    },
+    {
+      "file": "local-auth-relative-file.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "deployment.local_auth.token"
+    },
+    {
+      "file": "local-auth-token-both-sources.json",
+      "stage": "structure",
+      "kind": "invalid_combination",
+      "location": "deployment.local_auth.token"
+    },
+    {
+      "file": "local-auth-token-missing.json",
+      "stage": "semantic",
+      "kind": "missing_field",
+      "location": "deployment.local_auth.token"
+    },
+    {
+      "file": "local-auth-token-neither-source.json",
+      "stage": "structure",
+      "kind": "invalid_combination",
+      "location": "deployment.local_auth.token"
+    },
+    {
+      "file": "local-auth-unknown-mode.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "deployment.local_auth.mode"
     },
     {
       "file": "resources-unknown-field.json",
