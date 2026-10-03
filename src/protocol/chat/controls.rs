@@ -27,7 +27,7 @@ pub struct Params {
     pub seed: Option<Number>,
 }
 
-pub(super) fn parse_model(value: Json) -> Checked<String> {
+pub(in crate::protocol) fn parse_model(value: Json) -> Checked<String> {
     let model = string(value)?;
     let well_formed = !model.is_empty()
         && model.len() <= MAX_MODEL_BYTES

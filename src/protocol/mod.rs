@@ -24,7 +24,7 @@ use crate::telemetry::SafeCode;
 pub enum Protocol {
     ChatCompletionsText,
     /// Responses stateless text subset (`docs/contracts/responses-request.md`).
-    /// Unrouted until #84/#86: [`validate_with`] refuses it.
+    /// Parsed by [`validate_with`] (#84); unrouted until #86.
     ResponsesText,
 }
 
@@ -83,7 +83,7 @@ impl RequestBody {
     pub const fn stream(&self) -> Option<bool> {
         match self {
             Self::Chat(r) => r.stream(),
-            Self::Responses(_) => None,
+            Self::Responses(r) => r.stream(),
         }
     }
 
@@ -323,9 +323,16 @@ pub fn validate_with(
                 receipt,
             ))
         }
-        // Unrouted until #84 adds the classifier; the memory reservation and receipt drop
-        // here, so a refusal holds no capacity.
-        Protocol::ResponsesText => Err(ProtocolError::Unsupported),
+        // On every error the memory reservation and receipt drop with this frame, so a
+        // refusal holds no capacity.
+        Protocol::ResponsesText => {
+            let request = responses::classify(document, limits)?;
+            Ok(ValidatedRequest::new(
+                RequestBody::Responses(request),
+                memory,
+                receipt,
+            ))
+        }
     }
 }
 
@@ -387,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_is_unrouted_and_releases_the_reservation() {
+    fn responses_refusal_releases_the_reservation() {
         let a = admission();
         let r = received(&a, br#"{"model":"m","input":"hi"}"#);
         assert_eq!(
@@ -413,7 +420,7 @@ mod tests {
         assert_eq!(seen, [SlotMode::Redact, SlotMode::Redact]);
         assert_eq!(
             resp.serialize_bounded(1024).expect("fits"),
-            br#"{"model":"m","instructions":"i!","input":"x!"}"#
+            br#"{"model":"m","instructions":"i!","input":"x!","store":false}"#
         );
         assert_eq!(resp.serialize_bounded(8), Err(SerializeError::Limit));
         assert!(chat.revalidate().is_ok() && resp.revalidate().is_ok());
