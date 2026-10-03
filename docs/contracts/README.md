@@ -4,6 +4,7 @@ Normative rules for interfaces and behavior. Each contract has a status line tha
 
 - [request-state](request-state.md)
 - [core-completeness](core-completeness.md)
+- [request-policy](request-policy.md)
 - [field-classification](field-classification.md)
 - [chat-completions-request](chat-completions-request.md)
 - [resource-limits](resource-limits.md)

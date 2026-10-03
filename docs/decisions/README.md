@@ -39,6 +39,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0023](0023-header-size-measurement-and-size-classes.md) | Request-head size measurement and the size classes | Accepted; implemented (pinned-SDK header measurement, caps confirmed, field-count and head bounds answered by the head guard, one outcome per size class) |
 | [0024](0024-connection-reuse-measurement-and-decision.md) | Connection reuse on the local and provider legs: measured, both stay disabled | Accepted; measured, decision recorded (no behavior change); figures provisional on a not-quiet host; criteria and required tests listed for any future re-enable | #42 |
 | [0025](0025-alpha2-field-contract.md) | Alpha 2 recursive Chat Completions field contract, block-versus-redact rules, and module boundaries | Accepted (design); contract frozen, planned fields rejected until #53 to #55; module split, slot modes, and matrix tests implemented | #52 (then #53, #54, #55, #56) |
+| [0026](0026-request-policy-over-pinned-core.md) | Request block/redact policy over the pinned core: the core action set only, four operator keys, startup activation check | Accepted; implemented | #56 |
 
 ## Contracts
 
@@ -46,6 +47,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | --- | --- |
 | [request-state](../contracts/request-state.md) | ReceivedRequest, ValidatedRequest, SanitizedRequest; sealed final type |
 | [core-completeness](../contracts/core-completeness.md) | What counts as complete core inspection; blocker handling |
+| [request-policy](../contracts/request-policy.md) | Request-level action and result table over the pinned core; precedence; startup rejection; core debts #1177 to #1180 |
 | [field-classification](../contracts/field-classification.md) | Initial classification rules and rejected forms |
 | [chat-completions-request](../contracts/chat-completions-request.md) | Endpoint field matrix for the Alpha 1 Chat Completions text subset (implemented) and the frozen Alpha 2 recursive subset (planned), admission rules |
 | [resource-limits](../contracts/resource-limits.md) | Resource-limit categories; provisional request limits and memory composition |
