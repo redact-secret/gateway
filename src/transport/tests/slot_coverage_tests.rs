@@ -141,6 +141,26 @@ fn classes() -> Vec<(&'static str, Value)> {
                     "content": [{"type": "text", "text": format!("r {}", tok(54))}]}]}),
         ),
         (
+            "tool and schema descriptions (tools, tool_choice, parameters)",
+            json!({"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "clean"}],
+                "tools": [{"type": "function", "function": {"name": "lookup",
+                    "description": format!("d {}", tok(60)),
+                    "parameters": {"type": "object", "properties": {
+                        "city": {"type": "string", "description": format!("c {}", tok(61))},
+                        "mode": {"type": "string", "enum": ["fast", "slow"]}},
+                        "required": ["city"]}}}],
+                "tool_choice": {"type": "function", "function": {"name": "lookup"}}}),
+        ),
+        (
+            "structured-output schema description and schema text",
+            json!({"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "clean"}],
+                "response_format": {"type": "json_schema", "json_schema": {"name": "answer",
+                    "description": format!("d {}", tok(62)),
+                    "schema": {"type": "object", "properties": {
+                        "ok": {"type": "string", "description": format!("s {}", tok(63))}},
+                        "required": ["ok"]}}}}),
+        ),
+        (
             "every accepted class in one request",
             json!({"model": "gpt-4o-mini",
                 "messages": [{"role": "user", "content": [{"type": "text", "text": format!("p {}", tok(20))}]},
@@ -156,7 +176,11 @@ fn classes() -> Vec<(&'static str, Value)> {
 }
 
 /// Slots and secrets of a body as the typed contract sees them.
-async fn redact_slot_count(rig: &Rig, body: &str) -> usize {
+async fn redact_slot_count(
+    rig: &Rig,
+    body: &str,
+    classes: &mut std::collections::BTreeSet<String>,
+) -> usize {
     let received = rig
         .admission
         .begin_body_receipt(body.len(), &rig.limits)
@@ -173,6 +197,9 @@ async fn redact_slot_count(rig: &Rig, body: &str) -> usize {
             redact += 1;
             if text.contains("SYNTHETICREVOKED") {
                 with_secret += 1;
+                let shown = format!("{slot:?}");
+                let name = shown.split([' ', '{']).next().unwrap_or_default();
+                classes.insert(name.to_owned());
             }
         } else {
             assert!(
@@ -238,9 +265,10 @@ async fn a_secret_in_every_accepted_text_slot_class_never_reaches_the_upstream()
     .await;
     let markers = Markers::standard();
     let mut expected_calls = 0_usize;
+    let mut seen = std::collections::BTreeSet::new();
     for (name, body) in classes() {
         let text = body.to_string();
-        let secrets = redact_slot_count(&rig, &text).await;
+        let secrets = redact_slot_count(&rig, &text, &mut seen).await;
         let out = rig.post(request(&text, KEY, &[])).await;
         assert_eq!(out.status, 200, "{name}");
         markers.assert_clean(name, &out.body);
@@ -272,6 +300,13 @@ async fn a_secret_in_every_accepted_text_slot_class_never_reaches_the_upstream()
                 "{name}: {key}"
             );
         }
+        for key in ["tools", "tool_choice", "response_format"] {
+            assert_eq!(
+                parsed.get(key).is_some(),
+                body.get(key).is_some(),
+                "{name}: {key}"
+            );
+        }
         if let Some(meta) = body.get("metadata") {
             let sent: Vec<&String> = meta.as_object().unwrap().keys().collect();
             let got: Vec<&String> = parsed["metadata"].as_object().unwrap().keys().collect();
@@ -284,6 +319,21 @@ async fn a_secret_in_every_accepted_text_slot_class_never_reaches_the_upstream()
                     .all(Value::is_string)
             );
         }
+    }
+    // The table cannot silently stop covering a redactable slot class: every class of the
+    // contract that carries free text has a secret placed in it by some case above.
+    for class in [
+        "Message",
+        "Stop",
+        "User",
+        "ToolCallArgumentText",
+        "ToolDefDescription",
+        "ToolDefSchemaText",
+        "ResponseSchemaDescription",
+        "ResponseSchemaText",
+        "MetadataValue",
+    ] {
+        assert!(seen.contains(class), "no case covers {class}: {seen:?}");
     }
     rig.settle().await;
 }
@@ -340,6 +390,76 @@ async fn a_secret_in_a_metadata_key_blocks_but_the_charset_already_limits_the_ch
     assert_eq!(rig.post(request(ok, KEY, &[])).await.status, 200);
     let sent: Value = serde_json::from_slice(&rig.fake.calls()[0].body).unwrap();
     assert_eq!(sent["metadata"], json!({"trace_id": "v"}));
+    rig.settle().await;
+}
+
+#[tokio::test]
+async fn a_finding_in_any_label_position_of_the_other_slot_classes_blocks_with_zero_bytes() {
+    let rig = rig_with(
+        &ContentPolicy::new(Profile::Full),
+        RequestLimits::provisional(),
+    )
+    .await;
+    let t = tok(70);
+    let user = json!({"role": "user", "content": "clean"});
+    let tool = |name: &str, params: Value| {
+        json!({"model": "gpt-4o-mini", "messages": [user.clone()],
+            "tools": [{"type": "function", "function": {"name": name, "parameters": params}}]})
+    };
+    let cases = [
+        (
+            "tool name",
+            tool(&t, json!({"type": "object", "properties": {}})),
+        ),
+        (
+            "schema property key",
+            tool(
+                "f",
+                json!({"type": "object", "properties": {t.clone(): {"type": "string"}}}),
+            ),
+        ),
+        (
+            "schema required entry",
+            tool(
+                "f",
+                json!({"type": "object", "properties": {"a": {"type": "string"}}, "required": [t.clone()]}),
+            ),
+        ),
+        (
+            "schema enum string",
+            tool(
+                "f",
+                json!({"type": "object", "properties": {"a": {"type": "string", "enum": [t.clone()]}}}),
+            ),
+        ),
+        (
+            "response schema name",
+            json!({"model": "gpt-4o-mini", "messages": [user.clone()],
+                "response_format": {"type": "json_schema", "json_schema": {"name": t.clone(),
+                    "schema": {"type": "object", "properties": {}}}}}),
+        ),
+        (
+            "tool call id",
+            json!({"model": "gpt-4o-mini", "messages": [user.clone(),
+                {"role": "assistant", "content": null, "tool_calls": [{"id": t.clone(), "type": "function",
+                    "function": {"name": "f", "arguments": "{}"}}]}]}),
+        ),
+        (
+            "tool call argument key",
+            json!({"model": "gpt-4o-mini", "messages": [user.clone(),
+                {"role": "assistant", "content": null, "tool_calls": [{"id": "c1", "type": "function",
+                    "function": {"name": "f", "arguments": format!(r#"{{"{t}":1}}"#)}}]}]}),
+        ),
+    ];
+    for (name, body) in cases {
+        let out = rig.post(request(&body.to_string(), KEY, &[])).await;
+        assert_gateway_error(&out, 422, "unsupported_input");
+        assert!(
+            !String::from_utf8_lossy(&out.body).contains("SYNTHETICREVOKED"),
+            "{name}"
+        );
+        rig.fake.assert_nothing_sent();
+    }
     rig.settle().await;
 }
 
