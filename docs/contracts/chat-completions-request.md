@@ -63,10 +63,10 @@ Status column. **Implemented** rows exist in code and tests today. **Planned #NN
 | `seed` | structural | Implemented | Integer in the `i64` range. |
 | `stop` | text | Implemented | String, or array of 1 to 4 strings. |
 | `user` | text | Implemented | String, at most 256 bytes. |
-| `response_format` | structural | Implemented for `text` and `json_object`; `json_schema` Planned #54 | See below. |
-| `tools` | see below | Planned #54 | Array of 1 to 64 function tools. |
-| `tool_choice` | structural + label | Planned #54 | See below. |
-| `parallel_tool_calls` | structural | Planned #54 | Boolean. Rejected unless `tools` is present. |
+| `response_format` | structural | Implemented for `text`, `json_object`, and `json_schema` (#54) | See below. |
+| `tools` | see below | Implemented (#54) | Array of 1 to 64 function tools. |
+| `tool_choice` | structural + label | Implemented (#54) | See below. |
+| `parallel_tool_calls` | structural | Implemented (#54) | Boolean. Rejected unless `tools` is present. |
 | `metadata` | label + text | Planned #55 | See below. |
 | `functions`, `function_call` | rejected | Rejected | Legacy shapes; the current `tools` shapes replace them. Never planned. |
 | `logit_bias`, `prediction`, `modalities`, `audio`, `web_search_options`, `store`, `service_tier`, `reasoning_effort`, `logprobs`, `top_logprobs`, `verbosity`, `prompt_cache_key`, `safety_identifier`, anything unknown | rejected | Rejected | Arbitrary key-value data, binary or provider-stored content, or response shapes outside the relay bounds. Each needs its own contract and ADR. |
@@ -113,7 +113,7 @@ Example (synthetic):
 {"role":"tool","tool_call_id":"call_1","content":"sunny"}
 ```
 
-### `tools[]` (Planned #54)
+### `tools[]` (Implemented, #54)
 
 | Field | Class | Contract |
 | --- | --- | --- |
@@ -124,7 +124,7 @@ Example (synthetic):
 | `function.strict` | structural | Optional boolean, preserved. |
 | anything else | rejected | |
 
-`tool_choice` (Planned #54), exactly one of:
+`tool_choice` (Implemented, #54), exactly one of:
 
 | Form | Class | Contract |
 | --- | --- | --- |
@@ -133,7 +133,7 @@ Example (synthetic):
 
 `parallel_tool_calls` is a boolean and is allowed only when `tools` is present.
 
-### Schema subset (Planned #54)
+### Schema subset (Implemented, #54)
 
 Used by `tools[].function.parameters` and `response_format.json_schema.schema`. A schema is a JSON object that uses only these keywords, written by the serializer in this canonical order (`properties` keeps the caller's entry order):
 
@@ -153,6 +153,8 @@ Used by `tools[].function.parameters` and `response_format.json_schema.schema`. 
 
 Everything else is rejected, in particular: `$ref`, `$defs`, `definitions`, `$id`, `$schema`, `$anchor`, `$dynamicRef` (no reference of any kind is resolved or fetched, so there are no unresolved, external, or recursive constructs), `allOf`, `oneOf`, `not`, `if`/`then`/`else`, `patternProperties`, `propertyNames`, `prefixItems`, `unevaluated*`, `dependent*`, `pattern` and `format` (free-form strings that only a provider-specific engine interprets), `default`, `examples`, and `title` (arbitrary data or text that the smallest useful subset does not need), and any `x-` or unknown keyword. Schema nesting is also bounded by `max_depth` (default 16 containers including the request wrapper), so deep schemas need a raised limit. Schema depth is at most 8 nested schema objects, at most 256 schema objects per schema, and every node counts against the derived budgets.
 
+Implementation notes (#54, `src/protocol/chat/schema.rs`): the root schema must carry `type: "object"` (`{}` and non-object roots are rejected); `type` keeps the caller's shape (string or array); an empty `properties` object and an empty `required` array are accepted, an empty `enum` or `anyOf` is not; `tools: []` is rejected. Count, depth, and size violations (more than 64 tools, 64 properties, 64 `required`, 64 `enum`, 8 `anyOf`, 4 `type` entries, depth 8, 256 schema objects per schema, a description over 4096 bytes before redaction) are `413 limit_exceeded`; every other violation is `422 unsupported_input`; duplicate keys are `400 malformed_input` from the strict parse. Schema nodes, label bytes, and description bytes are charged to one request-wide derived budget (`Derived`, shared by `tools` and `response_format`; #53 charges decoded arguments to the same type). After redaction a description is rechecked against 4096 bytes and every label against its charset and length; the aggregate size is bounded by the output bound. An integer literal beyond `u64` reaches the module as a float (no `arbitrary_precision`), so it is written as a float rather than rejected; this is the D10 limit.
+
 Example (synthetic):
 
 ```json
@@ -164,7 +166,7 @@ Example (synthetic):
 | Form | Class | Status | Contract |
 | --- | --- | --- | --- |
 | `{"type":"text"}`, `{"type":"json_object"}` | structural | Implemented | Only `type`. |
-| `{"type":"json_schema","json_schema":{...}}` | label + text + schema | Planned #54 | `name` required NAME label; `description` optional text (at most 4096 bytes after redaction); `strict` optional boolean; `schema` required, the schema subset above (root `type: "object"`). Any other key is rejected. |
+| `{"type":"json_schema","json_schema":{...}}` | label + text + schema | Implemented (#54) | `name` required NAME label; `description` optional text (at most 4096 bytes after redaction); `strict` optional boolean; `schema` required, the schema subset above (root `type: "object"`). Any other key is rejected. |
 
 ### `metadata` (Planned #55)
 
@@ -182,7 +184,7 @@ A JSON object of at most 16 entries (the provider's limit). Keys are LINK labels
 | `n` other than `1` | Larger values multiply response size beyond the relay bounds. |
 | Any unknown key at any depth, any client claim that input is already scanned or redacted | Unknown nested fields get the same classification discipline as top-level fields; no claim is ever read. |
 
-Until a Planned row lands, `tools`, `tool_choice`, `parallel_tool_calls`, `metadata`, and `response_format.type = json_schema` are all in this table's rejected set, with zero upstream bytes. Role `tool`, `tool_calls`, `tool_call_id`, and assistant `content: null` beside `tool_calls` are implemented (#53).
+Until a Planned row lands, `metadata` is in this table's rejected set, with zero upstream bytes. Role `tool`, `tool_calls`, `tool_call_id`, and assistant `content: null` beside `tool_calls` are implemented (#53).
 
 ## Block versus redact
 
@@ -206,7 +208,7 @@ Text-slot order is fixed and identical for reading and mutation ([ADR 0025](../d
 5. `metadata` entries in input order, key then value.
 6. `response_format.json_schema`: `name`, `description`, then schema leaves.
 
-Today classes 1 (messages, including tool history, #53), 3, and 4 produce slots; classes 2, 5, and 6 are planned (#54, #55). After the core call on every slot returns `Ok`, and before serialization, the request is revalidated: the visited slot count equals the classified count; every replaced string is rechecked against its slot bound; every decoded argument tree is re-encoded and its shape (container kinds, key sequence, non-string leaves) must equal the pre-inspection shape; label slots must be byte-identical to what was classified; derived budgets are recomputed on the replaced content. Implemented for tool history (#53): the call and result labels must still conform and match a digest taken at parse time, linkage and id uniqueness are re-checked, each decoded argument tree must have its parse-time node count with conforming, unique keys, and a replaced string over the per-string bound is `limit_exceeded`; the aggregate size is bounded by the serializer's output bound. Serialization is then bounded as before. Any failure rejects the request with no upstream bytes.
+Today classes 1 (messages, including tool history, #53), 2 (`tools`, `tool_choice`; #54), 3, 4, and 6 (`response_format.json_schema`; #54) produce slots; class 5 (`metadata`) is planned (#55). After the core call on every slot returns `Ok`, and before serialization, the request is revalidated: the visited slot count equals the classified count; every replaced string is rechecked against its slot bound; every decoded argument tree is re-encoded and its shape (container kinds, key sequence, non-string leaves) must equal the pre-inspection shape; label slots must be byte-identical to what was classified; derived budgets are recomputed on the replaced content. Implemented for tool history (#53): the call and result labels must still conform and match a digest taken at parse time, linkage and id uniqueness are re-checked, each decoded argument tree must have its parse-time node count with conforming, unique keys, and a replaced string over the per-string bound is `limit_exceeded`; the aggregate size is bounded by the serializer's output bound. Serialization is then bounded as before. Any failure rejects the request with no upstream bytes.
 
 ## Typed boundary representation
 
