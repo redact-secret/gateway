@@ -57,7 +57,7 @@ SDK retry column: **verified in #22** with the pinned SDKs (npm `openai` 7.27.0,
 | `Content-Encoding` present or a transfer coding other than `chunked` | 415 | `unsupported_input` | no |
 | Malformed or conflicting `Content-Length` / empty body | 400 | `malformed_input` | no |
 | `Content-Length` together with `Transfer-Encoding` in the first request head (written by the connection-level head guard before the HTTP layer, #43; same body and `Connection: close`) | 400 | `malformed_input` | no |
-| Request head over 64 KiB without ending (written by the head guard, #43) | 431 | `limit_exceeded` | no |
+| Request head over 64 KiB, ended or not, or more than 100 header fields (written by the head guard, #43, #41) | 431 | `limit_exceeded` | no |
 | Invalid JSON, invalid UTF-8, duplicate key, aborted body | 400 | `malformed_input` | no |
 | Well-formed but outside the supported subset (unknown or unsupported field, wrong type, out-of-range value) | 422 | `unsupported_input` | no |
 | Declared or actual body over the limit, or a depth/node/string/count budget exceeded | 413 | `limit_exceeded` | no |
@@ -66,7 +66,7 @@ SDK retry column: **verified in #22** with the pinned SDKs (npm `openai` 7.27.0,
 | No usable provider `Authorization` (`WWW-Authenticate: Bearer`) (#24) | 401 | `missing_credential` | no |
 | Duplicate or malformed `Authorization`, malformed or repeated organization/project, malformed or ambiguous `Connection` (#24) | 400 | `malformed_input` | no |
 | `Expect` other than `100-continue` (#24) | 417 | `unsupported_input` | no |
-| Request headers over the byte limits (#24) | 431 | `limit_exceeded` | no |
+| Request header names plus values over 16,384 bytes or a value over 8,192 bytes (route, #24, #41) | 431 | `limit_exceeded` | no |
 | No upstream configured (`stream: true` or not) | 501 | `not_implemented` | yes (5xx; wasted work) |
 | `stream: true` from an HTTP/1.0 caller (a cut stream could not be told from a finished one) | 422 | `unsupported_input` | no |
 
@@ -107,6 +107,19 @@ The response is buffered under hard bounds and relayed only when complete, so ev
 SDK retry implications (verified in #22, see "SDK retry guidance"). The OpenAI Python and Node SDKs retry `5xx` and `408`/`409`/`429` by default, and a failed connection. The Gateway itself never retries and never replays a payload after any send attempt began. A retry by the SDK is a **new, independent request**, and where the first attempt reached the provider (a timeout, an invalid or oversized response, a disconnect) the provider may already have run, and may bill for, the first one: with the SDK defaults, an oversize, truncated, or timed-out provider answer reaches the provider three times. Only the rows marked "no" in the "Request bytes sent?" column are known to have transmitted nothing. A caller that cannot tolerate duplicate provider-side work must disable SDK retries (`maxRetries: 0` / `max_retries=0`, as the shipped examples do). No exactly-once or at-most-once delivery is claimed.
 
 Content coding: the Gateway requests `Accept-Encoding: identity` and does not decode. A provider response with any other `Content-Encoding` cannot be relayed faithfully (the coding header is not relayed) and is `upstream_invalid_response`.
+
+Request-head size classes (#41, [ADR 0023](../decisions/0023-header-size-measurement-and-size-classes.md)). One outcome per class, tested on both sides of every limit in `src/transport/tests/header_cap_tests.rs`:
+
+| Class | Condition | Answered by | Outcome |
+| --- | --- | --- | --- |
+| Within all limits | head at most 65,536 bytes, at most 100 fields, names plus values at most 16,384, each value at most 8,192 | route | admitted |
+| Route byte caps | over 16,384 of names plus values, or a value over 8,192 (head and field count within their limits) | route | `431 limit_exceeded`, gateway response |
+| Field count | more than 100 fields | head guard | fixed `431 limit_exceeded` constant, connection closed |
+| Head bound | head over 65,536 bytes, ended or not | head guard | the same fixed constant, connection closed |
+| Late head | not finished by `body_deadline_ms` | head guard | connection closed, no response |
+| Ambiguous framing | `Content-Length` with `Transfer-Encoding` | head guard | fixed `400 malformed_input` |
+
+In every refusal row nothing is reserved, nothing reaches the provider, and no request-derived byte or credential is in the response. Delivery of a guard answer is best effort (the peer may see a reset if it is still sending).
 
 Connection bound (#40, [ADR 0022](../decisions/0022-connection-bound-at-accept.md)). A connection that arrives while `resources.limits.max_connections` connections are open is closed at accept: no status, no body, no error code, because nothing has been read and nothing is written. The caller sees a closed or reset connection (an SDK `APIConnectionError`, retried by default like any connection error). This is not the `overload` of request admission, which is a `503` after a complete request head; the two bounds are independent. Health probes at the bound are refused the same way. There is no refusal counter or log yet.
 

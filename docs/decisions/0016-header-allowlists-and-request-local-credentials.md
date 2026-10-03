@@ -44,4 +44,4 @@ See the contract's verification section.
 
 ## Deferred measured choices
 
-Header byte limits (16 KiB total, 8 KiB value) and the 512-byte token cap are provisional and unmeasured; they only need to exceed legitimate SDK headers. The single body copy in `outbound` is not separately reserved; #20 should decide whether it is accounted.
+Header byte limits (16 KiB total, 8 KiB value) and the 512-byte token cap were provisional and unmeasured (the header limits are now measured and confirmed, [ADR 0023](0023-header-size-measurement-and-size-classes.md)); they only need to exceed legitimate SDK headers. The single body copy in `outbound` is not separately reserved; #20 should decide whether it is accounted.
