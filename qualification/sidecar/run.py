@@ -452,6 +452,9 @@ def main():
     assert oom_cid in oom_group and '..' not in oom_group
     evidence('oom-before',runtime_sample('oom'))
     command('docker','exec',CLUSTER+'-control-plane','/bin/sh','-ec','printf %s 262144 > "$1/memory.max"','--','/sys/fs/cgroup'+oom_group)
+    # An idle process can reclaim file-backed pages without dying. Force a
+    # normal authenticated request to allocate within the lowered hard limit.
+    actor('oom','load',3,1,65536)
     deadline=time.monotonic()+120
     while time.monotonic()<deadline:
         data=json.loads(kube('get','pod','oom','-o','json'))
