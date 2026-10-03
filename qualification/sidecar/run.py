@@ -16,7 +16,8 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE_IMAGE = 'kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a'
-HELPER = 'python:3.13-alpine@sha256:2dd78ad5cf13a0b68f5134dc49aa9950203a8cf4b7463431b9f3b398287c5059'
+HELPER_SOURCE = 'python:3.13-alpine@sha256:2dd78ad5cf13a0b68f5134dc49aa9950203a8cf4b7463431b9f3b398287c5059'
+HELPER = 'rsg-beta2-helper:local'
 CLUSTER = 'gateway-beta2'
 NS = 'gateway-beta2'
 OUT = ROOT / 'qualification/evidence/beta2'
@@ -100,7 +101,7 @@ def pod_spec(name, image, qualified=False, enforced=False, cpu='1', memory='256M
                      'volumeMounts': [{'name': 'tools', 'mountPath': '/tools', 'readOnly': True},
                                       {'name': 'operator-run', 'mountPath': '/run'}]})
     if qualified:
-        init.append({'name': 'synthetic-provider', 'image': HELPER, 'restartPolicy': 'Always',
+        init.append({'name': 'synthetic-provider', 'image': HELPER, 'imagePullPolicy':'Never', 'restartPolicy': 'Always',
                      'command': ['python', '/tools/actor.py', 'provider'], 'securityContext': {**context, 'runAsUser': 20001, 'runAsGroup': 20001},
                      'startupProbe': {'exec': {'command': ['python', '-c', 'import socket;socket.create_connection(("127.0.0.1",9000),2).close()']}, 'periodSeconds': 1},
                      'volumeMounts': [{'name': 'tools', 'mountPath': '/tools', 'readOnly': True}]})
@@ -110,7 +111,7 @@ def pod_spec(name, image, qualified=False, enforced=False, cpu='1', memory='256M
         'automountServiceAccountToken': False, 'enableServiceLinks': False, 'terminationGracePeriodSeconds': 15,
         'securityContext': {'runAsNonRoot': True, 'fsGroup': 65532, 'seccompProfile': {'type': 'RuntimeDefault'}},
         'initContainers': init,
-        'containers': [{'name': 'app', 'image': HELPER, 'command': ['python', '/tools/actor.py', 'idle'],
+        'containers': [{'name': 'app', 'image': HELPER, 'imagePullPolicy':'Never', 'command': ['python', '/tools/actor.py', 'idle'],
                         'securityContext': {**context, 'runAsUser': 10001, 'runAsGroup': 10001},
                         'volumeMounts': [{'name': 'tools', 'mountPath': '/tools', 'readOnly': True},
                                          {'name': 'token', 'mountPath': '/run/secrets', 'readOnly': True}]}],
@@ -256,6 +257,7 @@ def shipped_manifest():
     spec=deployment['spec']['template']['spec']
     spec['initContainers'][0]['imagePullPolicy']='Never'
     app=spec['containers'][0]
+    app['imagePullPolicy']='Never'
     app['command']=['python','/tools/actor.py','idle']
     app['volumeMounts'].append({'name':'tools','mountPath':'/tools','readOnly':True})
     spec['volumes'].append({'name':'tools','configMap':{'name':'tools'}})
@@ -282,7 +284,8 @@ def main():
     stage('create-native-cluster')
     command('kind', 'create', 'cluster', '--name', CLUSTER, '--image', NODE_IMAGE, '--wait', '120s', timeout=300)
     command('kubectl', '--context', 'kind-' + CLUSTER, 'create', 'namespace', NS)
-    command('docker', 'pull', HELPER)
+    command('docker', 'pull', HELPER_SOURCE)
+    command('docker', 'tag', HELPER_SOURCE, HELPER)
     command('sh', 'scripts/build-image.sh', 'target/release/redact-secret-gateway', 'rsg-beta2-candidate:local', 'linux/' + arch)
     command('sh', 'scripts/build-image.sh', 'qualification/target/release/redact-secret-gateway-qualification', 'rsg-beta2-qualification:local', 'linux/' + arch)
     with tempfile.TemporaryDirectory() as work:
@@ -298,7 +301,7 @@ def main():
     evidence('environment', {'recorded_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),
         'source_commit':command('git','rev-parse','HEAD'),'platform':platform.uname()._asdict(),
         'host_load':os.getloadavg(),'quiet_host':False,'kind':command('kind','version'),
-        'node_image':NODE_IMAGE,'helper_image':HELPER,
+        'node_image':NODE_IMAGE,'helper_image':HELPER_SOURCE,'helper_image_id':command('docker','inspect','--format','{{.Id}}',HELPER),
         'nodes':json.loads(command('kubectl','--context','kind-'+CLUSTER,'get','nodes','-o','json')),
         'cni_pods':json.loads(command('kubectl','--context','kind-'+CLUSTER,'-n','kube-system','get','pods','-o','json')),
         'core_pin':'=0.1.0-beta.12','config_schema_version':1,
