@@ -64,8 +64,10 @@ def main() -> None:
     with client.chat.completions.create(
         model=model, messages=[{"role": "user", "content": prompt}], stream=True
     ) as stream:
-        # A broken stream raises openai.APIConnectionError here: the gateway ends it abruptly and
-        # never invents a completion. Checking finish_reason is still good practice.
+        # A broken stream raised openai.APIConnectionError with the pinned SDK (observed, #60), but
+        # the SDK's iteration ending is NOT evidence that the answer is complete: a provider can
+        # also end a stream cleanly without a completion. The completion indicator the provider
+        # sends (finish_reason on a chunk) is the only check that holds on every path.
         for chunk in stream:
             if chunk.choices:
                 text += chunk.choices[0].delta.content or ""

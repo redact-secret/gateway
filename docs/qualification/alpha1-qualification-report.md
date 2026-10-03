@@ -62,6 +62,17 @@ Defaults (`maxRetries` / `max_retries` = 2), counted with SDK-side hooks and the
 - Retried (3 attempts): provider `408`, `409`, `429`, `500`, `502`, `503`, `504` (3 provider requests each); gateway `501` (0), `502 upstream_unavailable` (0), `502 upstream_response_too_large` and `502 upstream_invalid_response` (3 each), `504 upstream_timeout` (3), `503 overload` (0; the SDK waited the relayed `Retry-After: 1` between attempts), connection refused (0); a provider `429` before a stream starts (3).
 - **Corrections made to the earlier text:** (1) the SDKs obey `x-should-retry` and `retry-after-ms`, but the gateway's response-header allowlist drops both, so a provider that says "do not retry" is retried through the gateway (observed with a fake that sends them); (2) the earlier claims that SDKs "may retry" and "raise" on a cut stream were wrong in part: neither retried it, and Node raised only on Node 24 (not on 22.16.0).
 
+### Alpha 2 transport qualification (2026-10-03, #60)
+
+Added after the Alpha 1 candidate, on the same non-release build and the same pinned SDKs (openai 7.27.0 for Node.js, 3.24.0 for Python); the full tables are in [errors and telemetry](../contracts/errors-and-telemetry.md#alpha-2-transport-qualification-2026-10-03-60). Highlights:
+
+- **Status mapping frozen and enforced.** Every Gateway-generated outcome is one row of the "Frozen status mapping" table; `src/status_contract_tests.rs` derives the same rows from the code and fails on any difference in status, code, `Retry-After`, or the set of outcomes.
+- **Duplicate upstream work is real and client-side.** For every provider failure that reaches the provider (closed before any byte, partial head, bad status line, conflicting `Content-Length`, unsupported coding, truncated body, oversize, partial upload, no answer) the Gateway answers once with a safe `502`/`504`; the SDK default then sent the same sanitized request three times (three provider requests with identical bodies), and `maxRetries: 0` / `max_retries=0` sent one. The Gateway replayed nothing and retried nothing. Overload and refused connections are retried three times but never reach the provider.
+- **Streams.** After the headers no SDK retries (one attempt, one provider request). Python raised on every cut. Node.js 24 raised on every cut. Node.js 22.16.0 (undici 6.21.2) ended normally on every cut, and every SDK ended normally when the provider ended a stream cleanly after two events with no `finish_reason`: an iteration that ends is not evidence of a valid completion, and only the provider's `finish_reason` is. The CI now runs the whole Node.js SDK suite on both runtimes.
+- **Found and fixed:** a provider `101 Switching Protocols` was relayed to the caller as a `101`; it is now `502 upstream_invalid_response`.
+- **Framing at the HTTP level** (provider-side length and chunk inconsistencies, unsupported codings, hop-by-hop and connection-nominated headers in both directions): refused or stripped as tabulated; rejected request framing never reaches the provider; no error carries provider bytes, credentials, or payload text.
+- **Not claimed:** other SDK, Node.js, or Python versions, other HTTP clients, a real provider, an intermediary, TLS interception, exactly-once or at-most-once delivery, a retry broker. The Gateway still never retries.
+
 ## Acceptance reconciliation
 
 ### Issue #22: deliverables and acceptance criteria

@@ -50,6 +50,7 @@ mod fake_upstream;
 
 mod attack_tests;
 mod forward_tests;
+mod framing_matrix_tests;
 mod header_cap_tests;
 #[path = "../../tests/support/leak.rs"]
 #[allow(dead_code)]

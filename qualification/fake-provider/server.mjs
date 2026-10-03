@@ -13,6 +13,11 @@
 //   qual-err-429-retry-after (Retry-After: 0), qual-err-500-hint-no-retry (500 + x-should-retry: false), qual-retry-429-then-ok (two 429s, then 200),
 //   qual-sse-ok, qual-sse-fragmented, qual-sse-multi, qual-sse-interrupted(-close), qual-sse-gated,
 //   qual-sse-hang, qual-sse-slow, qual-sse-err-429.
+// Framing and delivery-uncertainty scenarios (#60), all raw bytes on the provider socket:
+//   qual-close-before-headers, qual-partial-head, qual-bad-status-line, qual-dup-content-length,
+//   qual-gzip (Content-Encoding: gzip), qual-partial-read (provider stops reading the request body),
+//   qual-sse-cut-before-first-event, qual-sse-clean-no-finish (clean end, no finish_reason, no [DONE]),
+//   qual-sse-no-done (finish_reason but no [DONE], clean end), qual-sse-bad-chunk (invalid chunk framing).
 //
 // Admin API (separate loopback port; the gateway never talks to it):
 //   GET  /__admin/calls                      -> {connections, calls:[...]} (recorded calls)
@@ -164,6 +169,22 @@ async function runScenario(call, req, res, json) {
     res.socket?.destroy();
     return;
   }
+  if (model === "qual-close-before-headers") {
+    call.server_aborted = true;
+    res.socket?.destroy();
+    return;
+  }
+  if (model === "qual-partial-head" || model === "qual-bad-status-line" || model === "qual-dup-content-length" || model === "qual-gzip") {
+    const raw = {
+      "qual-partial-head": "HTTP/1.1 200 OK\r\nContent-Ty",
+      "qual-bad-status-line": "ICY 200 OK\r\nContent-Length: 2\r\n\r\n{}",
+      "qual-dup-content-length": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nContent-Length: 3\r\nConnection: close\r\n\r\n{}x",
+      "qual-gzip": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+    }[model];
+    call.server_aborted = true;
+    res.socket?.write(raw, () => res.socket?.destroy());
+    return;
+  }
   if (model === "qual-hang") {
     return; // never answer; ends when the client (via the gateway) goes away
   }
@@ -234,6 +255,44 @@ async function runScenario(call, req, res, json) {
         res.socket?.destroy(); // no terminating chunk, no [DONE]
         return;
       }
+      case "qual-sse-cut-before-first-event": {
+        beginSse(res, call);
+        // Give the gateway time to read the headers and commit the response; a provider that
+        // closes in the same instant can be observed as a pre-commit 502 instead (a race the
+        // gateway cannot and need not resolve; documented in the contract).
+        await sleep(150);
+        call.server_aborted = true;
+        res.socket?.destroy(); // headers sent, then nothing: no event, no terminating chunk
+        return;
+      }
+      case "qual-sse-clean-no-finish": {
+        // A provider that ends the stream cleanly (terminating chunk) after only two events:
+        // no finish_reason and no [DONE]. The transport is valid; the completion is not.
+        beginSse(res, call);
+        res.write(events[0]);
+        res.write(events[1]);
+        mark(call, "first_event");
+        return res.end();
+      }
+      case "qual-sse-no-done": {
+        beginSse(res, call);
+        for (const e of events.slice(0, -1)) {
+          res.write(e);
+          await tick();
+        }
+        mark(call, "first_event");
+        return res.end(); // finish_reason arrived, [DONE] did not
+      }
+      case "qual-sse-bad-chunk": {
+        // Invalid chunk framing after the headers: the size line is not hexadecimal.
+        beginSse(res, call);
+        res.write(events[0]);
+        await new Promise((r) => res.socket?.write("ZZ\r\ngarbage\r\n", r));
+        mark(call, "first_event");
+        call.server_aborted = true;
+        res.socket?.destroy();
+        return;
+      }
       case "qual-sse-gated": {
         beginSse(res, call);
         res.write(events[0]);
@@ -294,9 +353,21 @@ const provider = http.createServer((req, res) => {
   calls.push(call);
   const chunks = [];
   let size = 0;
+  let partial = false;
   req.on("data", (c) => {
     size += c.length;
     if (size <= MAX_BODY) chunks.push(c);
+    // `qual-partial-read`: stop reading the request body after the first chunk that names the
+    // scenario and close the connection (a provider that dies mid-upload).
+    if (!partial && c.includes("qual-partial-read")) {
+      partial = true;
+      call.body_bytes = size;
+      call.body = Buffer.concat(chunks).toString("utf8");
+      call.scenario = "qual-partial-read";
+      call.server_aborted = true;
+      mark(call, "received");
+      req.socket.destroy();
+    }
   });
   req.socket.on("close", () => {
     if (!res.writableFinished && !call.server_aborted) mark(call, "closed");
@@ -304,6 +375,7 @@ const provider = http.createServer((req, res) => {
   });
   res.on("finish", () => mark(call, "finished"));
   req.on("end", () => {
+    if (partial) return;
     const raw = Buffer.concat(chunks);
     call.body = raw.toString("utf8");
     call.body_bytes = size;

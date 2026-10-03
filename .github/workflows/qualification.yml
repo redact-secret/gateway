@@ -42,11 +42,24 @@ env:
 
 jobs:
   sdk-suites:
-    name: Pinned SDK suites and README examples
+    # Two Node.js runtimes (#60). 24 is the version the examples require and runs everything. 22.16.0
+    # (undici 6.21.2) is the older runtime whose fetch did not report a stream cut after
+    # `Connection: close`; it runs the Node.js SDK suite only (the examples and the Python suite do
+    # not depend on the Node.js runtime), so the runtime difference is a recorded, tested fact and
+    # not a claim. The versions are exact pins for the 22 leg, major-only for 24 as before.
+    name: Pinned SDK suites (Node.js ${{ matrix.node }})
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node: "24"
+            suites: "node,python,examples"
+          - node: "22.16.0"
+            suites: "node"
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,10 +67,10 @@ jobs:
           persist-credentials: false
       - name: Install pinned toolchain (rust-toolchain.toml)
         run: rustup toolchain install
-      - name: Set up Node.js 24
+      - name: Set up Node.js ${{ matrix.node }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
+          node-version: ${{ matrix.node }}
           package-manager-cache: false
       - name: Set up Python 3.13
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -84,7 +97,9 @@ jobs:
           (cd qualification/sdk/node && npm run typecheck)
           (cd examples/node && npm run typecheck)
       - name: Run the SDK suites and the examples (retry observations are recorded as evidence)
-        run: sh qualification/run-suites.sh --suites node,python,examples
+        env:
+          QUAL_SUITES: ${{ matrix.suites }}
+        run: sh qualification/run-suites.sh --suites "$QUAL_SUITES"
       - name: Record the pinned versions that ran
         if: ${{ always() }}
         run: |
@@ -103,7 +118,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: sdk-qualification-evidence-${{ github.sha }}
+          name: sdk-qualification-evidence-node${{ matrix.node }}-${{ github.sha }}
           path: qualification/evidence/
           if-no-files-found: error
           retention-days: 14
