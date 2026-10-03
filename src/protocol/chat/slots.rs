@@ -17,11 +17,11 @@
 //!    then `tool_choice` function name;
 //! 3. `stop`;
 //! 4. `user`;
-//! 5. (#55) `metadata` entries in input order, key then value;
+//! 5. `metadata` entries in input order, key then value (#55, implemented);
 //! 6. (#54) `response_format.json_schema` (name, then schema labels and text in document
 //!    order).
 //!
-//! Classes 1, 3, 4 exist today. The reserved variants below are never produced until their
+//! Classes 1, 3, 4, 5 exist today. The reserved variants below are never produced until their
 //! owning issue lands; their order inside the list above is already contractual.
 
 use super::{
@@ -89,7 +89,7 @@ pub enum TextSlot {
     /// Schema free text under `response_format.json_schema.schema`. Redact.
     ResponseSchemaText { leaf: usize },
 
-    // ---- Reserved. #55: metadata. ----
+    // ---- Metadata (#55, implemented). ----
     /// `metadata` key. Detect-only.
     MetadataKey { entry: usize },
     /// `metadata` value. Redact.
@@ -174,8 +174,8 @@ impl ChatRequest {
     /// Revalidation after text mutation and before serialization (ADR 0025). Each owning
     /// module re-checks the constraints that a replacement can break (per-string and
     /// aggregate length bounds, derived-structure shape such as decoded tool arguments)
-    /// and fails closed. Nothing is checked today beyond the output bound, which the
-    /// serializer enforces.
+    /// and fails closed: `user` and `metadata` bounds are checked here (#55); the output
+    /// bound is enforced by the serializer.
     ///
     /// # Errors
     /// [`SerializeError::Limit`] when a replacement broke a size bound,
@@ -183,6 +183,7 @@ impl ChatRequest {
     pub fn revalidate(&self) -> Result<(), SerializeError> {
         tool_calls::revalidate(&self.messages)?;
         tool_defs::revalidate(&self.tool_defs)?;
+        stop_user::revalidate_user(self.user.as_deref())?;
         metadata::revalidate(&self.metadata)?;
         response_format::revalidate(self.response_format.as_ref())
     }

@@ -67,7 +67,7 @@ Status column. **Implemented** rows exist in code and tests today. **Planned #NN
 | `tools` | see below | Implemented (#54) | Array of 1 to 64 function tools. |
 | `tool_choice` | structural + label | Implemented (#54) | See below. |
 | `parallel_tool_calls` | structural | Implemented (#54) | Boolean. Rejected unless `tools` is present. |
-| `metadata` | label + text | Planned #55 | See below. |
+| `metadata` | label + text | Implemented (#55) | See below. |
 | `functions`, `function_call` | rejected | Rejected | Legacy shapes; the current `tools` shapes replace them. Never planned. |
 | `logit_bias`, `prediction`, `modalities`, `audio`, `web_search_options`, `store`, `service_tier`, `reasoning_effort`, `logprobs`, `top_logprobs`, `verbosity`, `prompt_cache_key`, `safety_identifier`, anything unknown | rejected | Rejected | Arbitrary key-value data, binary or provider-stored content, or response shapes outside the relay bounds. Each needs its own contract and ADR. |
 
@@ -168,9 +168,15 @@ Example (synthetic):
 | `{"type":"text"}`, `{"type":"json_object"}` | structural | Implemented | Only `type`. |
 | `{"type":"json_schema","json_schema":{...}}` | label + text + schema | Implemented (#54) | `name` required NAME label; `description` optional text (at most 4096 bytes after redaction); `strict` optional boolean; `schema` required, the schema subset above (root `type: "object"`). Any other key is rejected. |
 
-### `metadata` (Planned #55)
+### `metadata` (Implemented, #55)
 
-A JSON object of at most 16 entries (the provider's limit). Keys are LINK labels (scanned, never rewritten); values are strings of at most 512 bytes after redaction and are inspected text. Numbers, booleans, `null`, arrays, and nested objects are rejected, as is an empty-string key. Example: `{"trace_id":"abc","team":"synthetic"}`. Entries keep the caller's order.
+A JSON object of at most 16 entries (the provider's limit). Keys are LINK labels (scanned, never rewritten); values are strings of at most 512 bytes after redaction and are inspected text. Numbers, booleans, `null`, arrays, and nested objects are rejected, as is an empty-string key. Example: `{"trace_id":"abc","team":"synthetic"}`. Entries keep the caller's order. An empty object `{}` is accepted and forwarded as `{}`.
+
+Rules (`src/protocol/chat/metadata.rs`): the value must be an object; at most 16 entries; every key is 1 to 64 bytes of `[A-Za-z0-9_.:-]` (after JSON unescaping, so `"a\u0000b"` and any non-ASCII key fail); every value is a JSON string of at most 512 bytes. A duplicate key (also one that only differs in escaping) is `malformed_input` from the parser; the typed parse rechecks uniqueness. Every other shape (number, boolean, `null`, array, object, a non-object `metadata`) is `unsupported_input`. Metadata is not a generic object channel: it has no recursive form, no passthrough, and no key besides the closed LINK labels.
+
+Inspection: each key is scanned detect-only (a finding of any action rejects the request with `422 unsupported_input` and the key is never rewritten, so keys cannot collide or change the entry set); each value goes through the core as redactable text with request-wide placeholder numbering. After redaction a value that outgrew 512 bytes is refused with `413 limit_exceeded` (never truncated), and the whole outbound document is held to the transformed-output bound like every other slot. Aggregate metadata size is bounded by construction (16 entries of at most 64 + 512 bytes, 9,216 bytes of text) and by the parse budgets, the body limit, and the output bound; no separate counter exists.
+
+Redaction tokens: a client-supplied `<SECRET_n>`-shaped value is ordinary text. It is not a finding, it is never trusted as proof that the value was scanned, it is never restored to a secret, and it does not reserve a number (a real finding still receives the next request-wide number, so a literal and a gateway placeholder can look alike upstream). Input already sanitized by an adapter in front of the gateway is therefore scanned again like any other text; the gateway cannot tell the two apart and does not try. Metadata may be echoed by the provider in logs or dashboards, so the value channel is redacted and the key channel is limited to short labels plus the label scan; a short label that no detector recognizes can still carry information (see Residual risks).
 
 ### Deliberately unsupported (all `unsupported_input`, HTTP 422)
 
@@ -184,7 +190,7 @@ A JSON object of at most 16 entries (the provider's limit). Keys are LINK labels
 | `n` other than `1` | Larger values multiply response size beyond the relay bounds. |
 | Any unknown key at any depth, any client claim that input is already scanned or redacted | Unknown nested fields get the same classification discipline as top-level fields; no claim is ever read. |
 
-Until a Planned row lands, `metadata` is in this table's rejected set, with zero upstream bytes. Role `tool`, `tool_calls`, `tool_call_id`, and assistant `content: null` beside `tool_calls` are implemented (#53).
+Role `tool`, `tool_calls`, `tool_call_id`, and assistant `content: null` beside `tool_calls` are implemented (#53).
 
 ## Block versus redact
 
@@ -208,7 +214,7 @@ Text-slot order is fixed and identical for reading and mutation ([ADR 0025](../d
 5. `metadata` entries in input order, key then value.
 6. `response_format.json_schema`: `name`, `description`, then schema leaves.
 
-Today classes 1 (messages, including tool history, #53), 2 (`tools`, `tool_choice`; #54), 3, 4, and 6 (`response_format.json_schema`; #54) produce slots; class 5 (`metadata`) is planned (#55). After the core call on every slot returns `Ok`, and before serialization, the request is revalidated: the visited slot count equals the classified count; every replaced string is rechecked against its slot bound; every decoded argument tree is re-encoded and its shape (container kinds, key sequence, non-string leaves) must equal the pre-inspection shape; label slots must be byte-identical to what was classified; derived budgets are recomputed on the replaced content. Implemented for tool history (#53): the call and result labels must still conform and match a digest taken at parse time, linkage and id uniqueness are re-checked, each decoded argument tree must have its parse-time node count with conforming, unique keys, and a replaced string over the per-string bound is `limit_exceeded`; the aggregate size is bounded by the serializer's output bound. Serialization is then bounded as before. Any failure rejects the request with no upstream bytes.
+Today classes 1 (messages, including tool history, #53), 2 (`tools`, `tool_choice`; #54), 3, 4, 5 (`metadata`; #55), and 6 (`response_format.json_schema`; #54) produce slots, so every slot class is implemented. After the core call on every slot returns `Ok`, and before serialization, the request is revalidated: the visited slot count equals the classified count; every replaced string is rechecked against its slot bound; every decoded argument tree is re-encoded and its shape (container kinds, key sequence, non-string leaves) must equal the pre-inspection shape; label slots must be byte-identical to what was classified; derived budgets are recomputed on the replaced content. Implemented for tool history (#53): the call and result labels must still conform and match a digest taken at parse time, linkage and id uniqueness are re-checked, each decoded argument tree must have its parse-time node count with conforming, unique keys, and a replaced string over the per-string bound is `limit_exceeded`; the aggregate size is bounded by the serializer's output bound. Serialization is then bounded as before. Any failure rejects the request with no upstream bytes.
 
 ## Typed boundary representation
 

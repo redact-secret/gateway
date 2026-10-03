@@ -41,7 +41,7 @@ class Rejections(unittest.TestCase):
                 None,
             ),
             ("unknown field inside a text part", {"model": "qual-json-ok", "messages": [{"role": "user", "content": [text_part]}]}, None),
-            ("metadata", {**BASE, "metadata": {"k": "v"}}, None),
+            ("metadata with a nested object (string-only since #55)", {**BASE, "metadata": {"k": {"a": "b"}}}, None),
             ("logprobs", {**BASE, "logprobs": True}, None),
             ("participant name on a message", {"model": "qual-json-ok", "messages": [{"role": "user", "name": "alice", "content": "hi"}]}, None),
             ("tool role message", {"model": "qual-json-ok", "messages": [{"role": "tool", "tool_call_id": "x", "content": "hi"}]}, None),

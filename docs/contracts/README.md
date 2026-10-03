@@ -17,7 +17,7 @@ Credential and upstream trust is recorded in [ADR 0009](../decisions/0009-creden
 
 The stage-by-stage cancellation, deadline, cleanup-owner, and shutdown contract is [request-lifecycle](request-lifecycle.md) ([ADR 0027](../decisions/0027-write-budget-and-bounded-response-frames.md)).
 
-The Alpha 2 recursive Chat Completions field contract (tool history, tool definitions, schemas, metadata; planned until #53 to #55) and its module ownership are in [ADR 0025](../decisions/0025-alpha2-field-contract.md).
+The Alpha 2 recursive Chat Completions field contract (tool history, tool definitions, schemas, metadata; all implemented, #53 to #55) and its module ownership are in [ADR 0025](../decisions/0025-alpha2-field-contract.md).
 
 Alpha 1 qualification evidence (the threat-control map, stack pins, residual risks) is in [`docs/qualification/`](../qualification/alpha1-threat-control-map.md); the head guard and one-request-per-connection rule are in [ADR 0019](../decisions/0019-request-head-guard-and-one-request-per-connection.md).
 
