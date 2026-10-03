@@ -45,6 +45,49 @@ pub fn parse_pii(selectors: &[&str]) -> Result<PiiSelection, CoreBridgeError> {
     PiiSelection::parse(selectors).map_err(|e| map_core_error(&e))
 }
 
+/// Gateway disposition of one complete finding, derived only from the action the pinned
+/// core's `DefaultPolicy` attached to it. This is the whole request-level action table
+/// (`docs/contracts/request-policy.md`); there is no gateway policy language beside it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FindingDisposition {
+    /// `Action::Redact`: the core replaced the range; the redacted text is used.
+    Redact,
+    /// `Action::Block`: the whole request is rejected; no body is produced.
+    Block,
+    /// `Action::Warn` with `on_warn = reject`: the whole request is rejected.
+    WarnReject,
+    /// `Action::Warn` with `on_warn = forward`: the text is kept unchanged and counted.
+    WarnForward,
+    /// `Action::Allow`: the text is kept and counted as an unredacted finding.
+    Allow,
+}
+
+/// Map a core action to the gateway disposition. Exhaustive over the pinned `Action`.
+#[must_use]
+pub const fn disposition(action: Action, reject_warnings: bool) -> FindingDisposition {
+    match action {
+        Action::Redact => FindingDisposition::Redact,
+        Action::Block => FindingDisposition::Block,
+        Action::Warn if reject_warnings => FindingDisposition::WarnReject,
+        Action::Warn => FindingDisposition::WarnForward,
+        Action::Allow => FindingDisposition::Allow,
+    }
+}
+
+/// Build one throwaway registry for `profile` and `pii` so that an activation the pinned
+/// core cannot build is refused at startup, not at the first request.
+///
+/// # Errors
+/// [`CoreBridgeError::UnsupportedProfile`] or [`CoreBridgeError::Incomplete`].
+pub fn validate_activation(
+    profile: Profile,
+    pii_selectors: &[&str],
+) -> Result<(), CoreBridgeError> {
+    let spec = InspectorSpec::for_profile(profile, pii_selectors, 1, 1)?;
+    Inspector::new(&spec).map(|_| ())
+}
+
 /// Counts for one request inspection. Never content.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InspectionSummary {
@@ -435,14 +478,22 @@ impl Inspector {
         )
         .map_err(|e| map_core_error(&e))?;
         let findings = result.findings();
-        if findings.iter().any(|f| f.action() == Action::Block) {
+        let mut warned = 0_usize;
+        let mut blocked = false;
+        let mut rejected_warn = false;
+        for finding in findings {
+            match disposition(finding.action(), self.reject_warnings) {
+                FindingDisposition::Block => blocked = true,
+                FindingDisposition::WarnReject => rejected_warn = true,
+                FindingDisposition::WarnForward => warned = warned.saturating_add(1),
+                FindingDisposition::Redact | FindingDisposition::Allow => {}
+            }
+        }
+        // Block outranks a rejected warning: one Block anywhere blocks the whole request.
+        if blocked {
             return Err(CoreBridgeError::Blocked);
         }
-        let warned = findings
-            .iter()
-            .filter(|f| f.action() == Action::Warn)
-            .count();
-        if warned > 0 && self.reject_warnings {
+        if rejected_warn {
             return Err(CoreBridgeError::Warned);
         }
         let total_findings = scope
