@@ -13,6 +13,7 @@ import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from enum import Enum
 from typing import Any, Literal, Optional
 from uuid import UUID
 
@@ -30,11 +31,11 @@ def weather_model(n: int) -> type[BaseModel]:
     return create_model(
         "Weather",
         __doc__="Weather arguments.",
-        city=(str, Field(description=f"City name {secret(n)}")),
+        city=(str, Field(min_length=1, max_length=64, description=f"City name {secret(n)}")),
         days=(int, Field(ge=1, le=7)),
         unit=(Literal["c", "f"], ...),
         note=(Optional[str], ...),
-        tags=(list[str], ...),
+        tags=(list[str], Field(max_length=5)),
     )
 
 
@@ -76,6 +77,10 @@ class PydanticHelpers(unittest.TestCase):
         expected_tool = json.loads(json.dumps(tool).replace(secret(1), "<SECRET_1>"))
         self.assertEqual(sent["tools"], [expected_tool], "the SDK helper's tool, only the description redacted")
         self.assertEqual(planted_in(calls[0]["body"]), [])
+        props = sent["tools"][0]["function"]["parameters"]["properties"]
+        self.assertEqual((props["city"]["minLength"], props["city"]["maxLength"]), (1, 64))
+        self.assertEqual((props["days"]["minimum"], props["days"]["maximum"]), (1, 7))
+        self.assertEqual(props["tags"]["maxItems"], 5)
         fn = sent["tools"][0]["function"]
         self.assertIs(fn["strict"], True)
         self.assertIs(fn["parameters"]["additionalProperties"], False)
@@ -126,6 +131,13 @@ class PydanticHelpers(unittest.TestCase):
         class WithUuid(BaseModel):
             ident: UUID
 
+        class Color(Enum):
+            RED = "red"
+            BLUE = "blue"
+
+        class WithEnum(BaseModel):
+            color: Color
+
         found: dict[str, list[str]] = {}
         for name, model, keywords in [
             ("nested model ($defs/$ref)", Nested, ["$defs", "$ref"]),
@@ -133,6 +145,7 @@ class PydanticHelpers(unittest.TestCase):
             ("Field(pattern=...)", WithPattern, ["pattern"]),
             ("datetime (format)", WithDatetime, ["format"]),
             ("UUID (format)", WithUuid, ["format"]),
+            ("Enum class ($defs/$ref)", WithEnum, ["$defs", "$ref"]),
         ]:
             tool = openai.pydantic_function_tool(model, name="t")
             text = json.dumps(tool)

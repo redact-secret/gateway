@@ -162,6 +162,20 @@ Example (synthetic):
 {"type":"object","properties":{"city":{"type":"string","description":"City name."},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["city"],"additionalProperties":false}
 ```
 
+### SDK helper output against this subset (#57)
+
+Measured with the pinned SDKs ([Alpha 2 qualification report](../qualification/alpha2-qualification-report.md)). The gateway accepts what the subset allows and rejects the rest with `422 unsupported_input` and zero upstream bytes; it never strips a keyword on the caller's behalf.
+
+| Helper | Output | Result | What the application must do |
+| --- | --- | --- | --- |
+| Python `openai.pydantic_function_tool(Model)`, `chat.completions.parse(response_format=Model)` (strict conversion) | `title` on every schema object, `additionalProperties: false`, all properties `required`, `Optional` as `anyOf` with `null`, `Literal` as `enum`, `ge`/`le`/`min_length`/`max_length` as `minimum`/`maximum`/`minLength`/`maxLength` | **Accepted** for flat models (`title` is admitted as redacted text, [ADR 0029](../decisions/0029-schema-title-keyword.md)) | Nothing |
+| Same, with a nested model or an `Enum` class | `$defs` and `$ref` remain in the output | Rejected (`$defs`, `$ref`) | Use flat models and `Literal` |
+| Same, with a field default, `Field(pattern=...)`, `datetime`, `UUID`, `EmailStr`, URL types | `default`, `pattern`, `format` | Rejected | Remove the default or constraint; validate in the application |
+| Raw `Model.model_json_schema()` | `title` on each object, no `additionalProperties`, `default` for defaulted fields | Accepted for a flat model without defaults (verified); rejected with any keyword outside the subset | Same as above |
+| Node `zodResponseFormat`, `zodFunction` (`openai/helpers/zod`, zod 4.6.5) | `$schema` (draft-07) on the root, plus `format`/`pattern` for `.email()`, `.regex()`, `.uuid()` and similar | Rejected as emitted (`$schema`) | Delete `$schema` from the helper output; avoid format-bearing validators and `.default()` |
+
+Provider replies replayed as history: an assistant message object from a provider reply carries `refusal`, `annotations` and (Python `parse`) parsed fields. They are unknown fields and the request is rejected; build the assistant turn from `role`, `content` and `tool_calls[].{id, type, function.{name, arguments}}` only.
+
 ### `response_format`
 
 | Form | Class | Status | Contract |

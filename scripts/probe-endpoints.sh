@@ -8,6 +8,11 @@
 #   POST /v1/chat/completions, {}                      422 unsupported_input
 #   POST /v1/chat/completions, unknown field + synthetic token   422 unsupported_input
 #   POST /v1/chat/completions, Content-Type text/plain 415 unsupported_input
+#   Alpha 2 shapes, each refused by the field contract before inspection (#57):
+#   POST tools with a schema $ref + synthetic token    422 unsupported_input
+#   POST metadata with a number value                  422 unsupported_input
+#   POST tool_calls with malformed JSON arguments      400 malformed_input
+#   POST tool_calls with duplicate argument keys       400 malformed_input
 #   GET  /v1/chat/completions                          405
 #   GET  /v1/models                                    404 unsupported_input
 #
@@ -42,6 +47,18 @@ expect "POST unknown field with synthetic token" 422 unsupported_input -X POST -
   -d "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"$token\"}],\"frobnicate\":1}" \
   "$base/v1/chat/completions"
 expect "POST text/plain" 415 unsupported_input -X POST -H 'Content-Type: text/plain' -H "$auth" -d 'x' "$base/v1/chat/completions"
+expect "POST tool schema with \$ref and a synthetic token" 422 unsupported_input -X POST -H "$json" -H "$auth" \
+  -d "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"$token\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"f\",\"parameters\":{\"type\":\"object\",\"properties\":{\"a\":{\"\$ref\":\"#/x\"}}}}}]}" \
+  "$base/v1/chat/completions"
+expect "POST metadata with a number value" 422 unsupported_input -X POST -H "$json" -H "$auth" \
+  -d "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"metadata\":{\"k\":1}}" \
+  "$base/v1/chat/completions"
+expect "POST tool_calls with malformed arguments" 400 malformed_input -X POST -H "$json" -H "$auth" \
+  -d "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"},{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{bad\"}}]}]}" \
+  "$base/v1/chat/completions"
+expect "POST tool_calls with duplicate argument keys" 400 malformed_input -X POST -H "$json" -H "$auth" \
+  -d "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"},{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{\\\"a\\\":1,\\\"a\\\":2}\"}}]}]}" \
+  "$base/v1/chat/completions"
 expect "GET /v1/chat/completions" 405 unsupported_input "$base/v1/chat/completions"
 expect "GET /v1/models" 404 unsupported_input "$base/v1/models"
 echo "MVP smoke probes: health OK; every proxy-route probe rejected locally with its safe code"
