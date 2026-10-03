@@ -608,6 +608,11 @@ fn parse_content(obj: &Obj<'_>) -> Result<ContentPolicy, ConfigError> {
             MAX_FINDINGS_CEILING,
         )?);
     }
+    // The whole profile + PII activation must build in the pinned core now, so an
+    // unbuildable combination stops the process at startup instead of failing requests.
+    let refs: Vec<&str> = policy.pii().iter().map(String::as_str).collect();
+    core_bridge::validate_activation(policy.profile(), &refs)
+        .map_err(|_| ConfigError::new(ConfigErrorKind::InvalidValue, "content"))?;
     Ok(policy)
 }
 
