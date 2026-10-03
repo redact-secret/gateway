@@ -425,6 +425,29 @@ def main():
     assert actor('basic','direct',basic['status']['podIP'])['direct_reachable'] is True
     evidence('basic-residual-bypass',{'direct_egress_reachable':True,'mandatory_claim':False})
     kube('delete','pod','basic','--wait=true')
+    stage('candidate-resolver-and-tls-attacks')
+    tls_cases()
+    stage('memory-limit-termination-and-recovery')
+    apply(pod_spec('oom','rsg-beta2-candidate:local',memory='4Mi'))
+    deadline=time.monotonic()+120
+    while time.monotonic()<deadline:
+        data=json.loads(kube('get','pod','oom','-o','json'))
+        statuses=data.get('status',{}).get('initContainerStatuses',[])
+        last=next((s.get('lastState',{}).get('terminated',s.get('state',{}).get('terminated')) for s in statuses if s['name']=='gateway'),None)
+        if last and last.get('reason')=='OOMKilled':
+            assert not any('running' in s.get('state',{}) for s in data.get('status',{}).get('containerStatuses',[]))
+            evidence('oom',{'gateway_exit':last['exitCode'],'reason':'OOMKilled','app_started':False,'cleanup_promised':False})
+            break
+        time.sleep(1)
+    else: raise RuntimeError('OOM evidence deadline exceeded')
+    kube('delete','pod','oom','--wait=true')
+    apply(pod_spec('oom-recovery','rsg-beta2-qualification:local',qualified=True,enforced=True))
+    recovered=wait_pod('oom-recovery')
+    assert actor('oom-recovery','direct',recovered['status']['podIP'])['direct_reachable'] is False
+    assert actor('oom-recovery','load',3,1,1024)['statuses'].get('200',0)>0
+    evidence('oom-recovery',{'ready':True,'direct_egress_denied':True,'mediated_traffic_succeeded':True})
+    stage('active-json-sse-rolling-replacement')
+    rolling_replacement()
     all_rows = []
     egress_rows=[]
     for cpu in ['250m','500m','1']:
@@ -471,7 +494,9 @@ def main():
     cycles=[]
     started=time.monotonic()
     while time.monotonic()-started < duration:
-        cycles.append({'load':sampled_load(name,10,8,16384),'cancel':actor(name,'cancel'),
+        completions=actor(name,'complete-stream')
+        assert all(result['status']==200 and result['terminal'] is True for result in completions.values())
+        cycles.append({'completed_streams':completions,'load':sampled_load(name,10,8,16384),'cancel':actor(name,'cancel'),
                        'slow':actor(name,'slow'),'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')})
         evidence('soak-progress',{'declared_seconds':duration,'cycles':cycles})
     time.sleep(3)
@@ -510,29 +535,6 @@ def main():
     assert actor('replacement','direct',replacement['status']['podIP'])['direct_reachable'] is False
     assert actor('replacement','load',3,1,1024)['statuses'].get('200',0)>0
     evidence('replacement',{'direct_egress_denied':True,'mediated_traffic_succeeded':True})
-    stage('active-json-sse-rolling-replacement')
-    rolling_replacement()
-    stage('memory-limit-termination-and-recovery')
-    apply(pod_spec('oom','rsg-beta2-candidate:local',memory='4Mi'))
-    deadline=time.monotonic()+120
-    while time.monotonic()<deadline:
-        data=json.loads(kube('get','pod','oom','-o','json'))
-        statuses=data.get('status',{}).get('initContainerStatuses',[])
-        last=next((s.get('lastState',{}).get('terminated',s.get('state',{}).get('terminated')) for s in statuses if s['name']=='gateway'),None)
-        if last and last.get('reason')=='OOMKilled':
-            assert not any('running' in s.get('state',{}) for s in data.get('status',{}).get('containerStatuses',[]))
-            evidence('oom',{'gateway_exit':last['exitCode'],'reason':'OOMKilled','app_started':False,'cleanup_promised':False})
-            break
-        time.sleep(1)
-    else: raise RuntimeError('OOM evidence deadline exceeded')
-    kube('delete','pod','oom','--wait=true')
-    apply(pod_spec('oom-recovery','rsg-beta2-qualification:local',qualified=True,enforced=True))
-    recovered=wait_pod('oom-recovery')
-    assert actor('oom-recovery','direct',recovered['status']['podIP'])['direct_reachable'] is False
-    assert actor('oom-recovery','load',3,1,1024)['statuses'].get('200',0)>0
-    evidence('oom-recovery',{'ready':True,'direct_egress_denied':True,'mediated_traffic_succeeded':True})
-    stage('candidate-resolver-and-tls-attacks')
-    tls_cases()
     evidence('verdict',{'passed':True,'architecture':arch,'publication':False,
         'scope':'native sidecar startup/security, UID egress, cgroup load, bounded soak and restart/replacement',
         'remaining':'reconcile archived datasets, measured versus provisional support and final candidate handoff to #15'})

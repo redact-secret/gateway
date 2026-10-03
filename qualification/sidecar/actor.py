@@ -52,7 +52,7 @@ class Provider(BaseHTTPRequestHandler):
                 self.end_headers()
                 if scenario == 'stall-sse':
                     time.sleep(20)
-                chunks=1000 if scenario=='slow-downstream' else 50
+                chunks=1000 if scenario=='slow-downstream' else 150 if scenario=='long-sse' else 5 if scenario=='short-sse' else 50
                 chunk=b'data: '+b'x'*32768+b'\n\n' if scenario=='slow-downstream' else b'data: {"synthetic":"safe"}\n\n'
                 for _ in range(chunks):
                     self.wfile.write(chunk)
@@ -83,7 +83,7 @@ def call(endpoint='chat', size=1024, stream=False, invalid=False, auth=True, slo
     request = {'model': 'gpt-4o-mini', 'stream': stream}
     if slow:
         shape='slow-downstream'
-    if shape.startswith('stall-') or shape=='slow-downstream':
+    if shape.startswith('stall-') or shape in ('slow-downstream','long-sse','short-sse'):
         request['metadata']={'synthetic_scenario':shape}
     if endpoint == 'chat':
         request['messages'] = [{'role': 'user', 'content': text}]
@@ -197,8 +197,10 @@ if __name__ == '__main__':
         print(json.dumps(call(shape='stall-json')))
     elif mode == 'stall':
         print(json.dumps({'json':call(shape='stall-json'),'sse':call(stream=True,shape='stall-sse')}))
+    elif mode == 'complete-stream':
+        print(json.dumps({endpoint:call(endpoint,stream=True,shape='short-sse') for endpoint in ['chat','responses']}))
     elif mode in ('cancel', 'slow', 'stream'):
-        print(json.dumps(call(stream=True, cancel=mode=='cancel', slow=mode=='slow')))
+        print(json.dumps(call(stream=True, cancel=mode=='cancel', slow=mode=='slow',shape='long-sse' if mode=='stream' else 'safe')))
     elif mode == 'direct':
         address = sys.argv[2]
         try:
