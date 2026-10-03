@@ -35,12 +35,16 @@ fn temp_file(name: &str, content: &str) -> PathBuf {
 }
 
 fn http_get(addr: &str, path: &str) -> (u16, String) {
+    http_request(addr, path, "GET")
+}
+
+fn http_request(addr: &str, path: &str, method: &str) -> (u16, String) {
     let mut s = TcpStream::connect(addr).expect("connect");
     s.set_read_timeout(Some(Duration::from_secs(5)))
         .expect("timeout");
     write!(
         s,
-        "GET {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
     )
     .expect("write");
     let mut text = String::new();
@@ -96,6 +100,18 @@ fn operations_export_is_opt_in_loopback_and_has_no_request_labels() {
     let rejected = http_get(&observed.addr, &format!("/metrics?{MARKER}"));
     assert_eq!(rejected.0, 404);
     assert!(!rejected.1.contains(MARKER));
+    assert!(
+        rejected
+            .1
+            .to_ascii_lowercase()
+            .contains("content-type: application/json")
+    );
+    assert!(
+        rejected
+            .1
+            .to_ascii_lowercase()
+            .contains("cache-control: no-store")
+    );
     let (status, response) = http_get(&observed.addr, "/metrics");
     assert_eq!(status, 200);
     assert!(!response.contains(MARKER));
@@ -105,6 +121,14 @@ fn operations_export_is_opt_in_loopback_and_has_no_request_labels() {
     assert_eq!(snapshot["stages"].as_object().expect("stages").len(), 10);
     assert_eq!(snapshot["upstream_attempts"], 0);
     assert_eq!(snapshot["admission"]["waiting"], 0);
+    for method in ["HEAD", "POST"] {
+        let (status, response) = http_request(&observed.addr, "/metrics", method);
+        assert_eq!(status, 405);
+        let headers = response.to_ascii_lowercase();
+        assert!(headers.contains("allow: get"));
+        assert!(headers.contains("content-type: application/json"));
+        assert!(headers.contains("cache-control: no-store"));
+    }
     assert!(
         response
             .to_ascii_lowercase()

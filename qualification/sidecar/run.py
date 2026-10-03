@@ -298,6 +298,24 @@ def shipped_manifest():
     kube('delete','deployment','gateway-companion','--wait=true')
 
 
+def start_egress_watch(pod):
+    info=json.loads(kube('get','pod',pod,'-o','json'))
+    process=subprocess.Popen(['kubectl','--context','kind-'+CLUSTER,'-n',NS,'exec',pod,'-c','app','--','python','/tools/actor.py','watch-egress',info['status']['podIP'],'fd00:be7a:2::1'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    started=json.loads(process.stdout.readline())
+    assert started['watch_started'] is True
+    return process,started['pid']
+
+
+def stop_egress_watch(pod,watch):
+    process,pid=watch
+    actor(pod,'stop-watch',pid)
+    output,_=process.communicate(timeout=10)
+    assert process.returncode==0
+    result=json.loads(output)
+    assert result['attempts']>0 and result['direct_reachable']==0
+    return result
+
+
 def rolling_replacement():
     template=pod_spec('rolling','rsg-beta2-qualification:local',qualified=True,enforced=True)
     spec=template['spec']
@@ -427,6 +445,9 @@ def main():
                 load = sampled_load(name,10,clients,size)
                 after = {'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')}
                 assert all(after['metrics']['provider']['body'][key]==0 for key in ['local_header_received','provider_key_mismatch','local_token_value_received'])
+                deliveries=after['metrics']['provider']['body']['requests']-before['metrics']['provider']['body']['requests']
+                attempts=after['metrics']['gateway']['body']['upstream_attempts']-before['metrics']['gateway']['body']['upstream_attempts']
+                assert deliveries==attempts and attempts<=load['requests']
                 row={'cpu_limit':cpu,'load':load,'before':before,'after':after,'provisional':True}
                 all_rows.append(row)
                 evidence('load',all_rows)
@@ -443,8 +464,8 @@ def main():
     stage('declared-soak')
     duration=int(os.environ.get('BETA2_SOAK_SECONDS','600'))
     stalls=actor(name,'stall',timeout=60)
-    assert stalls['json']['status']==502 and stalls['sse']['terminal'] is False
     evidence('stalled-provider',stalls)
+    assert stalls['json']['status']==504 and stalls['sse']['terminal'] is False
     time.sleep(20)
     warm=runtime_sample(name)
     cycles=[]
@@ -466,6 +487,7 @@ def main():
                             'warm':warm,'recovered':recovered,'rss_allowance_kib':allowance,'passed':True})
     stage('active-stream-term-and-kill-restart')
     restarts=[]
+    watch=start_egress_watch(name)
     for signal in ['TERM','KILL']:
         stream=subprocess.Popen(['kubectl','--context','kind-'+CLUSTER,'-n',NS,'exec',name,'-c','app','--','python','/tools/actor.py','stream'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         deadline=time.monotonic()+10
@@ -478,7 +500,7 @@ def main():
         assert result['status']==200 and result['terminal'] is False
         row['active_stream']=result
         restarts.append(row)
-    evidence('restart',restarts)
+    evidence('restart',{'cycles':restarts,'continuous_ipv4_ipv6_egress':stop_egress_watch(name,watch)})
     pod=wait_pod(name)
     assert actor(name,'direct',pod['status']['podIP'])['direct_reachable'] is False
     assert actor(name,'load',3,1,1024)['statuses'].get('200',0)>0

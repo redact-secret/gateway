@@ -76,7 +76,7 @@ class Provider(BaseHTTPRequestHandler):
                 counts['active'] -= 1
 
 
-def call(endpoint='chat', size=1024, stream=False, invalid=False, auth=True, slow=False, cancel=False, shape='safe'):
+def call(endpoint='chat', size=1024, stream=False, invalid=False, auth=True, slow=False, cancel=False, shape='safe', duplicate=None):
     text = ('synthetic safe text ' * (size // 20 + 1))[:size]
     if shape == 'findings':
         text = ' '.join(f'ghp_SYNTHETICREVOKED{i:020}' for i in range(100))
@@ -104,7 +104,17 @@ def call(endpoint='chat', size=1024, stream=False, invalid=False, auth=True, slo
     connection = http.client.HTTPConnection('127.0.0.1', 8787, timeout=15)
     result = {'status': 0, 'truncated': False, 'terminal': False}
     try:
-        connection.request('POST', path, json.dumps(request), headers)
+        if duplicate:
+            encoded=json.dumps(request).encode()
+            connection.putrequest('POST',path)
+            connection.putheader('Content-Length',str(len(encoded)))
+            for name,value in headers.items():
+                connection.putheader(name,value)
+                if name==duplicate:
+                    connection.putheader(name,value)
+            connection.endheaders(encoded)
+        else:
+            connection.request('POST', path, json.dumps(request), headers)
         response = connection.getresponse()
         result['status'] = response.status
         if cancel:
@@ -176,9 +186,11 @@ if __name__ == '__main__':
         assert call(invalid=True)['status'] == 422
         assert call(auth=False)['status'] == 401
         assert call(auth='wrong')['status'] == 401
+        assert call(duplicate='X-Gateway-Local-Token')['status']==401
+        assert call(duplicate='Authorization')['status']==400
         after = get('/stats', 9000)['body']['requests']
         assert before == after
-        print(json.dumps({'unsupported_status': 422, 'missing_token_status': 401, 'upstream_delivery_delta': 0}))
+        print(json.dumps({'unsupported_status': 422, 'missing_token_status': 401, 'duplicate_local_token_status':401,'duplicate_provider_auth_status':400, 'upstream_delivery_delta': 0}))
     elif mode == 'single':
         print(json.dumps(call()))
     elif mode == 'json-stall':
@@ -195,6 +207,28 @@ if __name__ == '__main__':
         except OSError:
             reachable = False
         print(json.dumps({'direct_reachable': reachable}))
+    elif mode == 'watch-egress':
+        import signal
+        stopped=[False]
+        signal.signal(signal.SIGUSR1,lambda *_:stopped.__setitem__(0,True))
+        print(json.dumps({'watch_started':True,'pid':os.getpid()}),flush=True)
+        attempts=0
+        reachable=0
+        started=time.monotonic()
+        while not stopped[0]:
+            for address in sys.argv[2:]:
+                attempts+=1
+                try:
+                    with socket.create_connection((address,9000),timeout=0.2):
+                        reachable+=1
+                except OSError:
+                    pass
+            time.sleep(0.02)
+        print(json.dumps({'attempts':attempts,'direct_reachable':reachable,'seconds':time.monotonic()-started}),flush=True)
+    elif mode == 'stop-watch':
+        import signal
+        os.kill(int(sys.argv[2]),signal.SIGUSR1)
+        print(json.dumps({'stop_sent':True}))
     elif mode == 'identity':
         status = Path('/proc/self/status').read_text()
         safe = {line.split(':')[0]: line.split(':',1)[1].strip() for line in status.splitlines() if line.split(':')[0] in ('Uid','Gid','CapEff','NoNewPrivs','Seccomp')}

@@ -466,6 +466,10 @@ pub(crate) fn mount_export(
                 if request.uri().query().is_some() {
                     return (
                         StatusCode::NOT_FOUND,
+                        [
+                            (header::CONTENT_TYPE, "application/json"),
+                            (header::CACHE_CONTROL, "no-store"),
+                        ],
                         "{\"error\":{\"code\":\"unsupported_input\"}}",
                     )
                         .into_response();
@@ -474,6 +478,11 @@ pub(crate) fn mount_export(
                 if body.len() > 131_072 {
                     return (
                         StatusCode::SERVICE_UNAVAILABLE,
+                        [
+                            (header::CONTENT_TYPE, "application/json"),
+                            (header::CACHE_CONTROL, "no-store"),
+                            (header::RETRY_AFTER, "1"),
+                        ],
                         "{\"error\":{\"code\":\"overload\"}}",
                     )
                         .into_response();
@@ -488,7 +497,21 @@ pub(crate) fn mount_export(
                     .into_response()
             }
         })
-        .head(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+        .head(operations_method)
+        .fallback(operations_method),
+    )
+}
+
+async fn operations_method() -> impl axum::response::IntoResponse {
+    use axum::http::{StatusCode, header};
+    (
+        StatusCode::METHOD_NOT_ALLOWED,
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::CACHE_CONTROL, "no-store"),
+            (header::ALLOW, "GET"),
+        ],
+        "{\"error\":{\"code\":\"unsupported_input\"}}",
     )
 }
 
