@@ -135,18 +135,29 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Planned row: the route does not exist until #86. Flip this test there (assert the routed
-/// path instead) so a Responses route can never be added by accident before its parser.
+/// The Responses route exists (#86) and its literal path is spelled in exactly two places:
+/// the inbound path constant and the reviewed destination table. Nothing else (no config,
+/// header or body code) may carry it, so it cannot be selected by a caller.
 #[test]
-fn the_responses_route_is_unrouted_until_issue_86() {
+fn the_responses_path_is_spelled_only_by_the_route_and_the_destination_table() {
     let mut files = Vec::new();
     rust_files(&root().join("src"), &mut files);
+    let mut holders: Vec<String> = Vec::new();
     for path in files {
         let text = fs::read_to_string(&path).expect("read");
-        assert!(
-            !text.contains("/v1/responses"),
-            "{} routes /v1/responses before the contract's owners (#83 to #86) landed",
-            path.display()
-        );
+        if text.contains("\"/v1/responses\"") {
+            let rel = path.strip_prefix(root()).expect("under root");
+            let rel = rel.to_string_lossy().into_owned();
+            // In-crate test modules may spell it to assert the wire.
+            if !rel.contains("/tests/") {
+                holders.push(rel);
+            }
+        }
     }
+    holders.sort();
+    assert_eq!(
+        holders,
+        ["src/chat_route.rs", "src/transport/destination.rs"],
+        "only the inbound path constant and the reviewed destination table spell the path"
+    );
 }

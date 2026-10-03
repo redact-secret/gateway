@@ -1,4 +1,5 @@
-//! HTTP admission for `POST /v1/chat/completions` (#18; ADR 0002, 0003, 0007).
+//! HTTP admission for `POST /v1/chat/completions` (#18; ADR 0002, 0003, 0007) and, with the
+//! same pipeline bound to another protocol, `POST /v1/responses` (#86).
 //!
 //! Order of work for one request, each step failing closed with a fixed safe code:
 //!
@@ -72,8 +73,20 @@ use crate::transport::headers::{HeaderReject, VettedHeaders, vet_inbound};
 use crate::transport::local_auth::{AuthReject, LocalAuth};
 use crate::transport::{Forwarded, StreamResponse, TransportError, Upstream, UpstreamResponse};
 
-/// The one exact route served by this module.
+/// The exact Chat Completions path.
 pub const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
+
+/// The exact Responses path (#86). Reviewed and fixed; the caller never selects it.
+pub const RESPONSES_PATH: &str = "/v1/responses";
+
+/// The one exact inbound path for a protocol.
+#[must_use]
+pub const fn path_for(protocol: Protocol) -> &'static str {
+    match protocol {
+        Protocol::ChatCompletionsText => CHAT_COMPLETIONS_PATH,
+        Protocol::ResponsesText => RESPONSES_PATH,
+    }
+}
 
 /// A fixed local rejection. Carries no request content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -292,10 +305,14 @@ impl fmt::Debug for Admitted {
     }
 }
 
-/// The Chat Completions route. Built once at startup from the validated plan; holds no
-/// request state and no credentials.
+/// One inbound endpoint: the shared bounded admission, inspection, forwarding and relay
+/// pipeline bound to exactly one [`Protocol`] and one operator route id (#86). Chat
+/// Completions and Responses are two instances of this one type, never two pipelines.
+/// Built once at startup from the validated plan; holds no request state and no
+/// credentials.
 #[derive(Debug)]
-pub struct ChatRoute {
+pub struct EndpointRoute {
+    protocol: Protocol,
     admission: Arc<Admission>,
     limits: RequestLimits,
     max_body: usize,
@@ -309,14 +326,41 @@ pub struct ChatRoute {
     cancel: watch::Sender<bool>,
 }
 
-impl ChatRoute {
-    /// Compose the per-request limits with the aggregate budget: the largest accepted
-    /// body is clamped to what one reservation can ever cover. `route` is the approved
-    /// route id this endpoint is bound to (from the startup plan).
+/// The Chat Completions route (`POST /v1/chat/completions`).
+pub type ChatRoute = EndpointRoute;
+
+/// The Responses route (`POST /v1/responses`, #86): the same type, bound to
+/// [`Protocol::ResponsesText`].
+pub type ResponsesRoute = EndpointRoute;
+
+impl EndpointRoute {
+    /// A Chat Completions endpoint. Compose the per-request limits with the aggregate
+    /// budget: the largest accepted body is clamped to what one reservation can ever
+    /// cover. `route` is the approved route id this endpoint is bound to (from the startup
+    /// plan).
     #[must_use]
     pub fn new(admission: Arc<Admission>, limits: RequestLimits, route: RouteId) -> Self {
+        Self::for_protocol(Protocol::ChatCompletionsText, admission, limits, route)
+    }
+
+    /// A Responses endpoint (#86), otherwise identical to [`Self::new`].
+    #[must_use]
+    pub fn responses(admission: Arc<Admission>, limits: RequestLimits, route: RouteId) -> Self {
+        Self::for_protocol(Protocol::ResponsesText, admission, limits, route)
+    }
+
+    /// An endpoint for `protocol`. The protocol is fixed here, at startup, and decides the
+    /// exact path, the request matrix, and the [`ProtocolRoute`] built for approval.
+    #[must_use]
+    pub fn for_protocol(
+        protocol: Protocol,
+        admission: Arc<Admission>,
+        limits: RequestLimits,
+        route: RouteId,
+    ) -> Self {
         let max_body = limits.effective_max_body(admission.memory_total_units());
         Self {
+            protocol,
             admission,
             limits,
             max_body,
@@ -370,6 +414,18 @@ impl ChatRoute {
     /// dropped. Bytes already written to the provider cannot be retracted.
     pub fn cancel_in_flight(&self) {
         self.cancel.send_replace(true);
+    }
+
+    /// The protocol this endpoint serves.
+    #[must_use]
+    pub const fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+
+    /// The one exact inbound path.
+    #[must_use]
+    pub const fn path(&self) -> &'static str {
+        path_for(self.protocol)
     }
 
     /// The approved route id admitted requests are bound to.
@@ -439,7 +495,7 @@ impl ChatRoute {
         let headers = admitted.take_headers();
         let (validated, route) = admitted.into_parts();
         let started = Instant::now();
-        let route = ProtocolRoute::new(Protocol::ChatCompletionsText, route);
+        let route = ProtocolRoute::new(self.protocol, route);
         let sanitized = match inspection.inspect_and_approve(validated, route).await {
             Ok(sanitized) => sanitized,
             Err(error) => return Reject::Inspection(error).into_response(),
@@ -507,8 +563,7 @@ impl ChatRoute {
         .map_err(|_| Reject::Deadline)??;
         let received = ticket.complete(bytes).map_err(|_| Reject::TooLarge)?;
         let parsed = Instant::now();
-        let validated =
-            protocol::validate_with(received, Protocol::ChatCompletionsText, &self.limits)?;
+        let validated = protocol::validate_with(received, self.protocol, &self.limits)?;
         self.metrics.record(Stage::Parse, parsed.elapsed());
         Ok(Admitted {
             validated,
@@ -660,12 +715,13 @@ async fn collect(mut body: Body, cap: usize, declared: Option<usize>) -> Result<
     Ok(buffer)
 }
 
-/// Add the exact `POST /v1/chat/completions` route to `router`. Every method is routed
-/// to the handler so a wrong method gets the documented local `405`, never a silent
-/// fallthrough.
-pub fn mount(router: Router, route: Arc<ChatRoute>) -> Router {
+/// Add the endpoint's exact route (`POST /v1/chat/completions` or `POST /v1/responses`) to
+/// `router`. Every method is routed to the handler so a wrong method gets the documented
+/// local `405`, never a silent fallthrough.
+pub fn mount(router: Router, route: Arc<EndpointRoute>) -> Router {
+    let path = route.path();
     router.route(
-        CHAT_COMPLETIONS_PATH,
+        path,
         any(move |request: Request| {
             let route = Arc::clone(&route);
             async move { route.handle(request).await }

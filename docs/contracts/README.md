@@ -23,7 +23,7 @@ The stage-by-stage cancellation, deadline, cleanup-owner, and shutdown contract 
 
 The Alpha 2 recursive Chat Completions field contract (tool history, tool definitions, schemas, metadata; all implemented, #53 to #55) and its module ownership are in [ADR 0025](../decisions/0025-alpha2-field-contract.md).
 
-The Beta 1 stateless Responses text subset (`POST /v1/responses`; frozen design; the #84 text subset is implemented behind an unrouted path, the rest lands in #85 to #88) is the [responses-request](responses-request.md) contract and [ADR 0031](../decisions/0031-responses-stateless-text-contract.md): `store:false` is mandatory, stored and opaque state is rejected, and this is not generic OpenAI compatibility.
+The Beta 1 stateless Responses text subset (`POST /v1/responses`; frozen design; request parsing through #85 and the route, fixed destination and caller-auth boundary #86 are implemented, relay lifecycle #87 and qualification #88 are planned) is the [responses-request](responses-request.md) contract and [ADR 0031](../decisions/0031-responses-stateless-text-contract.md): `store:false` is mandatory, stored and opaque state is rejected, and this is not generic OpenAI compatibility.
 
 Alpha 1 qualification evidence (the threat-control map, stack pins, residual risks) is in [`docs/qualification/`](../qualification/alpha1-threat-control-map.md); the head guard and one-request-per-connection rule are in [ADR 0019](../decisions/0019-request-head-guard-and-one-request-per-connection.md).
 

@@ -313,7 +313,7 @@ async fn route_method_and_target_are_exact() {
         "/V1/chat/completions",
         "/v1/chat/completions%2f",
         "/v1/chat",
-        "/v1/responses",
+        "/v1/responses/",
         "/v1/completions",
         "//v1/chat/completions",
         "/v1/chat/completions/../completions",

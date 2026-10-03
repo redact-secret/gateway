@@ -541,6 +541,7 @@ impl Served {
         let services = crate::server::Services {
             admission: Arc::clone(&lab.admission),
             chat: Arc::clone(&lab.route),
+            responses: None,
             drain,
         };
         let bound = crate::server::bind(plan, move |_| Ok(services))

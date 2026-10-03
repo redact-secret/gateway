@@ -383,8 +383,7 @@
           "id": "openai.responses",
           "method": "POST",
           "path": "/v1/responses",
-          "status": "planned",
-          "owner": "#86",
+          "status": "implemented",
           "note": "fixed by the openai provider profile; adds no configuration key"
         }
       ]
