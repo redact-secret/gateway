@@ -31,7 +31,7 @@ spec:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
-          # Provisional; #93 must replace guidance with measured cgroup budgets.
+          # Tested reference profile; production aggregate sizing remains provisional.
           resources:
             requests: {cpu: 250m, memory: 128Mi}
             limits: {cpu: "1", memory: 256Mi}

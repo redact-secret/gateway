@@ -1,0 +1,20 @@
+[
+  {
+    "app_started": false,
+    "exit_code": 1,
+    "failing_container": "gateway",
+    "failure": "config"
+  },
+  {
+    "app_started": false,
+    "exit_code": 1,
+    "failing_container": "gateway",
+    "failure": "token"
+  },
+  {
+    "app_started": false,
+    "exit_code": 2,
+    "failing_container": "operator-egress",
+    "failure": "egress"
+  }
+]

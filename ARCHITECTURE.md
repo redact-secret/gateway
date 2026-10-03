@@ -114,7 +114,7 @@ Gateway owns protocol and transport fixtures; core owns detector regressions; be
 
 Post-stable expansions require separate ADRs: Anthropic, response inspection, shared gateways, optional Vault contract integration, additional OS artifacts, launchers, and Helm. They are not implied by the initial stable contract.
 
-## Beta 2 sidecar operations (implementation/qualification in progress)
+## Beta 2 sidecar operations (qualified recorded environments)
 
 [ADR 0035](docs/decisions/0035-kubernetes-sidecar-trust-and-probes.md) uses a
 loopback proxy, native sidecar startup ordering and bounded exec probes in the
@@ -123,5 +123,5 @@ placement and optional UID egress enforcement have separate qualification gates.
 [ADR 0036](docs/decisions/0036-loopback-operations-export.md) adds opt-in
 `serve-observed` with fixed aggregate JSON on loopback; it reuses production
 Metrics/Admission and grants no proxy authority. Normal `serve` is unchanged.
-Actual platform, cgroup, soak and recovery evidence is tracked in the
-[Beta 2 register](docs/qualification/beta2-qualification-report.md).
+Native amd64/arm64 platform, cgroup, 600-second soak and recovery evidence is archived in the
+[Beta 2 report](docs/qualification/beta2-qualification-report.md).

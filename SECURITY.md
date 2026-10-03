@@ -80,4 +80,4 @@ trusted ([ADR 0036](docs/decisions/0036-loopback-operations-export.md)). The bas
 Kubernetes manifest needs no root/capabilities/API token and cannot enforce
 app egress; the optional operator UID enforcement profile has separate admin
 prerequisites and evidence gates ([ADR 0035](docs/decisions/0035-kubernetes-sidecar-trust-and-probes.md)).
-No support or mandatory-egress claim precedes executed qualification.
+The [Beta 2 report](docs/qualification/beta2-qualification-report.md) records native amd64/arm64 Kubernetes 1.34/kindnet qualification, including denied app IPv4/IPv6 and loopback-provider connections through restarts. The optional owner profile permits app UID 10001 only TCP to loopback port 8787. Other UIDs/proxies, passed sockets, app privilege escalation and node/runtime compromise are outside its assumptions. No broader CNI/cluster or production capacity claim follows.

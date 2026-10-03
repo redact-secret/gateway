@@ -1,7 +1,7 @@
 # ADR 0035: Same-Pod sidecar trust, exec probes and mandatory egress
 
 Status: Accepted design under the maintainer's epic #14 implementation delegation.
-Implementation status: exec probe implemented; manifests and environment qualification in progress (#89–#95).
+Implementation status: implemented and qualified on native amd64/arm64 Kubernetes 1.34/kindnet; [executed report](../qualification/beta2-qualification-report.md), #89–#95.
 Date: 2026-10-03. Builds on ADR 0030, 0032, 0033 and 0024.
 
 ## Decision and scope
@@ -62,8 +62,7 @@ NET_ADMIN, SETUID, root, host access or another UID may be launched by the app.
 All outbound sockets must be created under UID 10001; passed/preopened sockets,
 other same-Pod proxy services and privileged debugging are outside the profile.
 The falsifiable requirement is: direct app IPv4/IPv6 egress fails while mediated
-traffic succeeds, including startup/restart/replacement. Until #92 records
-these results, mandatory traversal is **unqualified**. UID enforcement cannot
+traffic succeeds, including startup/restart/replacement. #92 records passing native amd64/arm64 tests in the report; mandatory traversal is qualified only for that environment and these assumptions. UID enforcement cannot
 protect against compromised Gateway, node/runtime admin or privileged CNI.
 
 A separate Gateway workload would require another ADR for caller identity,
@@ -94,9 +93,7 @@ There is no HTTP intermediary in this topology. Reuse Docker #44 separately.
 `telemetry` owns aggregate counters; deployment examples grant no new proxy
 or credential authority. All existing duplicate-key, auth-before-body,
 complete-inspection and no-forward invariants remain unchanged. Connection
-reuse remains disabled (ADR 0024). Numeric resource requests are provisional
-until #93; mandatory egress and platform support stay unqualified until their
-actual target evidence is archived. Signing/SBOM/provenance remain #15;
+reuse remains disabled (ADR 0024). Numeric resource requests/limits are a tested reference profile under #93, with production capacity still provisional. Mandatory egress and platform support are limited to the archived target evidence. Signing/SBOM/provenance remain #15;
 registry publication is not authorized.
 
 ## Verification

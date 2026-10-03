@@ -1,0 +1,7 @@
+{
+  "duplicate_local_token_status": 401,
+  "duplicate_provider_auth_status": 400,
+  "missing_token_status": 401,
+  "unsupported_status": 422,
+  "upstream_delivery_delta": 0
+}

@@ -1,0 +1,43 @@
+{
+  "continuous_ipv4_ipv6_egress": {
+    "attempts": 272,
+    "direct_reachable": 0,
+    "seconds": 28.64856054200004
+  },
+  "cycles": [
+    {
+      "active_stream": {
+        "milliseconds": 2165.336254000067,
+        "status": 200,
+        "terminal": false,
+        "truncated": true
+      },
+      "last_termination": {
+        "containerID": "containerd://a1f3cef3a491b7588ce860137db60d98f58f94be8536f53feb1f9b33de700115",
+        "exitCode": 0,
+        "finishedAt": "2026-10-03T19:56:12Z",
+        "reason": "Completed",
+        "startedAt": "2026-10-03T19:42:55Z"
+      },
+      "restarts": 1,
+      "signal": "TERM"
+    },
+    {
+      "active_stream": {
+        "milliseconds": 672.3469860000932,
+        "status": 200,
+        "terminal": false,
+        "truncated": true
+      },
+      "last_termination": {
+        "containerID": "containerd://90ba04e63bb0cc256f6dc49184dbbef9070d89b0403c8cfdef0bc5e5898c11cf",
+        "exitCode": 137,
+        "finishedAt": "2026-10-03T19:56:17Z",
+        "reason": "Error",
+        "startedAt": "2026-10-03T19:56:13Z"
+      },
+      "restarts": 2,
+      "signal": "KILL"
+    }
+  ]
+}

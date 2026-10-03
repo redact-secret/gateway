@@ -1,8 +1,8 @@
 # One-application Kubernetes companion
 
-Implementation example; cluster/platform/resource qualification is in progress
-under epic #14. See [ADR 0035](../../docs/decisions/0035-kubernetes-sidecar-trust-and-probes.md).
-Requires Kubernetes native sidecars (tested environment will be Kubernetes 1.34).
+Native amd64/arm64 qualification is recorded in the
+[Beta 2 report](../../docs/qualification/beta2-qualification-report.md) under epic #14. See [ADR 0035](../../docs/decisions/0035-kubernetes-sidecar-trust-and-probes.md).
+Requires Kubernetes native sidecars (tested environment: Kubernetes 1.34 with kindnet on pinned kind nodes).
 
 Build the candidate locally without publishing it. Render `GATEWAY_IMAGE_DIGEST`
 and `APPLICATION_IMAGE_DIGEST` to verified image digests available to your
@@ -25,7 +25,7 @@ sidecar startup probe gates application start. There is no Service or ingress;
 proxy and health endpoints listen on Pod loopback only. Exec probes run the
 shipped binary, not shell/curl. Probe processes count against the container's
 CPU/memory and share Gateway's connection bound; transient saturation can make
-a probe fail. Requests/limits are provisional pending #93 measurements.
+a probe fail. The 128-MiB request, 256-MiB limit and one-CPU ceiling are a tested reference profile; production capacity and aggregate worst-case sizing remain provisional. Lower CPU quotas were also measured in the report.
 
 Config/token changes require a validated restart. Updating a mounted Secret does
 not reload a running process; prefer versioned ConfigMap/Secret names and roll
@@ -39,7 +39,6 @@ drain; partial SSE is incomplete and delivered provider data cannot be retracted
 
 This basic manifest permits direct app egress. A Pod-level NetworkPolicy cannot
 permit Gateway provider egress while refusing it to its colocated app. Mandatory
-traversal needs the separately qualified operator profile in ADR 0035; until its
-tests pass that protection is not supported. No NET_ADMIN or privileged container
+traversal needs the separately qualified operator profile in ADR 0035. Its recorded tests deny app UID 10001 every destination except TCP loopback port 8787, including other loopback provider ports, through restart/replacement. Broader CNI environments need their own denial tests. No NET_ADMIN or privileged container
 is needed for this basic installation. The app/Gateway and token readers are one
 trust domain; node/runtime administration is trusted.

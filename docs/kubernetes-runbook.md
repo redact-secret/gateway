@@ -3,7 +3,7 @@
 Scope: one application and Gateway in one Pod. The
 [example](../examples/kubernetes/README.md), [trust/lifecycle ADR](decisions/0035-kubernetes-sidecar-trust-and-probes.md)
 and [execution register](qualification/beta2-qualification-report.md) determine
-what has actually been qualified. Resource recommendations remain provisional.
+what has actually been qualified. The tested 128/256-MiB request/limit and one-CPU ceiling form a reference profile; production sizing remains provisional.
 No registry image is published; do not substitute an unverified image tag.
 
 ## Startup and exposure
@@ -66,7 +66,7 @@ mode to an older binary requires changing `serve-observed` back to `serve`.
 The basic sidecar permits direct app egress. Ordinary NetworkPolicy cannot
 separate colocated app/Gateway permissions. The optional UID operator profile
 requires its own documented NET_ADMIN init container and actual denial tests
-through restarts/replacements. Installer failure must hold application startup;
+through restarts/replacements. App UID 10001 may connect only to TCP loopback port 8787; other loopback services, DNS and metadata are denied. The report records those tests on both native architectures. Installer failure must hold application startup;
 never continue a mandatory-egress claim after a failed enforcement test. Node,
 runtime, privileged administrators and other trusted token readers remain inside
 the deployment assumptions. No all-CNI or all-cluster support is implied.

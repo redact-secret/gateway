@@ -1,0 +1,8 @@
+{
+  "base_image_pinned": "gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2",
+  "base_image_platform": "linux/amd64",
+  "contains_binary_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+  "image_id": "sha256:40872fbb8917164d5aa09cf3b24c67c57ebd1d42042c8d3e5199d72de18d457e",
+  "local_ref": "redact-secret-gateway:candidate",
+  "runtime_user": "65532:65532"
+}

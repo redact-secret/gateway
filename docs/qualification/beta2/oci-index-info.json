@@ -1,0 +1,48 @@
+{
+  "consumer_verification": {
+    "execution_scope": "independent OCI selection; native binary/image execution is recorded by the platform jobs",
+    "layout_reference": "candidate",
+    "package_version": "1.13.3+ds1-2ubuntu0.24.04.3",
+    "registry_access": false,
+    "selected": [
+      {
+        "architecture": "amd64",
+        "config_digest": "sha256:40872fbb8917164d5aa09cf3b24c67c57ebd1d42042c8d3e5199d72de18d457e",
+        "matched": true
+      },
+      {
+        "architecture": "arm64",
+        "config_digest": "sha256:c8db03cf0f38dae7757f28721b3257981b7b18644d932580ecbfccae0e5b0a51",
+        "matched": true
+      }
+    ],
+    "tool": "skopeo version 1.13.3"
+  },
+  "index": {
+    "digest": "sha256:6208b525be9c1acddafd966b9ef166fbff06cb56560297af6c1d6df3c1a0108f",
+    "mediaType": "application/vnd.oci.image.index.v1+json",
+    "size": 493
+  },
+  "layout_reference": "candidate",
+  "published": false,
+  "variants": [
+    {
+      "digest": "sha256:3d5d59acf23ff6ef34b1e66bb5bc28650a723256cf807b56f34b2cce90ed55a8",
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "size": 3734
+    },
+    {
+      "digest": "sha256:e95a283c7150f6496a60bc2e86bd7fb14c7f61110c63cea3945d5cdf831f3e90",
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "platform": {
+        "architecture": "arm64",
+        "os": "linux"
+      },
+      "size": 3734
+    }
+  ]
+}

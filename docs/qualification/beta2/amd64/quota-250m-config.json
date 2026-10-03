@@ -1,0 +1,37 @@
+{
+  "content": {
+    "profile": "full"
+  },
+  "deployment": {
+    "listener": {
+      "address": "127.0.0.1:8787"
+    },
+    "local_auth": {
+      "mode": "token",
+      "token": {
+        "file": "/run/secrets/gateway-local-token"
+      }
+    },
+    "upstream": {
+      "provider": "openai"
+    }
+  },
+  "resources": {
+    "capacity": {
+      "inspection": 2,
+      "memory_units": 65536,
+      "receipt": 8,
+      "stream": 8,
+      "upstream": 8
+    },
+    "limits": {
+      "shutdown_drain_ms": 2000,
+      "stream_idle_ms": 3000,
+      "stream_lifetime_ms": 15000,
+      "stream_write_stall_ms": 2000,
+      "upstream_header_ms": 3000,
+      "upstream_total_ms": 15000
+    }
+  },
+  "schema_version": 1
+}

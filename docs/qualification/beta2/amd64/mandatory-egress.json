@@ -1,0 +1,26 @@
+[
+  {
+    "cpu": "250m",
+    "direct_ipv4_denied": true,
+    "direct_ipv6_denied": true,
+    "direct_loopback_provider_ports_denied": true,
+    "ipv6_control_reachable": true,
+    "operator_completed": true
+  },
+  {
+    "cpu": "500m",
+    "direct_ipv4_denied": true,
+    "direct_ipv6_denied": true,
+    "direct_loopback_provider_ports_denied": true,
+    "ipv6_control_reachable": true,
+    "operator_completed": true
+  },
+  {
+    "cpu": "1",
+    "direct_ipv4_denied": true,
+    "direct_ipv6_denied": true,
+    "direct_loopback_provider_ports_denied": true,
+    "ipv6_control_reachable": true,
+    "operator_completed": true
+  }
+]

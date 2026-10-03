@@ -1,0 +1,10 @@
+{
+  "exactly_once_claim": false,
+  "explicit_client_retries": 1,
+  "gateway_automatic_retries": 0,
+  "provider_deliveries": 2,
+  "statuses": [
+    504,
+    504
+  ]
+}

@@ -1,0 +1,23 @@
+GET /healthz -> 200
+GET /readyz -> 200
+POST no credential -> 401
+POST {} -> 422
+POST unknown field with synthetic token -> 422
+POST text/plain -> 415
+POST tool schema with $ref and a synthetic token -> 422
+POST metadata with a number value -> 422
+POST tool_calls with malformed arguments -> 400
+POST tool_calls with duplicate argument keys -> 400
+GET /v1/chat/completions -> 405
+POST /v1/responses no credential -> 401
+POST /v1/responses {} -> 422
+POST /v1/responses store omitted with a synthetic token -> 422
+POST /v1/responses previous_response_id -> 422
+POST /v1/responses hosted web_search tool -> 422
+POST /v1/responses function_call with malformed arguments -> 400
+POST /v1/responses text/plain -> 415
+GET /v1/responses -> 405
+POST /v1/responses/ (trailing slash) -> 404
+GET /v1/models -> 404
+smoke probes: health OK; every proxy-route probe (Chat Completions and Responses) rejected locally with its safe code
+exit status after SIGTERM: 0

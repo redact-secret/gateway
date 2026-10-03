@@ -1,0 +1,52 @@
+{
+  "actual_seconds": 613.2040177230001,
+  "declared_seconds": 600,
+  "passed": true,
+  "recovered": {
+    "api_token_mounted": false,
+    "cgroup": {
+      "cpu.max": "100000 100000",
+      "cpu.stat": "usage_usec 328613549\nuser_usec 225940241\nsystem_usec 102673307\nnice_usec 0\ncore_sched.force_idle_usec 0\nnr_periods 5206\nnr_throttled 198\nthrottled_usec 2174401\nnr_bursts 0\nburst_usec 0",
+      "memory.current": "6328320",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.max": "268435456",
+      "memory.peak": "11776000"
+    },
+    "fd_count": 11,
+    "identity": {
+      "CapEff": "0000000000000000",
+      "Gid": "65532\t65532\t65532\t65532",
+      "NoNewPrivs": "1",
+      "Seccomp": "2",
+      "Uid": "65532\t65532\t65532\t65532"
+    },
+    "pid": 163705,
+    "root_read_only": true,
+    "rss_kib": 7744,
+    "threads": 2
+  },
+  "rss_allowance_kib": 8192,
+  "warm": {
+    "api_token_mounted": false,
+    "cgroup": {
+      "cpu.max": "100000 100000",
+      "cpu.stat": "usage_usec 75243469\nuser_usec 52576031\nsystem_usec 22667438\nnice_usec 0\ncore_sched.force_idle_usec 0\nnr_periods 1234\nnr_throttled 198\nthrottled_usec 2174401\nnr_bursts 0\nburst_usec 0",
+      "memory.current": "5865472",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.max": "268435456",
+      "memory.peak": "10575872"
+    },
+    "fd_count": 11,
+    "identity": {
+      "CapEff": "0000000000000000",
+      "Gid": "65532\t65532\t65532\t65532",
+      "NoNewPrivs": "1",
+      "Seccomp": "2",
+      "Uid": "65532\t65532\t65532\t65532"
+    },
+    "pid": 163705,
+    "root_read_only": true,
+    "rss_kib": 7744,
+    "threads": 2
+  }
+}
