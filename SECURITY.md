@@ -24,7 +24,7 @@ This objective does not guarantee detection of every secret, protect plaintext b
 
 Assets include original request text, provider credentials, optional local caller tokens, transformed requests, core/configuration integrity, and process/network resources. The Gateway handles plaintext in memory. It does not promise secure erasure of every allocator/TLS buffer, encrypted RAM, or protection from privileged host inspection.
 
-The first stable trust domain is one application with a localhost companion or Kubernetes sidecar. Loopback is an address restriction, not caller authentication. Same-host or same-Pod processes and operators must be considered in the deployment assumptions. Multi-tenant and remote caller operation are not supported initially.
+The first stable trust domain is one application with a localhost companion or Kubernetes sidecar. Loopback is an address restriction, not caller authentication. Same-host or same-Pod processes and operators must be considered in the deployment assumptions. Multi-tenant and remote caller operation are not supported initially. A local caller token, an acknowledgement-plus-token rule for non-loopback binding, and the separation of health probes from proxy authority are frozen as a planned design in [ADR 0030](docs/decisions/0030-local-caller-auth-listener-health.md); they are not implemented yet (#63), and even when they are, a token over plain local HTTP does not make a shared or remote deployment supported.
 
 ## Threats and required controls
 
