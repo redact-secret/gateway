@@ -397,8 +397,12 @@ def main():
     stage('candidate-startup-probes-security')
     apply(pod_spec('candidate','rsg-beta2-candidate:local'))
     candidate = wait_pod('candidate')
+    probe_exits={}
+    for mode in ['live','ready']:
+        kube('exec','candidate','-c','gateway','--','/usr/local/bin/redact-secret-gateway','probe',mode,'127.0.0.1:8787')
+        probe_exits[mode]=0
     evidence('candidate-probes-security', {'pod_status':candidate['status'],'app_identity':actor('candidate','identity'),
-                                         'gateway_runtime':runtime_sample('candidate')})
+                                         'gateway_runtime':runtime_sample('candidate'),'shipped_exec_probe_exits':probe_exits})
     # Exact candidate: no accepted request or provider key. Auth refusal is local.
     refusal = json.loads(kube('exec','candidate','-c','app','--','python','-c',
         'import http.client,json;c=http.client.HTTPConnection("127.0.0.1",8787,timeout=3);c.request("POST","/v1/responses","{}",{"Content-Type":"application/json"});r=c.getresponse();print(json.dumps({"status":r.status,"body":json.loads(r.read())}))'))
