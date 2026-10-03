@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 
 use redact_secret::Profile;
 use redact_secret_gateway::admission::{Admission, CapacityPlan, RequestLimits};
+use redact_secret_gateway::boundary::ProtocolRoute;
 use redact_secret_gateway::boundary::{BoundaryError, Inspection, SanitizedRequest};
 use redact_secret_gateway::chat_route::{CHAT_COMPLETIONS_PATH, ChatRoute};
 use redact_secret_gateway::config::{self, ContentPolicy, OnWarn, RouteId};
@@ -82,7 +83,13 @@ impl Lab {
     async fn run(&self, body: &str) -> Result<SanitizedRequest, BoundaryError> {
         let validated = self.validate(body).await.expect("classified");
         self.inspection
-            .inspect_and_approve(validated, RouteId::new("synthetic-route"))
+            .inspect_and_approve(
+                validated,
+                ProtocolRoute::new(
+                    Protocol::ChatCompletionsText,
+                    RouteId::new("synthetic-route"),
+                ),
+            )
             .await
     }
 }

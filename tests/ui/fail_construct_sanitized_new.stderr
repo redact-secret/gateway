@@ -1,10 +1,15 @@
 error[E0624]: associated function `new` is private
- --> tests/ui/fail_construct_sanitized_new.rs:7:23
+ --> tests/ui/fail_construct_sanitized_new.rs:8:23
   |
-7 |     SanitizedRequest::new(Vec::new(), RouteId::new("r"), memory)
-  |                       ^^^ private associated function
+8 |       SanitizedRequest::new(Vec::new(), Protocol::ChatCompletionsText, RouteId::new("r"), memory)
+  |                         ^^^ private associated function
   |
  ::: src/boundary/sealed.rs
   |
-  |     pub(super) fn new(body: Vec<u8>, route: RouteId, memory: MemoryReservation) -> Self {
-  |     ----------------------------------------------------------------------------------- private associated function defined here
+  | /     pub(super) fn new(
+  | |         body: Vec<u8>,
+  | |         protocol: Protocol,
+  | |         route: RouteId,
+  | |         memory: MemoryReservation,
+  | |     ) -> Self {
+  | |_____________- private associated function defined here

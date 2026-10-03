@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use redact_secret::Profile;
 use redact_secret_gateway::admission::{Admission, CapacityPlan, RequestLimits};
+use redact_secret_gateway::boundary::ProtocolRoute;
 use redact_secret_gateway::boundary::{BoundaryError, Inspection, SanitizedRequest};
 use redact_secret_gateway::config::{ContentPolicy, OnWarn, RouteId};
 use redact_secret_gateway::core_bridge::CoreBridgeError;
@@ -82,7 +83,13 @@ impl Lab {
 
     async fn run(&self, body: &str) -> Result<SanitizedRequest, BoundaryError> {
         self.inspection
-            .inspect_and_approve(self.validate(body).await, RouteId::new("synthetic-route"))
+            .inspect_and_approve(
+                self.validate(body).await,
+                ProtocolRoute::new(
+                    Protocol::ChatCompletionsText,
+                    RouteId::new("synthetic-route"),
+                ),
+            )
             .await
     }
 
@@ -515,10 +522,10 @@ async fn dropping_the_awaiting_future_does_not_release_capacity_early() {
     }
     // Every worker is busy. Poll the request once so its job is submitted, then drop it.
     let validated = lab.validate(WARN_BODY).await;
-    let mut fut = Box::pin(
-        lab.inspection
-            .inspect_and_approve(validated, RouteId::new("r")),
-    );
+    let mut fut = Box::pin(lab.inspection.inspect_and_approve(
+        validated,
+        ProtocolRoute::new(Protocol::ChatCompletionsText, RouteId::new("r")),
+    ));
     let polled = tokio::time::timeout(Duration::from_millis(100), &mut fut).await;
     assert!(polled.is_err(), "the job is queued behind the gates");
     drop(fut);
@@ -567,7 +574,10 @@ async fn repeated_cancelled_requests_stay_within_capacity_and_all_capacity_retur
         let lab2 = Arc::clone(&lab);
         let task = tokio::spawn(async move {
             lab2.inspection
-                .inspect_and_approve(validated, RouteId::new("r"))
+                .inspect_and_approve(
+                    validated,
+                    ProtocolRoute::new(Protocol::ChatCompletionsText, RouteId::new("r")),
+                )
                 .await
         });
         tokio::task::yield_now().await;

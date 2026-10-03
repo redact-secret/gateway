@@ -21,10 +21,28 @@ pub enum SerializeError {
 }
 
 /// Output sink that refuses to grow past its bound.
-pub(super) struct Bounded {
+pub(in crate::protocol) struct Bounded {
     buf: Vec<u8>,
     max: usize,
     overflow: bool,
+}
+
+impl Bounded {
+    pub(in crate::protocol) fn new(max: usize, estimate: usize) -> Self {
+        Self {
+            buf: Vec::with_capacity(estimate.min(max)),
+            max,
+            overflow: false,
+        }
+    }
+
+    pub(in crate::protocol) fn into_inner(self) -> Vec<u8> {
+        self.buf
+    }
+
+    pub(in crate::protocol) const fn overflowed(&self) -> bool {
+        self.overflow
+    }
 }
 
 impl Write for Bounded {
@@ -42,7 +60,7 @@ impl Write for Bounded {
     }
 }
 
-pub(super) fn json_str(w: &mut Bounded, text: &str) -> io::Result<()> {
+pub(in crate::protocol) fn json_str(w: &mut Bounded, text: &str) -> io::Result<()> {
     serde_json::to_writer(w, text).map_err(io::Error::from)
 }
 
@@ -63,14 +81,10 @@ impl ChatRequest {
     pub fn serialize_bounded(&self, max_bytes: usize) -> Result<Vec<u8>, SerializeError> {
         let mut estimate = 256_usize;
         self.for_each_text(|_, text| estimate = estimate.saturating_add(text.len()));
-        let mut out = Bounded {
-            buf: Vec::with_capacity(estimate.min(max_bytes)),
-            max: max_bytes,
-            overflow: false,
-        };
+        let mut out = Bounded::new(max_bytes, estimate);
         match self.write_to(&mut out) {
-            Ok(()) => Ok(out.buf),
-            Err(_) if out.overflow => Err(SerializeError::Limit),
+            Ok(()) => Ok(out.into_inner()),
+            Err(_) if out.overflowed() => Err(SerializeError::Limit),
             Err(_) => Err(SerializeError::Invalid),
         }
     }

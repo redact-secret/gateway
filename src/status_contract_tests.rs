@@ -97,6 +97,9 @@ fn reject_id(reject: Reject) -> String {
         Reject::Inspection(BoundaryError::Serialization) => {
             "Reject::Inspection(Serialization)".into()
         }
+        Reject::Inspection(BoundaryError::RouteMismatch) => {
+            "Reject::Inspection(RouteMismatch)".into()
+        }
         Reject::Inspection(BoundaryError::Core(e)) => {
             format!("Reject::Inspection(Core({}))", core(e))
         }
@@ -127,6 +130,7 @@ fn all_rejects() -> Vec<Reject> {
         Reject::Expectation,
         Reject::Inspection(BoundaryError::OutputLimit),
         Reject::Inspection(BoundaryError::Serialization),
+        Reject::Inspection(BoundaryError::RouteMismatch),
     ];
     for error in [
         TransportError::ClientInit,

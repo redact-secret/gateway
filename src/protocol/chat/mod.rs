@@ -37,7 +37,7 @@ mod messages;
 mod metadata;
 mod response_format;
 mod schema;
-mod serialize;
+pub(super) mod serialize;
 mod slots;
 mod stop_user;
 mod tool_calls;

@@ -156,6 +156,7 @@ Column meanings. `Provider bytes sent`: `no` means nothing of this request reach
 | `Reject::Expectation` | 417 | `unsupported_input` | - | no | no | Drop `Expect`, or use `100-continue`. |
 | `Reject::Inspection(OutputLimit)` | 413 | `limit_exceeded` | - | no | no | Shrink the request. |
 | `Reject::Inspection(Serialization)` | 422 | `unsupported_input` | - | no | no | Fix the request. |
+| `Reject::Inspection(RouteMismatch)` | 500 | `incomplete_inspection` | - | no | yes | Wiring defect (the validated protocol is not the route's protocol); refused before inspection, nothing was sent upstream. Never caused by client input. |
 | `Reject::Inspection(Core(UnsupportedProfile))` | 422 | `unsupported_input` | - | no | no | Configuration defect; fix the deployment. |
 | `Reject::Inspection(Core(InvalidConfiguration))` | 422 | `unsupported_input` | - | no | no | Configuration defect; fix the deployment. |
 | `Reject::Inspection(Core(LimitExceeded))` | 413 | `limit_exceeded` | - | no | no | Shrink the request. |

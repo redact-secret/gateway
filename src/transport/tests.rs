@@ -71,6 +71,11 @@ fn route() -> RouteId {
     RouteId::new(ROUTE)
 }
 
+/// The Chat protocol bound to `id`, as the served route builds it.
+fn chat_route(id: RouteId) -> boundary::ProtocolRoute {
+    boundary::ProtocolRoute::new(crate::protocol::Protocol::ChatCompletionsText, id)
+}
+
 /// Client over plain loopback HTTP (the one place `https_only` is lowered, test-only).
 fn http_upstream(addr: SocketAddr) -> Upstream {
     http_upstream_with(addr, RequestLimits::provisional())
@@ -317,7 +322,7 @@ async fn forward_to_an_unknown_route_fails_closed_before_any_send() {
     let s = boundary::approve(
         v,
         CompleteInspection::for_test(b"x".to_vec()),
-        RouteId::new("r"),
+        chat_route(RouteId::new("r")),
     )
     .expect("approved");
     let upstream = Upstream::new(None).expect("client");

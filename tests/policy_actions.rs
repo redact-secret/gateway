@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use redact_secret::{Action, Profile};
 use redact_secret_gateway::admission::{Admission, CapacityPlan, RequestLimits};
+use redact_secret_gateway::boundary::ProtocolRoute;
 use redact_secret_gateway::boundary::{BoundaryError, Inspection, SanitizedRequest};
 use redact_secret_gateway::config::{self, ContentPolicy, OnWarn, RouteId};
 use redact_secret_gateway::core_bridge::{
@@ -78,7 +79,13 @@ impl Lab {
         let validated =
             protocol::validate_with(received, Protocol::ChatCompletionsText, &self.limits).unwrap();
         self.inspection
-            .inspect_and_approve(validated, RouteId::new("synthetic-route"))
+            .inspect_and_approve(
+                validated,
+                ProtocolRoute::new(
+                    Protocol::ChatCompletionsText,
+                    RouteId::new("synthetic-route"),
+                ),
+            )
             .await
     }
 }
