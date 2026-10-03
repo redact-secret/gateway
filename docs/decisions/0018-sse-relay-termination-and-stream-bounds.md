@@ -44,3 +44,5 @@ The #21 acceptance item "pinned Node/Python streaming clients work against fragm
 
 
 Amendment (#59, [ADR 0027](0027-write-budget-and-bounded-response-frames.md)): the sentence that a slow-progress consumer is bounded by the lifetime deadline holds for streams; a buffered JSON response now has the same bound through a cumulative write budget equal to `stream_lifetime_ms`.
+
+Amendment (#87): `POST /v1/responses` uses this relay unchanged: both endpoints are the same `EndpointRoute` over the same transport, permits, limits and write-stall listener, so every bound, termination rule and cleanup rule in this ADR holds for Responses streams and Responses JSON answers. The relay still parses no event, so a provider-declared `response.failed` or `response.incomplete` is ordinary content that ends with the provider's clean end, and only an abrupt end, never a gateway-made event, signals transport truncation. Evidence: `src/transport/tests/responses_stream_tests.rs` (in-process fake provider) and the SDK suites `responses-lifecycle` (qualification build).

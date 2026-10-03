@@ -17,6 +17,7 @@
 // Framing and delivery-uncertainty scenarios (#60), all raw bytes on the provider socket:
 //   qual-close-before-headers, qual-partial-head, qual-bad-status-line, qual-dup-content-length,
 //   qual-gzip (Content-Encoding: gzip), qual-partial-read (provider stops reading the request body),
+//   (Responses scenarios, POST /v1/responses: see responses.mjs, #87)
 //   qual-sse-cut-before-first-event, qual-sse-clean-no-finish (clean end, no finish_reason, no [DONE]),
 //   qual-sse-no-done (finish_reason but no [DONE], clean end), qual-sse-bad-chunk (invalid chunk framing).
 //
@@ -39,6 +40,7 @@ import { readFileSync } from "node:fs";
 // either value (the valid one or the decoy) reached it in any header, the target, or the body.
 const synthetic = JSON.parse(readFileSync(new URL("../synthetic.json", import.meta.url), "utf8"));
 const LOCAL_TOKENS = [synthetic.local_token, synthetic.local_token_decoy];
+import { makeResponsesScenario } from "./responses.mjs";
 
 const MAX_BODY = 8 * 1024 * 1024;
 const PIECES = ["Hel", "lo ", "안녕", "하세요", " 🙂", "!"];
@@ -376,6 +378,8 @@ async function runScenario(call, req, res, json) {
   return sendJson(res, 404, providerError(404));
 }
 
+const runResponsesScenario = makeResponsesScenario({ sendJson, beginSse, mark, tick, providerError });
+
 const provider = http.createServer((req, res) => {
   const call = {
     seq: calls.length + 1,
@@ -440,6 +444,13 @@ const provider = http.createServer((req, res) => {
     }
     call.scenario = typeof json?.model === "string" ? json.model : "";
     mark(call, "received");
+    // `POST /v1/responses` scenarios live in responses.mjs (#87).
+    if (req.method === "POST" && req.url === "/v1/responses") {
+      runResponsesScenario(call, req, res, json).catch(() => {
+        res.socket?.destroy();
+      });
+      return;
+    }
     if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
       return sendJson(res, 404, providerError(404));
     }
