@@ -125,6 +125,56 @@ Connection bound (#40, [ADR 0022](../decisions/0022-connection-bound-at-accept.m
 
 Cancellation and shutdown. When the caller disconnects, the request future is dropped: any wait, inspection await, or upstream exchange is cancelled, the connection to the provider is closed, and the memory reservation and permits are released. Bytes already written to the provider cannot be retracted, so a cancelled request may still have been received (and acted on) by the provider. At shutdown the Gateway stops accepting, reports not ready, and drains for at most `shutdown_drain_ms`; remaining in-flight requests are then cancelled the same way (answering `503 not_ready` if the caller is still connected) and `serve` returns without waiting further than a one-second grace.
 
+## Frozen status mapping (#60)
+
+Status: frozen for Alpha 2 and enforced. This table is the single inventory of every Gateway-generated outcome, one row per outcome. The unit tests in `src/status_contract_tests.rs` build the same rows from the code (`Reject::status_and_code`, the rendered response, the head guard's fixed bytes) and fail when any status, code, `Retry-After`, or the set of outcomes differs from this table, so neither can change without the other. The situational tables above remain the readable view; this one is the exact one. All bodies are the fixed `{"error":{"code":"<code>"}}` and carry no request, header, provider, or credential text.
+
+**Pre-commit versus post-commit.** Every outcome in this table happens *before* any response byte is committed to the caller, so it has a real HTTP status and can be acted on by status. Once a response (a buffered JSON answer or the headers of an event stream) has begun, no status can change: a stream that fails afterwards ends abruptly without its terminating chunk and nothing is written into it (see "SSE streams"). That is a **post-commit truncation**, it has no status and no code, and the only reliable detection is the provider's own completion indicator (see "Detecting an incomplete stream").
+
+Column meanings. `Provider bytes sent`: `no` means nothing of this request reached the provider; `yes` means the request was fully sent; `maybe` means it may have been (a header or total deadline elapsed). `SDK default retry`: whether the pinned OpenAI SDKs retry the status by default (`408`, `409`, `429`, every `5xx`); verified in #22 and re-verified in #60. The gateway itself never retries; a client retry is a new request. Where bytes may have reached the provider, a client retry can duplicate provider-side work.
+
+| Outcome | Status | Code | Retry-After | Provider bytes sent | SDK default retry | Retry guidance |
+| --- | --- | --- | --- | --- | --- | --- |
+| `Reject::Method` | 405 | `unsupported_input` | - | no | no | Fix the call. |
+| `Reject::Target` | 400 | `unsupported_input` | - | no | no | Fix the call. |
+| `Reject::ContentType` | 415 | `unsupported_input` | - | no | no | Fix the call. |
+| `Reject::Encoding` | 415 | `unsupported_input` | - | no | no | Send an uncompressed body. |
+| `Reject::Framing` | 400 | `malformed_input` | - | no | no | Fix the framing. |
+| `Reject::TooLarge` | 413 | `limit_exceeded` | - | no | no | Shrink the request. |
+| `Reject::LimitExceeded` | 413 | `limit_exceeded` | - | no | no | Shrink the request. |
+| `Reject::Deadline` | 408 | `limit_exceeded` | - | no | yes | Safe to retry: nothing was sent upstream. |
+| `Reject::Overload` | 503 | `overload` | 1 | no | yes | Safe to retry after `Retry-After`: nothing was sent upstream. |
+| `Reject::Malformed` | 400 | `malformed_input` | - | no | no | Fix the body. |
+| `Reject::Unsupported` | 422 | `unsupported_input` | - | no | no | Fix the request; includes a `Block` or `Warn` finding. |
+| `Reject::NotImplemented` | 501 | `not_implemented` | - | no | yes | No retry helps (no upstream configured); retries are wasted work. |
+| `Reject::ShuttingDown` | 503 | `not_ready` | - | no | yes | Retry against another instance; this one is draining. |
+| `Reject::MissingCredential` | 401 | `missing_credential` | - | no | no | Supply a provider `Authorization`. |
+| `Reject::Header` | 400 | `malformed_input` | - | no | no | Fix the header (duplicate or malformed credential, organization, project, or `Connection`). |
+| `Reject::HeaderTooLarge` | 431 | `limit_exceeded` | - | no | no | Shrink the headers. |
+| `Reject::Expectation` | 417 | `unsupported_input` | - | no | no | Drop `Expect`, or use `100-continue`. |
+| `Reject::Inspection(OutputLimit)` | 413 | `limit_exceeded` | - | no | no | Shrink the request. |
+| `Reject::Inspection(Serialization)` | 422 | `unsupported_input` | - | no | no | Fix the request. |
+| `Reject::Inspection(Core(UnsupportedProfile))` | 422 | `unsupported_input` | - | no | no | Configuration defect; fix the deployment. |
+| `Reject::Inspection(Core(InvalidConfiguration))` | 422 | `unsupported_input` | - | no | no | Configuration defect; fix the deployment. |
+| `Reject::Inspection(Core(LimitExceeded))` | 413 | `limit_exceeded` | - | no | no | Shrink the request. |
+| `Reject::Inspection(Core(Blocked))` | 422 | `unsupported_input` | - | no | no | Remove the blocked content. |
+| `Reject::Inspection(Core(Warned))` | 422 | `unsupported_input` | - | no | no | Remove the content, or change `content.on_warn`. |
+| `Reject::Inspection(Core(Overload))` | 503 | `overload` | 1 | no | yes | Safe to retry after `Retry-After`: nothing was sent upstream. |
+| `Reject::Inspection(Core(Incomplete))` | 500 | `incomplete_inspection` | - | no | yes | Inspection failed closed; nothing was sent upstream, so a retry cannot duplicate provider work. |
+| `Reject::Transport(ClientInit)` | 502 | `transport_failure` | - | no | yes | Startup defect; not expected at request time. |
+| `Reject::Transport(UnknownRoute)` | 501 | `not_implemented` | - | no | yes | No upstream for the route; retries are wasted work. |
+| `Reject::Transport(Timeout)` | 504 | `upstream_timeout` | - | maybe | yes | A retry may duplicate provider work. |
+| `Reject::Transport(Connect)` | 502 | `upstream_unavailable` | - | no | yes | Safe to retry: the request never left. |
+| `Reject::Transport(Tls)` | 502 | `upstream_tls_failure` | - | no | yes | Retrying does not help until the deployment is fixed. |
+| `Reject::Transport(InvalidResponse)` | 502 | `upstream_invalid_response` | - | yes | yes | A retry duplicates provider work that already happened. |
+| `Reject::Transport(ResponseTooLarge)` | 502 | `upstream_response_too_large` | - | yes | yes | A retry duplicates provider work that already happened. |
+| `HeadGuard::Ambiguous` | 400 | `malformed_input` | - | no | no | Send one of `Content-Length` or `Transfer-Encoding`. Fixed bytes written by the head guard; best effort on delivery. |
+| `HeadGuard::TooLarge` | 431 | `limit_exceeded` | - | no | no | Shrink the head (over 64 KiB or over 100 fields). Fixed bytes; best effort on delivery. |
+| `HeadGuard::LateHead` | none | none | - | no | yes | Connection closed without a response when the head is not finished by `body_deadline_ms`; the SDK sees a connection error and retries it. |
+| `Connection::AtBound` | none | none | - | no | yes | Connection closed at accept when `max_connections` are open; the SDK sees a connection error and retries it. |
+
+A provider's own `4xx`/`5xx` is a provider response, relayed as received, and is not in this table. The `501`, `500`, and `502` rows are retried by the SDK defaults although retrying cannot help; that is the client's status-based policy (the gateway does not relay `x-should-retry`), not a gateway decision. The two closed-connection rows have no status or code by design: nothing has been read or is safe to write.
+
 ## SSE streams (#21; [ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md))
 
 `stream: true` is admitted, parsed, inspected, and sealed exactly like any request (every rejection above applies and sends zero upstream bytes), then forwarded once. A `2xx` answer with `Content-Type: text/event-stream` is relayed incrementally and unredacted; any other answer (a provider `4xx`/`5xx`, a JSON answer) is the ordinary buffered relay above. Provider events are relayed byte for byte: the Gateway never parses, merges, splits, reorders, or adds events, and never adds `data: [DONE]` or any other completion or error event.

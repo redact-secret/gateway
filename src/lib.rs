@@ -19,6 +19,8 @@ mod head_guard;
 pub mod health;
 pub mod protocol;
 pub mod server;
+#[cfg(test)]
+mod status_contract_tests;
 pub mod telemetry;
 pub mod transport;
 mod write_stall;

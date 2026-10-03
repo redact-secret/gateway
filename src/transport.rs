@@ -426,6 +426,12 @@ impl Upstream {
             return Err(TransportError::ResponseTooLarge);
         }
         let status = response.status();
+        // A final answer is never informational. The client consumes interim `1xx`
+        // responses itself; a `101 Switching Protocols` surfaces as a response and would
+        // otherwise be relayed to the caller as a status the gateway never negotiated (#60).
+        if status.is_informational() {
+            return Err(TransportError::InvalidResponse);
+        }
         let relayed = headers::relay_response_headers(response.headers())
             .map_err(|_| TransportError::InvalidResponse)?;
         Ok((response, status, relayed))
