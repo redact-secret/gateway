@@ -113,8 +113,7 @@
      }
 --- a/src/transport.rs
 +++ b/src/transport.rs
-@@ -40,7 +40,8 @@
- pub mod credential;
+@@ -41,6 +41,7 @@
  pub mod destination;
  pub mod headers;
  pub mod local_auth;
