@@ -13,6 +13,7 @@ Normative rules for interfaces and behavior. Each contract has a status line tha
 - [upstream-destinations](upstream-destinations.md)
 - [headers-and-credentials](headers-and-credentials.md)
 - [local-caller-auth](local-caller-auth.md) (implemented for Chat Completions, #63)
+- [config-upgrade-rollback](config-upgrade-rollback.md) (restart activation, migration and rollback pairs)
 - [config-schema](config-schema.md) (frozen, implemented; schema file `docs/schema/gateway-config.v1.schema.json`)
 - [request-lifecycle](request-lifecycle.md)
 

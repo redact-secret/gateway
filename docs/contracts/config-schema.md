@@ -74,7 +74,7 @@ The rules apply from this freeze on. Nothing is silently reinterpreted: an unrec
 | Lower a ceiling or change a provisional default or capacity guidance | Allowed only while the value is listed under `x-gateway.freeze.provisional`; release note, and the schema, `resource-limits.md`, and the code change in one PR. |
 | Tighten a combination (as the `local_auth` non-loopback rule above) | Needs an ADR and a release note; it fails closed at startup, never at request time. |
 
-Upgrade and rollback are restart-based. A newer binary accepts every older config that follows the additive rules. An older binary given a newer config rejects the new key as `unknown_field` before readiness, so the rollback failure mode is a refused start with a static diagnostic, not a weakened gateway; rolling back means removing the newer keys and restarting. The upgrade and rollback procedure with worked examples is #64.
+Upgrade and rollback are restart-based. A newer binary accepts every older config that follows the additive rules. An older binary given a newer config rejects the new key as `unknown_field` before readiness, so the rollback failure mode is a refused start with a static diagnostic, not a weakened gateway; rolling back means removing the newer keys and restarting. The upgrade and rollback procedure with worked examples is [config-upgrade-rollback](config-upgrade-rollback.md) (#64, [ADR 0033](../decisions/0033-config-upgrade-rollback.md)).
 
 ## Not in scope
 
