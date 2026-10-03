@@ -96,7 +96,15 @@ async function stop(g) {
 }
 
 async function snapshot(g) {
-  return (await fetch(g.metrics)).json();
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await (await fetch(g.metrics)).json();
+    } catch (e) {
+      // Ephemeral-port pressure from the connection-per-request load: wait and retry.
+      if (attempt >= 20) throw e;
+      await sleep(250);
+    }
+  }
 }
 
 /** Resident memory sampler: `ps` polling (any OS) plus VmHWM from the process (Linux). */
@@ -879,6 +887,15 @@ async function aggMixed(label, cap, limits, load) {
   await providerFresh();
   const bodies = Object.fromEntries(SHAPES.map((s) => [s, { json: shapeBody(s, "qual-json-slow").body, fast: shapeBody(s, "qual-json-ok").body }]));
   const sseBody = JSON.stringify({ model: "qual-sse-hang", stream: true, messages: [{ role: "user", content: "q" }] });
+  const coldBaseline = await procCounts(g);
+  // Warm-up (not measured): every shape once per inspection worker, concurrently, so first-use
+  // costs of the core on each worker thread are paid before the baseline. Without it, one-time
+  // warm-up growth would be charged to the load.
+  for (const shape of SHAPES) {
+    await Promise.all(Array.from({ length: cap.inspection }, () => aggCall(g, bodies[shape].fast)));
+  }
+  await awaitDrained(g);
+  await providerFresh();
   const baseline = await procCounts(g);
   const before = await snapshot(g);
   const sampler = startSampler(g);
@@ -1015,6 +1032,7 @@ async function aggMixed(label, cap, limits, load) {
     },
     true_peak_rss: trueRss,
     baseline_rss_kb: baseline.rss_kb,
+    cold_baseline_rss_kb: coldBaseline.rss_kb,
   };
 }
 
@@ -1069,11 +1087,14 @@ async function aggCancellation() {
   const endAt = performance.now() + seconds * 1000;
   const t = new Tally();
   const workers = [];
-  for (let c = 0; c < 16; c++) {
+  for (let c = 0; c < 12; c++) {
     workers.push(
       (async () => {
         let i = c;
-        while (performance.now() < endAt) t.add(await aggCall(g, heavy, { abortMs: 2 + ((i++ * 7) % 9) }));
+        while (performance.now() < endAt) {
+          t.add(await aggCall(g, heavy, { abortMs: 2 + ((i++ * 7) % 9) }));
+          await sleep(4); // pace connection churn: every request is a new local port
+        }
       })(),
     );
   }
@@ -1150,7 +1171,7 @@ function spread(runs) {
     const v = runs.map((r) => r[k]).filter((x) => typeof x === "number").sort((a, b) => a - b);
     if (!v.length) continue;
     const mid = v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
-    out[k] = { median: Math.round(mid * 10) / 10, min: v[0], max: v.at(-1), runs: v.length };
+    out[k] = { median: Math.round(mid * 1000) / 1000, min: v[0], max: v.at(-1), runs: v.length };
   }
   return out;
 }
@@ -1178,6 +1199,17 @@ async function rustcVersion() {
   return (await execp("rustc", ["--version"])).trim() || null;
 }
 
+/** Wait for closed local connections (TIME_WAIT) to fall so one scenario cannot starve the next of ports. */
+async function settlePorts() {
+  if (!DARWIN) return;
+  const t = performance.now();
+  while (performance.now() - t < 90000) {
+    const out = await execp("netstat", ["-an", "-p", "tcp"]);
+    if (out.split("\n").filter((l) => l.includes("TIME_WAIT")).length < 3000) return;
+    await sleep(3000);
+  }
+}
+
 async function aggregateMain() {
   const cpus = os.cpus().length;
   const capStd = { receipt: 16, memory_units: 262144, inspection: 4, upstream: 16, stream: 16 };
@@ -1189,15 +1221,15 @@ async function aggregateMain() {
     const quiet = await waitForQuiet();
     const t0 = Date.now();
     const run = { run: r + 1, host_before: quiet };
-    run.stages_by_shape = await aggStages(capStd);
-    run.pre_forward_rejections = await aggRejections();
-    run.held_request_memory = await aggHeld();
-    run.buffered_responses = await aggRelay();
-    run.mixed_overload = await aggMixed("tight_capacity_finite_sockets", capTight, limTight, load);
-    run.mixed_ample = await aggMixed("standard_capacity_default_sockets", capStd, {}, { ...load, flood: 40 });
-    run.starvation = await aggStarvation();
-    run.cancellation_storm = await aggCancellation();
-    run.sockets_only = await aggSockets();
+    run.stages_by_shape = (await settlePorts(), await aggStages(capStd));
+    run.pre_forward_rejections = (await settlePorts(), await aggRejections());
+    run.held_request_memory = (await settlePorts(), await aggHeld());
+    run.buffered_responses = (await settlePorts(), await aggRelay());
+    run.mixed_overload = (await settlePorts(), await aggMixed("tight_capacity_finite_sockets", capTight, limTight, load));
+    run.mixed_ample = (await settlePorts(), await aggMixed("standard_capacity_default_sockets", capStd, {}, { ...load, flood: 40 }));
+    run.starvation = (await settlePorts(), await aggStarvation());
+    run.cancellation_storm = (await settlePorts(), await aggCancellation());
+    run.sockets_only = (await settlePorts(), await aggSockets());
     const end = await hostSnapshot();
     run.host_after = end;
     run.duration_s = Math.round((Date.now() - t0) / 1000);
@@ -1254,6 +1286,10 @@ async function aggregateMain() {
       for (const k of ["inspection_in_use", "memory_units_in_use", "receipt_in_use", "upstream_in_use", "stream_in_use", "waiting", "threads", "sockets", "rss_kb"]) h[`${key}.peak.${k}`] = m.peaks_sampled[k];
       h[`${key}.true_peak_rss_kb`] = m.true_peak_rss.max_rss_kb;
       h[`${key}.baseline_rss_kb`] = m.baseline_rss_kb;
+      h[`${key}.cold_baseline_rss_kb`] = m.cold_baseline_rss_kb;
+      h[`${key}.growth_over_warm_baseline_kb`] = m.peaks_sampled.rss_kb - m.baseline_rss_kb;
+      h[`${key}.true_peak_growth_over_warm_baseline_kb`] = m.true_peak_rss.max_rss_kb - m.baseline_rss_kb;
+      h[`${key}.sampled_growth_over_sampled_reserved_peak`] = Math.round(((m.peaks_sampled.rss_kb - m.baseline_rss_kb) / Math.max(1, m.peaks_sampled.memory_units_in_use)) * 100) / 100;
       h[`${key}.recovery.counters_zero_after_ms`] = m.recovery.counters_zero_after_ms;
       h[`${key}.recovery.sockets_back_after_ms`] = m.recovery.sockets_back_to_baseline_after_ms;
       h[`${key}.recovery.probe_ok_of_10`] = m.recovery.probe_requests_ok_of_10;
