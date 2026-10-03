@@ -41,3 +41,6 @@ End-to-end tests in `src/transport/tests/stream_tests.rs` run the whole route ag
 ## SDK qualification (#22): done through the ADR 0020 test build
 
 The #21 acceptance item "pinned Node/Python streaming clients work against fragmented synthetic SSE including multibyte text and multiple events per transport chunk" is met by the SDK suites in [ADR 0020](0020-sdk-qualification-test-build.md), which run the same stream shapes (events split at every byte offset pattern including inside a multibyte character, several events per chunk, slow, gated/incremental, interrupted, idle-cut, provider error before the stream) through a real Node SDK and a real Python SDK. Results and the Node truncation finding are in [the qualification report](../qualification/alpha1-qualification-report.md).
+
+
+Amendment (#59, [ADR 0027](0027-write-budget-and-bounded-response-frames.md)): the sentence that a slow-progress consumer is bounded by the lifetime deadline holds for streams; a buffered JSON response now has the same bound through a cumulative write budget equal to `stream_lifetime_ms`.
