@@ -1,6 +1,6 @@
 # Contract: initial field classification
 
-Status: approved design contract. The Chat Completions tables are complete for Alpha 1 (implemented, #18, #19) and frozen for Alpha 2 (#52, [ADR 0025](../decisions/0025-alpha2-field-contract.md)); the Alpha 2 additions are planned until #53, #54, and #55 land. Owner: `protocol` module.
+Status: approved design contract. The Chat Completions tables are complete for Alpha 1 (implemented, #18, #19) and frozen for Alpha 2 (#52, [ADR 0025](../decisions/0025-alpha2-field-contract.md)); the Alpha 2 additions are planned until #53 and #55 land; tool definitions and structured-output schemas (#54) are implemented. Owner: `protocol` module.
 
 ## Classes
 
@@ -40,4 +40,4 @@ Alpha 1: Chat Completions text subset. Alpha 2: the recursive Chat Completions s
 
 ## Status
 
-Implemented for the Chat Completions text subset (#18): the matrix, the recursive unknown-field rejection, and the decoded-string and duplicate-key rules. Tool results and app-submitted tool arguments (assistant `tool_calls`, `role: tool`) are implemented (#53). The Alpha 2 contract for metadata and tool descriptions or schema text is frozen (#52) and **planned** for implementation (#54, #55); until then those forms are rejected. The slot-mode mechanism (redact versus detect-only) and the post-mutation revalidation hook are implemented and behavior-neutral for Alpha 1.
+Implemented for the Chat Completions text subset (#18): the matrix, the recursive unknown-field rejection, and the decoded-string and duplicate-key rules. Tool results and app-submitted tool arguments (assistant `tool_calls`, `role: tool`) are implemented (#53). Tool descriptions and schema text (#54: `tools`, `tool_choice`, `parallel_tool_calls`, `response_format.json_schema`) are implemented. The Alpha 2 contract for metadata is frozen (#52) and **planned** for implementation (#55); until then it is rejected. The slot-mode mechanism (redact versus detect-only) and the post-mutation revalidation hook are implemented and behavior-neutral for Alpha 1.

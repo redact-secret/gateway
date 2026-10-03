@@ -183,7 +183,7 @@ fn rows() -> Vec<Row> {
           r#"{"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[]}]}"#, Expect::Unsupported, None),
 
         // ---- Planned for #54: tools, tool_choice, response_format json_schema ----------
-        r(Class::Label, "tools[].function (name label, description text, parameters schema), tool_choice, parallel_tool_calls",
+        Row { implemented: true, ..r(Class::Label, "tools[].function (name label, description text, parameters schema), tool_choice, parallel_tool_calls",
           r#"{"model":"m","messages":[{"role":"user","content":"q"}],"tools":[{"type":"function","function":{"name":"get_weather","description":"Look up weather.","strict":true,"parameters":{"type":"object","properties":{"city":{"type":"string","description":"City name."}},"required":["city"],"additionalProperties":false}}}],"tool_choice":{"type":"function","function":{"name":"get_weather"}},"parallel_tool_calls":false}"#,
           ACC(vec![
               (msg(0), "q"),
@@ -193,11 +193,11 @@ fn rows() -> Vec<Row> {
               (TextSlot::ToolDefSchemaText { tool: 0, leaf: 1 }, "City name."),
               (TextSlot::ToolDefSchemaLabel { tool: 0, leaf: 2 }, "city"),
               (TextSlot::ToolChoiceName, "get_weather"),
-          ]), Some("#54")),
-        r(Class::Structural, "tool_choice string forms none, auto, required",
+          ]), Some("#54")) },
+        Row { implemented: true, ..r(Class::Structural, "tool_choice string forms none, auto, required",
           r#"{"model":"m","messages":[{"role":"user","content":"q"}],"tools":[{"type":"function","function":{"name":"f"}}],"tool_choice":"required"}"#,
-          ACC(vec![(msg(0), "q"), (TextSlot::ToolDefName { tool: 0 }, "f")]), Some("#54")),
-        r(Class::Label, "response_format json_schema (name label, description text, schema, strict)",
+          ACC(vec![(msg(0), "q"), (TextSlot::ToolDefName { tool: 0 }, "f")]), Some("#54")) },
+        Row { implemented: true, ..r(Class::Label, "response_format json_schema (name label, description text, schema, strict)",
           r#"{"model":"m","messages":[{"role":"user","content":"q"}],"response_format":{"type":"json_schema","json_schema":{"name":"answer","description":"The answer.","strict":true,"schema":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}}}}"#,
           ACC(vec![
               (msg(0), "q"),
@@ -205,7 +205,7 @@ fn rows() -> Vec<Row> {
               (TextSlot::ResponseSchemaDescription, "The answer."),
               (TextSlot::ResponseSchemaLabel { leaf: 0 }, "ok"),
               (TextSlot::ResponseSchemaLabel { leaf: 1 }, "ok"),
-          ]), Some("#54")),
+          ]), Some("#54")) },
         r(Class::Rejected, "tool_choice without tools",
           r#"{"model":"m","messages":[{"role":"user","content":"q"}],"tool_choice":"auto"}"#, Expect::Unsupported, None),
         r(Class::Rejected, "tool_choice naming an undeclared tool",
@@ -218,6 +218,15 @@ fn rows() -> Vec<Row> {
           r#"{"model":"m","messages":[{"role":"user","content":"q"}],"tools":[{"type":"function","function":{"name":"bad name!"}}]}"#, Expect::Unsupported, None),
         r(Class::Rejected, "tools[].type other than function",
           r#"{"model":"m","messages":[{"role":"user","content":"q"}],"tools":[{"type":"custom","custom":{"name":"f"}}]}"#, Expect::Unsupported, None),
+
+        r(Class::Rejected, "parallel_tool_calls without tools",
+          r#"{"model":"m","messages":[{"role":"user","content":"q"}],"parallel_tool_calls":true}"#, Expect::Unsupported, None),
+        r(Class::Rejected, "schema title, pattern, format, allOf (outside the subset)",
+          r#"{"model":"m","messages":[{"role":"user","content":"q"}],"response_format":{"type":"json_schema","json_schema":{"name":"n","schema":{"type":"object","title":"T"}}}}"#, Expect::Unsupported, None),
+        r(Class::Rejected, "json_schema without name or schema, or with an unknown key",
+          r#"{"model":"m","messages":[{"role":"user","content":"q"}],"response_format":{"type":"json_schema","json_schema":{"schema":{"type":"object"}}}}"#, Expect::Unsupported, None),
+        r(Class::Rejected, "schema property key outside the identifier charset",
+          r#"{"model":"m","messages":[{"role":"user","content":"q"}],"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object","properties":{"bad key":{"type":"string"}}}}}]}"#, Expect::Unsupported, None),
 
         // ---- Planned for #55: metadata -------------------------------------------------
         r(Class::Label, "metadata (key label, string value text)",
@@ -355,7 +364,6 @@ async fn check_target(owner: &str) {
 }
 
 #[tokio::test]
-#[ignore = "rejected-until-#54: remove this attribute when tool definitions and schemas land"]
 async fn target_rows_for_54_tool_definitions_and_schemas() {
     check_target("#54").await;
 }
