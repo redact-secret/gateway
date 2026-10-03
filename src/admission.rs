@@ -325,6 +325,10 @@ impl MemoryReservation {
 #[derive(Debug)]
 pub struct Admission {
     memory_total: u32,
+    receipt_total: u32,
+    inspection_total: u32,
+    upstream_total: u32,
+    stream_total: u32,
     waiting: Arc<AtomicU32>,
     receipt: Arc<Semaphore>,
     memory: Arc<Semaphore>,
@@ -351,6 +355,10 @@ impl Admission {
     pub fn new(plan: &CapacityPlan) -> Self {
         Self {
             memory_total: plan.memory_units.get(),
+            receipt_total: plan.receipt.get(),
+            inspection_total: plan.inspection.get(),
+            upstream_total: plan.upstream.get(),
+            stream_total: plan.stream.get(),
             waiting: Arc::new(AtomicU32::new(0)),
             receipt: sized(plan.receipt),
             memory: sized(plan.memory_units),
@@ -384,6 +392,22 @@ impl Admission {
             memory,
             body_cap,
         })
+    }
+
+    /// Current occupancy of every class and of the wait queue (counts only).
+    #[must_use]
+    pub fn load(&self) -> AdmissionLoad {
+        let used = |total: u32, free: &Semaphore| {
+            total.saturating_sub(u32::try_from(free.available_permits()).unwrap_or(u32::MAX))
+        };
+        AdmissionLoad {
+            receipt_in_use: used(self.receipt_total, &self.receipt),
+            memory_units_in_use: used(self.memory_total, &self.memory),
+            inspection_in_use: used(self.inspection_total, &self.inspection),
+            upstream_in_use: used(self.upstream_total, &self.upstream),
+            stream_in_use: used(self.stream_total, &self.stream),
+            waiting: self.waiting.load(Ordering::Acquire),
+        }
     }
 
     /// Total aggregate memory budget in units.
@@ -495,6 +519,25 @@ impl Admission {
     }
 }
 
+/// Point-in-time occupancy of the five capacities and the wait queue. Counts only: it names
+/// no request and carries no content. Each value is a separate relaxed read, so under load
+/// the fields are individually exact but not one atomic snapshot (#58 measurement aid).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AdmissionLoad {
+    /// Receipt permits held.
+    pub receipt_in_use: u32,
+    /// Memory units reserved.
+    pub memory_units_in_use: u32,
+    /// Inspection permits held: jobs queued plus running (ADR 0004).
+    pub inspection_in_use: u32,
+    /// Upstream permits held.
+    pub upstream_in_use: u32,
+    /// Stream permits held.
+    pub stream_in_use: u32,
+    /// Requests waiting for receipt and memory capacity right now.
+    pub waiting: u32,
+}
+
 /// Slot in the bounded admission wait queue. Released on drop.
 struct WaitSlot {
     waiting: Arc<AtomicU32>,
@@ -601,6 +644,38 @@ mod tests {
         assert!(a.try_upstream().is_ok());
         assert!(a.try_stream().is_ok());
         assert!(a.try_receipt().is_ok());
+    }
+
+    #[test]
+    fn load_counts_held_permits_and_returns_to_zero() {
+        let a = admission();
+        assert_eq!(a.load().inspection_in_use, 0);
+        let i = a.try_inspection().expect("free");
+        let m = a.try_reserve_memory(6).expect("fits");
+        let r = a.try_receipt().expect("free");
+        let load = a.load();
+        assert_eq!(
+            (
+                load.inspection_in_use,
+                load.memory_units_in_use,
+                load.receipt_in_use
+            ),
+            (1, 6, 1)
+        );
+        assert_eq!(
+            (load.upstream_in_use, load.stream_in_use, load.waiting),
+            (0, 0, 0)
+        );
+        drop((i, m, r));
+        let load = a.load();
+        assert_eq!(
+            (
+                load.inspection_in_use,
+                load.memory_units_in_use,
+                load.receipt_in_use
+            ),
+            (0, 0, 0)
+        );
     }
 
     #[test]

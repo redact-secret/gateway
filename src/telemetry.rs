@@ -135,12 +135,57 @@ impl StreamEnd {
     }
 }
 
-/// Count, total, and maximum of one stage. Saturating; never resets.
-#[derive(Debug, Default)]
+/// Histogram buckets per stage: exact for 0 to 3 microseconds, then four buckets per power
+/// of two (each at most 25% wide) up to `u64::MAX`. Fixed size, so memory stays bounded.
+const BUCKETS: usize = 252;
+
+/// Bucket index of `micros`. Monotonic, total over `u64`.
+fn bucket_of(micros: u64) -> usize {
+    if micros < 4 {
+        return usize::try_from(micros).unwrap_or(0);
+    }
+    let octave = 63_u32.saturating_sub(micros.leading_zeros());
+    let sub = (micros >> octave.saturating_sub(2)) & 3;
+    let index = u64::from(octave.saturating_sub(1))
+        .saturating_mul(4)
+        .saturating_add(sub);
+    usize::try_from(index)
+        .unwrap_or(BUCKETS - 1)
+        .min(BUCKETS - 1)
+}
+
+/// Largest microsecond value that falls in bucket `index` (the conservative edge).
+fn bucket_upper(index: usize) -> u64 {
+    if index < 4 {
+        return u64::try_from(index).unwrap_or(0);
+    }
+    let octave = u32::try_from(index / 4).unwrap_or(0).saturating_add(1);
+    let sub = u64::try_from(index % 4).unwrap_or(0);
+    let shift = octave.saturating_sub(2);
+    let next = sub.saturating_add(5);
+    next.checked_shl(shift)
+        .filter(|v| v >> shift == next)
+        .map_or(u64::MAX, |v| v.saturating_sub(1))
+}
+
+/// Count, total, maximum, and distribution of one stage. Saturating; never resets.
+#[derive(Debug)]
 struct StageCell {
     count: AtomicU64,
     total_micros: AtomicU64,
     max_micros: AtomicU64,
+    buckets: [AtomicU64; BUCKETS],
+}
+
+impl Default for StageCell {
+    fn default() -> Self {
+        Self {
+            count: AtomicU64::new(0),
+            total_micros: AtomicU64::new(0),
+            max_micros: AtomicU64::new(0),
+            buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+        }
+    }
 }
 
 /// A point-in-time copy of one stage's counters.
@@ -205,6 +250,25 @@ impl Metrics {
                 Some(t.saturating_add(micros))
             });
         cell.max_micros.fetch_max(micros, Ordering::Relaxed);
+        if let Some(bucket) = cell.buckets.get(bucket_of(micros)) {
+            bucket.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// The non-empty histogram buckets of `stage` as `(upper_edge_micros, count)`, ascending.
+    /// A percentile read from these is the bucket's upper edge: at most 25% above the true
+    /// value, never below it (#58). Counts only.
+    #[must_use]
+    pub fn histogram(&self, stage: Stage) -> Vec<(u64, u64)> {
+        self.cell(stage)
+            .buckets
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| {
+                let n = b.load(Ordering::Relaxed);
+                (n > 0).then(|| (bucket_upper(i), n))
+            })
+            .collect()
     }
 
     #[must_use]
@@ -320,6 +384,39 @@ mod tests {
         assert_eq!(m.stage(Stage::Inspection).count, 0);
         m.note_upstream_attempt();
         assert_eq!(m.upstream_attempts(), 1);
+    }
+
+    #[test]
+    fn histogram_buckets_cover_every_value_within_a_quarter() {
+        use super::{BUCKETS, bucket_of, bucket_upper};
+        let mut last = 0;
+        for v in (0..5_000_u64).chain([1 << 20, (1 << 20) + 1, u64::MAX / 2, u64::MAX]) {
+            let i = bucket_of(v);
+            assert!(i < BUCKETS, "in range");
+            if v < 5_000 {
+                assert!(i >= last, "monotonic");
+                last = i;
+            }
+            let upper = bucket_upper(i);
+            assert!(upper >= v, "{v} fits under its bucket edge {upper}");
+            if (4..(1 << 62)).contains(&v) {
+                assert!(upper - v <= v / 4 + 1, "{v}: edge {upper} within 25%");
+            }
+        }
+        assert_eq!(bucket_of(u64::MAX), BUCKETS - 1);
+    }
+
+    #[test]
+    fn histogram_counts_each_observation_once() {
+        let m = Metrics::new();
+        for v in [1_u64, 1, 50, 5_000] {
+            m.record(Stage::Inspection, Duration::from_micros(v));
+        }
+        let h = m.histogram(Stage::Inspection);
+        assert_eq!(h.iter().map(|(_, n)| n).sum::<u64>(), 4);
+        assert_eq!(h.first(), Some(&(1, 2)));
+        assert!(h.windows(2).all(|w| w[0].0 < w[1].0), "ascending");
+        assert!(m.histogram(Stage::Parse).is_empty());
     }
 
     #[test]

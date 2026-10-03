@@ -21,12 +21,13 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+use crate::admission::Admission;
 use crate::config::{self, RuntimePlan};
 use crate::server::{self, Services, ShutdownSignal, StartupError};
 use crate::telemetry::{Metrics, Stage, StreamEnd};
@@ -99,10 +100,17 @@ async fn run_server(plan: Arc<RuntimePlan>, fake: SocketAddr) -> Result<(), Star
     let signals = ShutdownSignal::install()?;
     let metrics = Arc::new(Metrics::new());
     let for_init = Arc::clone(&metrics);
+    // Occupancy observer for the load measurements (#58): counts only, no request data.
+    let observed: Arc<Mutex<Option<Arc<Admission>>>> = Arc::new(Mutex::new(None));
+    let observed_init = Arc::clone(&observed);
     let bound = server::bind(plan, move |plan| {
         let upstream = Upstream::from_plan_with_fake_provider(plan, fake)
             .map_err(|_| StartupError::Init)?;
-        Services::init_with(plan, upstream, for_init)
+        let services = Services::init_with(plan, upstream, for_init)?;
+        if let Ok(mut slot) = observed_init.lock() {
+            *slot = Some(services.admission());
+        }
+        Ok(services)
     })
     .await?;
     eprintln!(
@@ -125,7 +133,7 @@ async fn run_server(plan: Arc<RuntimePlan>, fake: SocketAddr) -> Result<(), Star
             return Err(StartupError::Serve);
         }
     }
-    let metrics_task = tokio::spawn(serve_metrics(metrics_listener, metrics));
+    let metrics_task = tokio::spawn(serve_metrics(metrics_listener, metrics, observed));
     let result = bound.serve(signals.recv()).await;
     metrics_task.abort();
     result?;
@@ -135,10 +143,34 @@ async fn run_server(plan: Arc<RuntimePlan>, fake: SocketAddr) -> Result<(), Star
 
 fn stage_json(metrics: &Metrics, stage: Stage) -> Value {
     let s = metrics.stage(stage);
-    json!({"count": s.count, "total_us": s.total_micros, "max_us": s.max_micros})
+    let hist: Vec<Value> = metrics
+        .histogram(stage)
+        .into_iter()
+        .map(|(upper, n)| json!([upper, n]))
+        .collect();
+    json!({"count": s.count, "total_us": s.total_micros, "max_us": s.max_micros, "hist": hist})
 }
 
-fn snapshot(metrics: &Metrics) -> Value {
+fn admission_json(observed: &Mutex<Option<Arc<Admission>>>) -> Value {
+    let load = observed
+        .lock()
+        .ok()
+        .and_then(|slot| slot.as_ref().map(|a| (a.load(), a.memory_total_units())));
+    match load {
+        Some((l, memory_total)) => json!({
+            "receipt_in_use": l.receipt_in_use,
+            "memory_units_in_use": l.memory_units_in_use,
+            "memory_units_total": memory_total,
+            "inspection_in_use": l.inspection_in_use,
+            "upstream_in_use": l.upstream_in_use,
+            "stream_in_use": l.stream_in_use,
+            "waiting": l.waiting,
+        }),
+        None => Value::Null,
+    }
+}
+
+fn snapshot(metrics: &Metrics, observed: &Mutex<Option<Arc<Admission>>>) -> Value {
     let ends = [
         ("completed", StreamEnd::Completed),
         ("upstream_error", StreamEnd::UpstreamError),
@@ -171,6 +203,7 @@ fn snapshot(metrics: &Metrics) -> Value {
         "stream_bytes": metrics.stream_bytes(),
         "stream_buffered_now": metrics.stream_buffered(),
         "stream_buffered_peak": metrics.stream_buffered_peak(),
+        "admission": admission_json(observed),
         "rss_peak_kb": peak_rss_kb(),
         "marker": MARKER,
     })
@@ -187,14 +220,18 @@ fn peak_rss_kb() -> Option<u64> {
         .and_then(|n| n.parse().ok())
 }
 
-async fn serve_metrics(listener: TcpListener, metrics: Arc<Metrics>) {
+async fn serve_metrics(
+    listener: TcpListener,
+    metrics: Arc<Metrics>,
+    observed: Arc<Mutex<Option<Arc<Admission>>>>,
+) {
     loop {
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
         let mut buf = [0_u8; 1024];
         let _ = socket.read(&mut buf).await;
-        let body = snapshot(&metrics).to_string();
+        let body = snapshot(&metrics, &observed).to_string();
         let head = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
