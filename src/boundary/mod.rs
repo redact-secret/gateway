@@ -24,7 +24,7 @@ use crate::core_bridge::{
     CompleteInspection, CoreBridgeError, Inspector, InspectorSpec, RequestScope,
 };
 use crate::protocol::ValidatedRequest;
-use crate::protocol::chat::SerializeError;
+use crate::protocol::chat::{SerializeError, SlotMode};
 use crate::telemetry::{Metrics, SafeCode, Stage};
 
 /// Most inspection worker threads, whatever the configured inspection capacity.
@@ -179,25 +179,42 @@ fn inspect_request(
 ) -> Result<(ValidatedRequest, CompleteInspection), BoundaryError> {
     // `model` is a validated identifier that is never rewritten; any finding rejects.
     inspector.reject_if_findings(validated.chat().model())?;
-    let expected = validated.chat().text_count();
+    let expected_redact = validated.chat().redactable_count();
+    let expected_all = validated.chat().text_count();
     let mut scope = RequestScope::new(spec);
     let mut failure: Option<CoreBridgeError> = None;
-    validated.chat_mut().for_each_text_mut(|_slot, text| {
+    let mut visited = 0_usize;
+    validated.chat_mut().for_each_text_mut(|slot, text| {
         if failure.is_some() {
             return;
         }
-        match inspector.inspect_text(&mut scope, text) {
-            Ok(redacted) => *text = redacted.into_string(),
-            Err(e) => failure = Some(e),
+        visited = visited.saturating_add(1);
+        match slot.mode() {
+            // Structural labels (identifiers, keys, enum values) are never rewritten:
+            // any finding blocks the request (ADR 0025).
+            SlotMode::DetectOnly => {
+                if let Err(e) = inspector.reject_if_findings(text) {
+                    failure = Some(e);
+                }
+            }
+            SlotMode::Redact => match inspector.inspect_text(&mut scope, text) {
+                Ok(redacted) => *text = redacted.into_string(),
+                Err(e) => failure = Some(e),
+            },
         }
     });
     if let Some(e) = failure {
         return Err(e.into());
     }
     // Every allowed text must have been inspected, no more and no fewer.
-    if scope.summary().leaves != expected {
+    if visited != expected_all || scope.summary().leaves != expected_redact {
         return Err(CoreBridgeError::Incomplete.into());
     }
+    // Replacement can break bounds or derived structure; fail closed before serializing.
+    validated.chat().revalidate().map_err(|e| match e {
+        SerializeError::Limit => BoundaryError::OutputLimit,
+        SerializeError::Invalid => BoundaryError::Serialization,
+    })?;
     let bound = max_output.min(reserved_bytes(&validated));
     let serializing = std::time::Instant::now();
     let output = validated
