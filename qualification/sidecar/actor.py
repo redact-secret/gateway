@@ -184,23 +184,18 @@ if __name__ == '__main__':
     elif mode == 'snapshot':
         print(json.dumps({'gateway': get('/metrics'), 'provider': get('/stats', 9000)}))
     elif mode == 'reject':
-        before = get('/stats', 9000)['body']['requests']
         assert call(invalid=True)['status'] == 422
         assert call(auth=False)['status'] == 401
         assert call(auth='wrong')['status'] == 401
         assert call(duplicate='X-Gateway-Local-Token')['status']==401
         assert call(duplicate='Authorization')['status']==400
-        after = get('/stats', 9000)['body']['requests']
-        assert before == after
-        print(json.dumps({'unsupported_status': 422, 'missing_token_status': 401, 'duplicate_local_token_status':401,'duplicate_provider_auth_status':400, 'upstream_delivery_delta': 0}))
+        print(json.dumps({'unsupported_status': 422, 'missing_token_status': 401, 'duplicate_local_token_status':401,'duplicate_provider_auth_status':400}))
     elif mode == 'single':
         print(json.dumps(call()))
     elif mode == 'retry-ambiguity':
-        before=get('/stats',9000)['body']['requests']
         results=[call(shape='stall-json') for _ in range(2)]
-        delivered=get('/stats',9000)['body']['requests']-before
-        assert all(row['status']==504 for row in results) and delivered==2
-        print(json.dumps({'statuses':[row['status'] for row in results],'explicit_client_retries':1,'provider_deliveries':delivered,'gateway_automatic_retries':0,'exactly_once_claim':False}))
+        assert all(row['status']==504 for row in results)
+        print(json.dumps({'statuses':[row['status'] for row in results],'explicit_client_retries':1,'gateway_automatic_retries':0,'exactly_once_claim':False}))
     elif mode == 'json-stall':
         print(json.dumps(call(shape='stall-json')))
     elif mode == 'stall':

@@ -68,7 +68,7 @@ def wait_pod(name, ready=True, seconds=180):
 
 
 def actor(pod, mode, *args, timeout=180):
-    return json.loads(kube('exec', pod, '-c', 'app', '--', 'python', '/tools/actor.py', mode, *map(str, args), timeout=timeout))
+    return json.loads(kube('exec', pod, '-c', 'synthetic-provider' if mode=='snapshot' else 'app', '--', 'python', '/tools/actor.py', mode, *map(str, args), timeout=timeout))
 
 
 def pod_spec(name, image, qualified=False, enforced=False, cpu='1', memory='256Mi', failure=None):
@@ -303,7 +303,7 @@ def shipped_manifest():
 
 def start_egress_watch(pod):
     info=json.loads(kube('get','pod',pod,'-o','json'))
-    process=subprocess.Popen(['kubectl','--context','kind-'+CLUSTER,'-n',NS,'exec',pod,'-c','app','--','python','/tools/actor.py','watch-egress',info['status']['podIP'],'fd00:be7a:2::1'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    process=subprocess.Popen(['kubectl','--context','kind-'+CLUSTER,'-n',NS,'exec',pod,'-c','app','--','python','/tools/actor.py','watch-egress',info['status']['podIP'],'fd00:be7a:2::1','127.0.0.1','::1'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
     with selectors.DefaultSelector() as selector:
         selector.register(process.stdout,selectors.EVENT_READ)
         if not selector.select(timeout=10):
@@ -473,9 +473,16 @@ def main():
         ipv6_control=json.loads(kube('exec',name,'-c','synthetic-provider','--','python','-c','import socket,json;socket.create_connection(("fd00:be7a:2::1",9000),2).close();print(json.dumps({"ipv6_control_reachable":True}))'))
         assert ipv6_control['ipv6_control_reachable'] is True
         assert actor(name,'direct','fd00:be7a:2::1')['direct_reachable'] is False
-        egress_rows.append({'cpu':cpu,'operator_completed':True,'direct_ipv4_denied':True,'direct_ipv6_denied':True,'ipv6_control_reachable':True})
+        assert actor(name,'direct','127.0.0.1')['direct_reachable'] is False
+        assert actor(name,'direct','::1')['direct_reachable'] is False
+        egress_rows.append({'direct_loopback_provider_ports_denied':True,'cpu':cpu,'operator_completed':True,'direct_ipv4_denied':True,'direct_ipv6_denied':True,'ipv6_control_reachable':True})
         evidence('mandatory-egress',egress_rows)
-        assert actor(name,'reject')['upstream_delivery_delta'] == 0
+        rejected_before=actor(name,'snapshot')['provider']['body']['requests']
+        rejected=actor(name,'reject')
+        rejected_after=actor(name,'snapshot')['provider']['body']['requests']
+        assert rejected_after==rejected_before
+        rejected['upstream_delivery_delta']=0
+        evidence(name+'-reject',rejected)
         for size in [1024,16384,65536]:
             for clients in [1,8,32]:
                 before = {'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')}
@@ -500,7 +507,12 @@ def main():
     name='quota-1'
     stage('declared-soak')
     duration=int(os.environ.get('BETA2_SOAK_SECONDS','600'))
-    evidence('retry-ambiguity',actor(name,'retry-ambiguity',timeout=30))
+    retry_before=actor(name,'snapshot')['provider']['body']['requests']
+    ambiguity=actor(name,'retry-ambiguity',timeout=30)
+    retry_after=actor(name,'snapshot')['provider']['body']['requests']
+    assert retry_after-retry_before==2
+    ambiguity['provider_deliveries']=2
+    evidence('retry-ambiguity',ambiguity)
     stalls=actor(name,'stall',timeout=60)
     evidence('stalled-provider',stalls)
     assert stalls['json']['status']==504 and stalls['sse']['terminal'] is False

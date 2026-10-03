@@ -52,7 +52,9 @@ An optional, separately tested operator profile may run an initial NET_ADMIN
 installer before the native Gateway sidecar and application. Its own dedicated
 operator image and administrator privilege are outside the default install.
 The installer inserts IPv4 AND IPv6 OUTPUT owner rules: app UID 10001 may use
-loopback; every other destination, including DNS and metadata, is rejected.
+TCP to `127.0.0.1:8787` / `[::1]:8787` only. All other destinations and
+ports, including other loopback services, DNS and metadata, are rejected.
+Changing the listener address/port requires a reviewed matching operator policy.
 Gateway UID 65532 uses the reviewed resolver/address/TLS policy. Installer
 failure must prevent app startup. Container restarts retain sandbox rules;
 new Pods rerun the installer before either workload starts. No process with
