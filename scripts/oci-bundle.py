@@ -64,9 +64,12 @@ def assemble(output, archives):
              "manifests": sorted(manifests, key=lambda item: item["platform"]["architecture"])}
     index_bytes = encoded(index)
     index_descriptor = put(index_bytes, index["mediaType"])
-    (output / "index.json").write_bytes(index_bytes)
+    # A layout can hold several named images. Expose one named multi-platform
+    # image, so standard OCI consumers resolve its inner index by architecture.
+    reference = {**index_descriptor, "annotations": {"org.opencontainers.image.ref.name": "candidate"}}
+    (output / "index.json").write_bytes(encoded({"schemaVersion": 2, "manifests": [reference]}))
     (output / "oci-layout").write_bytes(encoded({"imageLayoutVersion": "1.0.0"}))
-    return {"index": index_descriptor, "variants": index["manifests"], "published": False}
+    return {"index": index_descriptor, "variants": index["manifests"], "layout_reference": "candidate", "published": False}
 
 
 if __name__ == "__main__":

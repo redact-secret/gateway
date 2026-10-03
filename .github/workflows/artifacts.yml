@@ -298,6 +298,9 @@ jobs:
           set -eu
           python3 scripts/test-oci-bundle.py
           python3 scripts/oci-bundle.py oci-layout bundle/redact-secret-gateway-candidate-image-linux-amd64.tar bundle/redact-secret-gateway-candidate-image-linux-arm64.tar > bundle/oci-index-info.json
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y skopeo=1.13.3+ds1-2ubuntu0.24.04.3
+          python3 scripts/verify-oci-consumer.py oci-layout bundle/oci-index-info.json
           tar -cf bundle/redact-secret-gateway-candidate-image-linux-multiarch.oci.tar -C oci-layout .
       - name: Generate manifest.json and SHA256SUMS
         run: sh scripts/candidate-manifest.sh bundle

@@ -40,7 +40,13 @@ class BundleTests(unittest.TestCase):
             self.assertEqual([v["platform"]["architecture"] for v in report["variants"]], ["amd64", "arm64"])
             for blob in (root / "layout" / "blobs" / "sha256").iterdir():
                 self.assertEqual(hashlib.sha256(blob.read_bytes()).hexdigest(), blob.name)
-            self.assertEqual(report["index"]["digest"], "sha256:" + hashlib.sha256((root / "layout" / "index.json").read_bytes()).hexdigest())
+            layout = json.loads((root / "layout" / "index.json").read_bytes())
+            self.assertEqual(len(layout["manifests"]), 1)
+            named = layout["manifests"][0]
+            self.assertEqual(named["annotations"]["org.opencontainers.image.ref.name"], "candidate")
+            self.assertEqual(named["digest"], report["index"]["digest"])
+            multi = json.loads((root / "layout" / "blobs" / "sha256" / named["digest"].split(":")[1]).read_bytes())
+            self.assertEqual(multi["manifests"], report["variants"])
 
     def test_duplicate_platform_and_wrong_root_hash_are_refused(self):
         for duplicate in (True, False):
