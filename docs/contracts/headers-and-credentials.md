@@ -1,6 +1,6 @@
 # Contract: headers, framing, and provider credentials
 
-Status: implemented for inbound vetting, the request-local credential, outbound wire-header construction, and the response-header allowlist (#24, [ADR 0016](../decisions/0016-header-allowlists-and-request-local-credentials.md)). Sending the request and relaying ordinary JSON responses is implemented (#20, [ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md)). **Planned:** SSE relay (#21) and the local caller token (Beta 1 #12). Code: `src/transport/headers.rs`, `src/transport/credential.rs`, `Upstream::outbound`.
+Status: implemented for inbound vetting, the request-local credential, outbound wire-header construction, and the response-header allowlist (#24, [ADR 0016](../decisions/0016-header-allowlists-and-request-local-credentials.md)). Sending the request and relaying ordinary JSON responses is implemented (#20, [ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md)). **Planned:** the local caller token (Beta 1 #12), frozen in [local-caller-auth](local-caller-auth.md) ([ADR 0030](../decisions/0030-local-caller-auth-listener-health.md), #61) and enforced by #63. Code: `src/transport/headers.rs`, `src/transport/credential.rs`, `Upstream::outbound`.
 
 ## Principles
 
@@ -48,9 +48,9 @@ There is no `Transfer-Encoding`, `Connection`, `Expect`, `Upgrade`, `TE`, `Trail
 - It is forwarded only to the destination chosen by `RouteId` from the reviewed table. Content-profile changes cannot alter header policy, `Host`, TLS, or origin (tested).
 - Secure erasure is **not** promised (SECURITY.md, ADR 0007): copies may remain in allocator, HTTP, and TLS buffers.
 
-## Local gateway authority (reserved, Beta 1 #12)
+## Local gateway authority (frozen design, planned: #63)
 
-A caller token proving the caller may use the gateway is a separate concept. The header name is not fixed yet; the reserved namespace is `X-Gateway-Local-*` (`LOCAL_AUTHORITY_PREFIX`). Requirements on #12: its own type and module, never accepted as the provider credential, consumed locally, and never forwarded. Today any such header is ignored and cannot reach the wire (the outbound set is an allowlist). It must not use `Authorization`, which is the provider credential.
+A caller token proving the caller may use the gateway is a separate concept and is specified in [local-caller-auth](local-caller-auth.md) ([ADR 0030](../decisions/0030-local-caller-auth-listener-health.md)). The header is `X-Gateway-Local-Token` inside the reserved `X-Gateway-Local-*` namespace (`LOCAL_AUTHORITY_PREFIX`); it has its own type and module, is never accepted as the provider credential, is consumed locally, and is never forwarded. It does not use `Authorization`, which stays the provider credential. **Today nothing enforces it:** every `X-Gateway-Local-*` header, including `X-Gateway-Local-Token`, is ignored and cannot reach the wire (the outbound set is an allowlist). When #63 lands, a missing or invalid token is `401 local_auth_required` / `local_auth_invalid` before any body read, and `vet_inbound` runs only for authenticated requests.
 
 ## Framing and malformed-header outcomes
 

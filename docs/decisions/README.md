@@ -43,6 +43,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0027](0027-write-budget-and-bounded-response-frames.md) | Cumulative write budget and bounded response frames | Accepted; implemented (#59) | #59 |
 | [0028](0028-aggregate-load-qualification.md) | Aggregate load qualification: measurement aids, findings, no change to defaults | Accepted; measured, decision recorded (figures provisional) | #58 |
 | [0029](0029-schema-title-keyword.md) | Admit the `title` schema keyword as inspected free text | Accepted | #57 |
+| [0030](0030-local-caller-auth-listener-health.md) | Local caller token, listener and health authority: header, syntax, comparison, secret references, ordering, listener combinations | Accepted (design); contract frozen, planned (not implemented) | #61 (then #63, #86, #62, #64, #65) |
 
 ## Contracts
 
@@ -57,6 +58,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [errors-and-telemetry](../contracts/errors-and-telemetry.md) | Safe error code taxonomy and telemetry exclusions |
 | [upstream-destinations](../contracts/upstream-destinations.md) | Fixed HTTPS destinations, client hardening, address policy, test-seam isolation |
 | [headers-and-credentials](../contracts/headers-and-credentials.md) | Header allowlists, request-local provider credential, framing, response headers, reserved local authority |
+| [local-caller-auth](../contracts/local-caller-auth.md) | Planned (frozen design, #61): local caller token header, syntax, comparison, secret references, ordering, listener combinations, health authority |
 
 ## Template
 
