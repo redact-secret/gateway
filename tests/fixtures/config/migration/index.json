@@ -1,0 +1,65 @@
+{
+  "comment": "Upgrade and rollback fixtures for #64 (docs/contracts/config-upgrade-rollback.md). Every file is synthetic and carries token references only. alpha/ files are what an Alpha 1 era build (before #63) accepted; beta/ files are what the current build accepts. Each upgrade pair must load through the real loader at both ends or, where the Alpha file is rejected by the Beta loader, say so explicitly.",
+  "alpha_loads_unchanged": [
+    "alpha/loopback-openai.json"
+  ],
+  "upgrades": [
+    {
+      "id": "loopback-keep-address-only",
+      "from": "alpha/loopback-openai.json",
+      "to": "beta/loopback-openai-disabled-explicit.json",
+      "change": "add deployment.local_auth {mode: disabled}; optional, behaviorally identical",
+      "adds_auth": false
+    },
+    {
+      "id": "loopback-adopt-token",
+      "from": "alpha/loopback-openai.json",
+      "to": "beta/loopback-openai-token-env.json",
+      "change": "add deployment.local_auth {mode: token, token: {env}}; application must send X-Gateway-Local-Token",
+      "adds_auth": true
+    },
+    {
+      "id": "container-non-loopback",
+      "from": "alpha/container-non-loopback.json",
+      "to": "beta/container-token-file.json",
+      "change": "non-loopback with allow_non_loopback now requires local_auth.mode token (tightening, ADR 0032 amendment); add a token file reference",
+      "adds_auth": true,
+      "alpha_rejected_by_beta": {
+        "kind": "invalid_combination",
+        "location": "deployment.local_auth.mode"
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "file": "rejected/newer-schema-version.json",
+      "kind": "unsupported_schema_version",
+      "location": "schema_version",
+      "why": "a newer schema version is never read as version 1"
+    },
+    {
+      "file": "rejected/older-schema-version.json",
+      "kind": "unsupported_schema_version",
+      "location": "schema_version",
+      "why": "version 0 never existed as a supported contract"
+    },
+    {
+      "file": "rejected/future-key-under-local-auth.json",
+      "kind": "unknown_field",
+      "location": "deployment.local_auth",
+      "why": "stand-in for a key a later build adds: an older build rejects it, so rollback cannot silently drop the setting"
+    },
+    {
+      "file": "rejected/alpha-with-inline-credential.json",
+      "kind": "unknown_field",
+      "location": "deployment.upstream",
+      "why": "a provider credential in configuration is not a supported key in any version"
+    },
+    {
+      "file": "rejected/beta-alpha-non-loopback-no-auth.json",
+      "kind": "invalid_combination",
+      "location": "deployment.local_auth.mode",
+      "why": "non-loopback listener without a token is unsupported in the Beta line"
+    }
+  ]
+}

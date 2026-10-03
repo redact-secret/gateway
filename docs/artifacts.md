@@ -65,6 +65,10 @@ A workflow step asserts those fields (`distributable` false, proxy capability, p
 - Compose: `examples/compose/compose.yaml` (single service, loopback-published port, the token as a Compose secret from `GATEWAY_LOCAL_TOKEN_FILE`).
 - Image name: `redact-secret-gateway:candidate` is a local name. The registry and image name are to be selected; nothing is pushed.
 
+## Upgrade and rollback
+
+Config upgrades from Alpha shapes, rollback pairs and the restart-only activation rule are in [config-upgrade-rollback](contracts/config-upgrade-rollback.md). The candidate image is unpublished; no compatibility between images is promised yet.
+
 ## Release gating
 
 Artifact distribution is gated and nothing is published. Before any publication:

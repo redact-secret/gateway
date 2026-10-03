@@ -13,7 +13,7 @@ Status: implemented (#4 loopback health, #18 to #25 the Chat Completions proxy).
 
 Exit codes: 0 success, 1 validation/startup/runtime failure, 2 usage error. Arguments, paths, and file content are never echoed. There are no environment-variable settings, and no proxy settings are inherited.
 
-Configuration is static: it is read once at startup and restart-activated. There is no hot reload, no per-request config read, and no request-time policy selection.
+Configuration is static: it is read once at startup and restart-activated. There is no hot reload, no per-request config read, and no request-time policy selection. Upgrade, rollback, failed-start behavior and token-change steps are in [config-upgrade-rollback](contracts/config-upgrade-rollback.md) (#64).
 
 ## Machine-readable schema
 
