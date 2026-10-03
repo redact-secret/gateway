@@ -33,9 +33,11 @@ def stage(name):
     print('beta2 stage: '+name,flush=True)
 
 
-def command(*args, data=None, timeout=180):
+def command(*args, data=None, timeout=180, diagnostic=False):
     result = subprocess.run(args, input=data, capture_output=True, text=True, timeout=timeout, cwd=ROOT)
     if result.returncode:
+        if diagnostic:
+            print('safe OS-counter helper diagnostic: '+result.stderr[-2000:],file=sys.stderr,flush=True)
         # Commands include no live credential; suppress subprocess output to avoid
         # accidentally dumping objects containing the throwaway Secret.
         raise RuntimeError(f'qualification command failed: {args[0]} (exit {result.returncode})')
@@ -145,8 +147,8 @@ print(json.dumps({'pid':pid,'rss_kib':int(status.get('VmRSS','0 kB').split()[0])
     # kind nodes have no Python assumption: read host-visible proc/cgroup through
     # a transient pinned helper sharing node PID/cgroup namespaces, read-only.
     raw = command('docker', 'run', '--rm', '--pid', 'container:' + node, '--cgroupns', 'host',
-                  '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--cap-add', 'SYS_PTRACE', '--security-opt', 'no-new-privileges',
-                  '-e', f'GATEWAY_PID={pid}', HELPER, 'python', '-c', script)
+                  '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--cap-add', 'SYS_PTRACE', '--security-opt', 'apparmor=unconfined', '--security-opt', 'no-new-privileges',
+                  '-e', f'GATEWAY_PID={pid}', HELPER, 'python', '-c', script, diagnostic=True)
     result=json.loads(raw)
     assert result['identity']['Uid'].split()==['65532']*4
     assert int(result['identity']['CapEff'],16)==0 and result['identity']['NoNewPrivs']=='1' and result['identity']['Seccomp']=='2'
@@ -219,7 +221,7 @@ def tls_cases():
             installer={'name':'operator-addresses','image':'rsg-beta2-operator:local','imagePullPolicy':'Never',
                 'command':['/bin/sh','-ec',aliases],
                 'securityContext':{**context,'runAsNonRoot':False,'runAsUser':0,'runAsGroup':0,'capabilities':{'drop':['ALL'],'add':['NET_ADMIN']}}}
-            provider={'name':'synthetic-tls-provider','image':HELPER,'restartPolicy':'Always',
+            provider={'name':'synthetic-tls-provider','image':HELPER,'imagePullPolicy':'Never','restartPolicy':'Always',
                 'command':['python','/tls-tools/tls_stand_in.py','serve','--cert','/certs/leaf.pem','--key','/certs/leaf.key','--ipv6'],
                 'securityContext':{**context,'runAsUser':20001,'runAsGroup':20001,'capabilities':{'drop':['ALL'],'add':['NET_BIND_SERVICE']}},
                 'startupProbe':{'exec':{'command':['python','/tls-tools/tls_stand_in.py','sync']},'periodSeconds':1,'timeoutSeconds':3,'failureThreshold':30},
@@ -275,6 +277,41 @@ def shipped_manifest():
         'qualification_adaptations':['local candidate image reference','pinned helper application and tool mount','same synthetic Secret under local-token name'],
         'pod_status':pod['status'],'app_identity':identity,'gateway_runtime':runtime_sample(name)})
     kube('delete','deployment','gateway-companion','--wait=true')
+
+
+def rolling_replacement():
+    template=pod_spec('rolling','rsg-beta2-qualification:local',qualified=True,enforced=True)
+    spec=template['spec']
+    apply({'apiVersion':'apps/v1','kind':'Deployment','metadata':{'name':'qualified-rolling'},
+        'spec':{'replicas':1,'selector':{'matchLabels':{'app':'qualified-rolling'}},
+        'template':{'metadata':{'labels':{'app':'qualified-rolling'}},'spec':spec}}})
+    kube('rollout','status','deployment/qualified-rolling','--timeout=180s',timeout=200)
+    old=json.loads(kube('get','pods','-l','app=qualified-rolling','-o','json'))['items'][0]
+    name=old['metadata']['name']
+    clients=[]
+    for mode in ['stream','json-stall']:
+        clients.append(subprocess.Popen(['kubectl','--context','kind-'+CLUSTER,'-n',NS,'exec',name,'-c','app','--','python','/tools/actor.py',mode],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True))
+    deadline=time.monotonic()+10
+    while actor(name,'snapshot')['provider']['body']['active']<2:
+        if time.monotonic()>deadline: raise RuntimeError('rolling active request barrier exceeded')
+        time.sleep(0.1)
+    started=time.monotonic()
+    kube('rollout','restart','deployment/qualified-rolling')
+    kube('rollout','status','deployment/qualified-rolling','--timeout=180s',timeout=200)
+    new=next(p for p in json.loads(kube('get','pods','-l','app=qualified-rolling','-o','json'))['items'] if p['metadata']['uid']!=old['metadata']['uid'] and not p['metadata'].get('deletionTimestamp'))
+    recovered=wait_pod(new['metadata']['name'])
+    assert actor(new['metadata']['name'],'direct',recovered['status']['podIP'])['direct_reachable'] is False
+    assert actor(new['metadata']['name'],'load',3,1,1024)['statuses'].get('200',0)>0
+    outcomes=[]
+    for process in clients:
+        output,_=process.communicate(timeout=30)
+        result=json.loads(output) if output.strip() else None
+        if result: assert result['terminal'] is False
+        outcomes.append({'client_exit':process.returncode,'aggregate_result':result,'automatic_retry':False})
+    evidence('rolling-replacement',{'old_uid':old['metadata']['uid'],'new_uid':new['metadata']['uid'],
+        'elapsed_seconds':time.monotonic()-started,'active_json_and_sse':outcomes,
+        'direct_egress_denied':True,'mediated_traffic_succeeded':True})
+    kube('delete','deployment','qualified-rolling','--wait=true')
 
 
 def main():
@@ -432,6 +469,8 @@ def main():
     assert actor('replacement','direct',replacement['status']['podIP'])['direct_reachable'] is False
     assert actor('replacement','load',3,1,1024)['statuses'].get('200',0)>0
     evidence('replacement',{'direct_egress_denied':True,'mediated_traffic_succeeded':True})
+    stage('active-json-sse-rolling-replacement')
+    rolling_replacement()
     stage('memory-limit-termination-and-recovery')
     apply(pod_spec('oom','rsg-beta2-candidate:local',memory='4Mi'))
     deadline=time.monotonic()+120

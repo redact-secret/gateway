@@ -158,6 +158,8 @@ if __name__ == '__main__':
                 super().server_bind()
         DualStack(('::', 9000), Provider).serve_forever()
     elif mode == 'idle':
+        import signal
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         print('application-started-after-gateway-startup-probe', flush=True)
         while True:
             time.sleep(30)
@@ -175,6 +177,8 @@ if __name__ == '__main__':
         print(json.dumps({'unsupported_status': 422, 'missing_token_status': 401, 'upstream_delivery_delta': 0}))
     elif mode == 'single':
         print(json.dumps(call()))
+    elif mode == 'json-stall':
+        print(json.dumps(call(shape='stall-json')))
     elif mode == 'stall':
         print(json.dumps({'json':call(shape='stall-json'),'sse':call(stream=True,shape='stall-sse')}))
     elif mode in ('cancel', 'slow', 'stream'):
