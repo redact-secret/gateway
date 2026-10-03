@@ -326,18 +326,29 @@ async fn main() {
     let small = body_of(SMALL);
     let large = body_of(LARGE);
     let mut configs: Vec<Config> = Vec::new();
-    for (label, body, seq_n) in [("small_4KiB", &small, it(3000)), ("large_384KiB", &large, it(300))] {
+    for (label, body, seq_n) in [
+        ("small_4KiB", &small, it(3000)),
+        ("large_384KiB", &large, it(300)),
+    ] {
         for (shape, clients, per) in [("sequential", 1, seq_n), ("concurrent8", 8, seq_n / 4)] {
             let post = |close: bool| request_bytes("POST", "/echo", body, close);
             configs.push(Config {
                 name: format!("surrogate_keepalive/{label}/{shape}"),
-                target: Arc::new(Target { addr: ka, req: post(false), reuse: true }),
+                target: Arc::new(Target {
+                    addr: ka,
+                    req: post(false),
+                    reuse: true,
+                }),
                 clients,
                 per_client: per,
             });
             configs.push(Config {
                 name: format!("surrogate_close/{label}/{shape}"),
-                target: Arc::new(Target { addr: cl, req: post(false), reuse: false }),
+                target: Arc::new(Target {
+                    addr: cl,
+                    req: post(false),
+                    reuse: false,
+                }),
                 clients,
                 per_client: per,
             });

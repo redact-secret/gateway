@@ -114,7 +114,10 @@ fn make_pki() -> Pki {
     }
 }
 
-fn client_config(pki: &Pki, versions: &[&'static rustls::SupportedProtocolVersion]) -> Arc<ClientConfig> {
+fn client_config(
+    pki: &Pki,
+    versions: &[&'static rustls::SupportedProtocolVersion],
+) -> Arc<ClientConfig> {
     let mut roots = RootCertStore::empty();
     roots
         .add(CertificateDer::from(pki.ca_der.clone()))

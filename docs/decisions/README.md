@@ -37,6 +37,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0020](0020-sdk-qualification-test-build.md) | SDK qualification through a separate non-release test build | Accepted by the maintainer; implemented (generated crate with a loopback fake provider, dedicated workflow, eight-file allowlist, seam-absence proof on candidate binaries); supersedes the open item in ADR 0017 | #22 |
 | [0022](0022-connection-bound-at-accept.md) | Connection bound enforced at accept time | Accepted; implemented (`max_connections`, immediate close over the bound, slot tied to the connection IO, health not exempt, no per-peer bound); default provisional with a recorded loaded-host measurement | #40 |
 | [0023](0023-header-size-measurement-and-size-classes.md) | Request-head size measurement and the size classes | Accepted; implemented (pinned-SDK header measurement, caps confirmed, field-count and head bounds answered by the head guard, one outcome per size class) |
+| [0024](0024-connection-reuse-measurement-and-decision.md) | Connection reuse on the local and provider legs: measured, both stay disabled | Accepted; measured, decision recorded (no behavior change); figures provisional on a not-quiet host; criteria and required tests listed for any future re-enable | #42 |
 
 ## Contracts
 
