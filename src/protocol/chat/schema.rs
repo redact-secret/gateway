@@ -10,11 +10,12 @@
 //!
 //! Text classes (ADR 0025 D1, D2): property keys, `required` entries, and `enum`/`const`
 //! strings are **labels** (constrained charset and length, scanned detect-only, never
-//! rewritten); `description` is **text** (redacted in place). Numbers and booleans are
+//! rewritten); `title` and `description` are **text** (redacted in place; `title` was admitted
+//! in #57 so the OpenAI Python SDK's strict conversion passes, ADR 0029). Numbers and booleans are
 //! structural and are preserved. The traversal visits leaves in the canonical keyword order
 //! below, counting labels and text together as `leaf`.
 //!
-//! Canonical keyword order (serializer and traversal): `type`, `description`, `properties`
+//! Canonical keyword order (serializer and traversal): `type`, `title`, `description`, `properties`
 //! (the caller's entry order), `items`, `required`, `enum`, `const`, `additionalProperties`,
 //! `anyOf`, `minimum`, `maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`.
 //!
@@ -55,7 +56,7 @@ pub const MAX_ENUM: usize = 64;
 pub const MAX_ANY_OF: usize = 8;
 /// Most entries in a `type` array.
 pub const MAX_TYPES: usize = 4;
-/// Longest `description`, in bytes (checked at parse time and again after redaction).
+/// Longest `description` or `title`, in bytes (checked at parse time and again after redaction).
 pub const MAX_DESCRIPTION_BYTES: usize = 4096;
 /// Longest label, in bytes.
 pub const MAX_LABEL_BYTES: usize = 64;
@@ -139,6 +140,7 @@ enum Scalar {
 #[derive(Clone, Default, PartialEq)]
 pub struct Schema {
     types: Option<TypeSpec>,
+    title: Option<String>,
     description: Option<String>,
     properties: Option<Vec<(String, Self)>>,
     items: Option<Box<Self>>,
@@ -280,6 +282,7 @@ fn parse_schema(
     for (key, value) in entries {
         match key.as_str() {
             "type" => schema.types = Some(parse_types(value)?),
+            "title" => schema.title = Some(parse_description(value, derived)?),
             "description" => schema.description = Some(parse_description(value, derived)?),
             "properties" => {
                 let Json::Object(props) = value else {
@@ -368,7 +371,7 @@ fn parse_schema(
             "minItems" => schema.min_items = Some(bound(value)?),
             "maxItems" => schema.max_items = Some(bound(value)?),
             // `$ref`, `$defs`, `$id`, `$schema`, `allOf`, `oneOf`, `not`, `if`, `pattern`,
-            // `format`, `default`, `examples`, `title`, and anything unknown.
+            // `format`, `default`, `examples`, and anything unknown.
             _ => return Err(unsupported()),
         }
     }
@@ -383,6 +386,9 @@ fn emit(leaf: &mut usize) -> usize {
 
 /// Visit every label and text leaf in canonical order.
 pub(super) fn visit(schema: &Schema, leaf: &mut usize, f: &mut impl FnMut(Leaf, &str)) {
+    if let Some(text) = &schema.title {
+        f(Leaf::Text(emit(leaf)), text);
+    }
     if let Some(text) = &schema.description {
         f(Leaf::Text(emit(leaf)), text);
     }
@@ -424,6 +430,9 @@ pub(super) fn visit_mut(
     leaf: &mut usize,
     f: &mut impl FnMut(Leaf, &mut String),
 ) {
+    if let Some(text) = &mut schema.title {
+        f(Leaf::Text(emit(leaf)), text);
+    }
     if let Some(text) = &mut schema.description {
         f(Leaf::Text(emit(leaf)), text);
     }
@@ -463,9 +472,10 @@ pub(super) fn visit_mut(
 /// is repaired.
 pub(super) fn revalidate(schema: &Schema) -> Result<(), SerializeError> {
     if schema
-        .description
-        .as_ref()
-        .is_some_and(|d| d.len() > MAX_DESCRIPTION_BYTES)
+        .title
+        .iter()
+        .chain(&schema.description)
+        .any(|d| d.len() > MAX_DESCRIPTION_BYTES)
     {
         return Err(SerializeError::Limit);
     }
@@ -571,6 +581,10 @@ pub(super) fn write(schema: &Schema, w: &mut Bounded) -> io::Result<()> {
                 w.write_all(b"]")?;
             }
         }
+    }
+    if let Some(text) = &schema.title {
+        key(w, &mut first, "title")?;
+        json_str(w, text)?;
     }
     if let Some(text) = &schema.description {
         key(w, &mut first, "description")?;

@@ -447,6 +447,49 @@ function shapeBody(shape, model = "qual-json-ok") {
       }
       return { body: base({ metadata }, [{ role: "user", content: "hello" }]), expect_findings: secrets };
     }
+    // Same-size Alpha 2 shapes for the incremental-cost comparison with the Alpha 1 cases (#57).
+    case "tool_history_4KiB":
+    case "tool_history_16KiB_findings": {
+      const withSecrets = shape.endsWith("findings");
+      const total = withSecrets ? 16 * 1024 : 4 * 1024;
+      const rounds = Math.max(1, Math.round(total / 2048));
+      const per = Math.max(16, Math.floor((total - 400 - rounds * 260) / (rounds * 4)) - (withSecrets ? 40 : 0));
+      const messages = [{ role: "user", content: "run the lookups" }];
+      let n = 0;
+      for (let t = 0; t < rounds; t++) {
+        const calls = [];
+        for (let c = 0; c < 2; c++) {
+          const args = { query: `${fill(n, per)}${withSecrets ? ` ${tok(n)}` : ""}`, limit: 5 };
+          calls.push({ id: `call_${t}_${c}`, type: "function", function: { name: "lookup_record", arguments: JSON.stringify(args) } });
+          n++;
+        }
+        messages.push({ role: "assistant", content: null, tool_calls: calls });
+        for (let c = 0; c < 2; c++) {
+          messages.push({ role: "tool", tool_call_id: `call_${t}_${c}`, content: `${fill(n, per)}${withSecrets ? ` ${tok(n)}` : ""}` });
+          n++;
+        }
+      }
+      return { body: base({}, messages), expect_findings: withSecrets ? n : 0 };
+    }
+    case "tool_defs_4KiB":
+    case "tool_defs_16KiB_findings": {
+      const withSecrets = shape.endsWith("findings");
+      const total = withSecrets ? 16 * 1024 : 4 * 1024;
+      const ntools = Math.max(1, Math.round(total / 2048));
+      const props = 6;
+      const desc = Math.max(16, Math.floor((total - 300 - ntools * 200) / (ntools * (props + 1))) - 60 - (withSecrets ? 40 : 0));
+      const tools = [];
+      let secrets = 0;
+      for (let k = 0; k < ntools; k++) {
+        const properties = {};
+        for (let j = 0; j < props; j++) {
+          properties[`p_${j}`] = { type: "string", description: `${fill(k * props + j, desc)}${withSecrets ? ` ${tok(k * props + j)}` : ""}` };
+          if (withSecrets) secrets++;
+        }
+        tools.push({ type: "function", function: { name: `tool_${k}`, description: fill(k, desc), parameters: { type: "object", properties, required: ["p_0"] } } });
+      }
+      return { body: base({ tools }, user), expect_findings: secrets };
+    }
     case "node_dense": {
       const tools = [];
       for (let k = 0; k < 5; k++) {
@@ -693,9 +736,9 @@ async function recoveryProbe(g, n = 10) {
 }
 
 /** One gateway per shape: sequential per-request stage percentiles, forwarded-body checks, true peak. */
-async function aggStages(cap) {
+async function aggStages(cap, shapes = SHAPES) {
   const out = {};
-  for (const shape of SHAPES) {
+  for (const shape of shapes) {
     const g = await startAggGateway(cap, {});
     await providerFresh();
     const { body, expect_findings } = shapeBody(shape);
@@ -723,6 +766,8 @@ async function aggStages(cap) {
     const peak = await stopAggGateway(g);
     out[shape] = {
       input_bytes: Buffer.byteLength(body),
+      // Bytes the provider received per request: the sanitized document the gateway serialized.
+      output_bytes: stats.received ? Math.round(stats.bytes / stats.received) : null,
       expected_findings: expect_findings,
       requests: count,
       status_counts: statuses,
@@ -1371,6 +1416,85 @@ async function aggregateMain() {
   writeFileSync(outFile, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`wrote ${path.basename(outFile)} (runs ${RUNS}; provisional: ${report.provisional})`);
   rmSync(tmp, { recursive: true, force: true });
+}
+
+// Incremental parse/scan/serialize cost and output growth of the Alpha 2 shapes next to the Alpha 1
+// cases (#57). `--incremental [--quick] [--runs N]` reuses aggStages, the same gateway configuration
+// and the same shape builders as --aggregate (#58); it only selects the shapes and skips the load
+// sections. Same quiet-host protocol and labelling.
+const INCREMENTAL = process.argv.includes("--incremental");
+const INCREMENTAL_SHAPES = [
+  "small_4KiB", "tool_history_4KiB", "tool_defs_4KiB", "metadata",
+  "many_findings_16KiB", "tool_history_16KiB_findings", "tool_defs_16KiB_findings",
+  "large_500KiB", "tool_history", "tool_defs", "node_dense",
+];
+
+async function incrementalMain() {
+  const cpus = os.cpus().length;
+  const capStd = { receipt: 16, memory_units: 262144, inspection: 4, upstream: 16, stream: 16 };
+  const runs = [];
+  for (let r = 0; r < RUNS; r++) {
+    const quiet = await waitForQuiet();
+    const stages = (await settlePorts(), await aggStages(capStd, INCREMENTAL_SHAPES));
+    const end = await hostSnapshot();
+    const provisional = !(quiet.quiet_at_start && end.load1 <= end.threshold_load1);
+    runs.push({ run: r + 1, host_before: quiet, host_after: end, provisional, stages_by_shape: stages });
+    console.log(`run ${r + 1}/${RUNS}: load1 start ${quiet.at_start.load1.toFixed(2)} end ${end.load1.toFixed(2)} provisional=${provisional}`);
+  }
+  const med = (xs) => {
+    const v = xs.filter((x) => typeof x === "number").sort((a, b) => a - b);
+    return v.length ? v[Math.floor((v.length - 1) / 2)] : null;
+  };
+  const summary = {};
+  for (const shape of INCREMENTAL_SHAPES) {
+    const per = runs.map((r) => r.stages_by_shape[shape]);
+    const kib = per[0].input_bytes / 1024;
+    const m = (s) => med(per.map((p) => p.stage_us[s].p50));
+    summary[shape] = {
+      input_bytes: per[0].input_bytes,
+      output_bytes: per[0].output_bytes,
+      output_growth_bytes: per[0].output_bytes - per[0].input_bytes,
+      output_over_input: Math.round((per[0].output_bytes / per[0].input_bytes) * 1000) / 1000,
+      expected_findings: per[0].expected_findings,
+      parse_p50_us: m("parse"),
+      inspection_p50_us: m("inspection"),
+      serialization_p50_us: m("serialization"),
+      parse_us_per_kib: Math.round((m("parse") / kib) * 100) / 100,
+      inspection_us_per_kib: Math.round((m("inspection") / kib) * 100) / 100,
+      inspection_p50_range_us: [Math.min(...per.map((p) => p.stage_us.inspection.p50)), Math.max(...per.map((p) => p.stage_us.inspection.p50))],
+      provider_bodies_with_secret_prefix: per.map((p) => p.provider_bodies_with_secret_prefix),
+      status_counts: per.map((p) => p.status_counts),
+    };
+  }
+  const version = execFileSync(BINARY, ["--version"], { encoding: "utf8" })
+    .trim()
+    .replace(/redact-secret-gateway-qualification/, "qualification binary")
+    .replace(/\s*\[RSG-[^\]]*\]/, "");
+  const report = {
+    kind: "alpha2-incremental-cost",
+    tool: "qualification/perf/run.mjs --incremental (reuses the --aggregate sequential stage measurement, #58; no performance claim)",
+    quick_mode: QUICK,
+    build: version,
+    profile: process.env.QUAL_PROFILE ?? "unknown",
+    source_commit: process.env.GATEWAY_COMMIT ?? null,
+    host: { os: `${os.platform()} ${os.release()}`, arch: os.arch(), cpu_model: os.cpus()[0]?.model ?? null, cpus, memory_gib: Math.round(os.totalmem() / 2 ** 30), node: process.version, rustc: await rustcVersion() },
+    runs_requested: RUNS,
+    all_runs_quiet: runs.every((r) => !r.provisional),
+    provisional: runs.some((r) => r.provisional),
+    note: "inspection includes serialization; parse runs on the request thread; stage figures are exact sequential deltas (median of per-run p50 in the summary). output_bytes is the body the fake provider received (the sanitized document). Same-size Alpha 2 shapes (4 KiB and 16 KiB) are compared with small_4KiB and many_findings_16KiB.",
+    summary,
+    runs,
+  };
+  mkdirSync(EVIDENCE, { recursive: true });
+  const outFile = path.join(EVIDENCE, QUICK ? "incremental-cost-quick.json" : "incremental-cost.json");
+  writeFileSync(outFile, `${JSON.stringify(report, null, 2)}\n`);
+  console.log(`wrote ${path.basename(outFile)} (runs ${RUNS}; provisional: ${report.provisional})`);
+  rmSync(tmp, { recursive: true, force: true });
+}
+
+if (INCREMENTAL) {
+  await incrementalMain();
+  process.exit(0);
 }
 
 if (AGGREGATE) {

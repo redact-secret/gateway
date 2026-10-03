@@ -272,6 +272,44 @@ async fn description_at_the_bound_with_a_secret_is_redacted_within_it() {
     assert!(desc.len() <= 4096);
 }
 
+/// `title` is free text like `description` (#57, ADR 0029): it round-trips in canonical
+/// position (after `type`, before `description`), a secret in it is redacted in place, and
+/// a property that is merely named `title` is still an ordinary label.
+#[tokio::test]
+async fn title_round_trips_and_a_secret_in_it_is_redacted_in_place() {
+    let lab = Lab::new(&full());
+    let request = shell(json!({
+        "tools": [{"type": "function", "function": {
+            "name": "lookup",
+            "parameters": {
+                "type": "object",
+                "title": format!("루트 {}", token(1)),
+                "description": "d",
+                "properties": {
+                    "title": {"type": "string", "title": "Title", "description": format!("x {}", token(2))},
+                    "n": {"anyOf": [{"type": "string", "title": "S"}, {"type": "null"}], "title": "N"}},
+                "required": ["title", "n"], "additionalProperties": false}}}],
+        "response_format": {"type": "json_schema", "json_schema": {
+            "name": "ans", "strict": true,
+            "schema": {"type": "object", "title": format!("resp {}", token(3)),
+                       "properties": {"a": {"type": "string", "title": "A"}}, "required": ["a"]}}}
+    }));
+    let sealed = lab.run(&request.to_string()).await.unwrap();
+    let wire = std::str::from_utf8(sealed.body()).unwrap();
+    assert!(!wire.contains("SYNTHETICREVOKED"), "{wire}");
+    // Canonical order: `title` is written right after `type`, before `description`.
+    assert!(
+        wire.contains(r#""type":"object","title":"루트 <SECRET_1>","description":"d""#),
+        "{wire}"
+    );
+    let mut expected = request.clone();
+    expected["tools"][0]["function"]["parameters"]["title"] = json!("루트 <SECRET_1>");
+    expected["tools"][0]["function"]["parameters"]["properties"]["title"]["description"] =
+        json!("x <SECRET_2>");
+    expected["response_format"]["json_schema"]["schema"]["title"] = json!("resp <SECRET_3>");
+    assert_eq!(out(&sealed), expected);
+}
+
 // ------------------------------------------------------- secret placement: labels block
 
 /// A finding in any label position blocks the request: nothing is rewritten and no sealed
@@ -464,7 +502,12 @@ fn rejected_cases() -> Vec<(&'static str, String, ProtocolError)> {
         ("format", tool_body(r#"{"type":"object","properties":{"a":{"type":"string","format":"email"}}}"#), U),
         ("default", tool_body(r#"{"type":"object","properties":{"a":{"type":"string","default":"SYNTHETIC"}}}"#), U),
         ("examples", tool_body(r#"{"type":"object","properties":{"a":{"type":"string","examples":["SYNTHETIC"]}}}"#), U),
-        ("title", tool_body(r#"{"type":"object","title":"Args"}"#), U),
+        ("title of the wrong type", tool_body(r#"{"type":"object","title":5}"#), U),
+        ("title null", tool_body(r#"{"type":"object","properties":{"a":{"type":"string","title":null}}}"#), U),
+        ("oversized title", tool_body(&format!(r#"{{"type":"object","title":"{}"}}"#, "a".repeat(4097))), L),
+        ("duplicate title", tool_body(r#"{"type":"object","title":"A","title":"B"}"#), M),
+        ("title on a tool function (not a schema keyword)", r#"{"model":"m","messages":[{"role":"user","content":"q"}],"tools":[{"type":"function","function":{"name":"f","title":"T"}}]}"#.to_owned(), U),
+        ("title beside json_schema name (not a schema keyword)", r#"{"model":"m","messages":[{"role":"user","content":"q"}],"response_format":{"type":"json_schema","json_schema":{"name":"n","title":"T","schema":{"type":"object"}}}}"#.to_owned(), U),
         ("unknown nested keyword", tool_body(r#"{"type":"object","properties":{"a":{"type":"string","x-vendor":true}}}"#), U),
         ("additionalProperties schema", tool_body(r#"{"type":"object","additionalProperties":{"type":"string"}}"#), U),
         ("root not an object schema", tool_body(r#"{"type":"string"}"#), U),
@@ -524,10 +567,10 @@ fn strip(value: &mut Value, rejected: &[&str]) {
     }
 }
 
-/// Documents what real SDK helpers emit and which of those keywords the contract rejects
-/// today, so #57 can decide whether to relax any of them. Nothing is relaxed here: the
-/// assertions pin the current behavior (each fixture is rejected, and only because of the
-/// listed keywords).
+/// Documents what real SDK helpers emit and which of those keywords the contract rejects.
+/// #57 relaxed only `title` (ADR 0029): the assertions pin that the strict-converted Python
+/// shape now passes as emitted and that every other fixture is rejected only because of the
+/// listed keywords.
 ///
 /// The fixtures are written by hand to match the helpers' output shapes: Pydantic's
 /// `model_json_schema()` (titles, defaults, `$defs`/`$ref` for nested models), the OpenAI
@@ -537,8 +580,8 @@ fn strip(value: &mut Value, rejected: &[&str]) {
 /// `format`, `pattern`, `additionalProperties: false`).
 #[tokio::test]
 async fn sdk_generated_schema_shapes_and_the_keywords_rejected_today() {
-    const CANDIDATES: [&str; 8] = [
-        "title", "default", "$schema", "$defs", "$ref", "format", "pattern", "examples",
+    const CANDIDATES: [&str; 7] = [
+        "default", "$schema", "$defs", "$ref", "format", "pattern", "examples",
     ];
     let pydantic_raw = json!({
         "$defs": {"Address": {"properties": {"city": {"title": "City", "type": "string"}},
@@ -594,13 +637,9 @@ async fn sdk_generated_schema_shapes_and_the_keywords_rejected_today() {
         (
             "pydantic model_json_schema",
             &pydantic_raw,
-            &["$defs", "$ref", "default", "title"],
+            &["$defs", "$ref", "default"],
         ),
-        (
-            "openai python to_strict_json_schema",
-            &openai_strict,
-            &["title"],
-        ),
+        ("openai python to_strict_json_schema", &openai_strict, &[]),
         (
             "zod-to-json-schema",
             &zod,
@@ -608,9 +647,11 @@ async fn sdk_generated_schema_shapes_and_the_keywords_rejected_today() {
         ),
     ];
     for (name, fixture, keywords) in expected {
+        // Since #57 `title` is accepted text, so the strict conversion passes as emitted.
+        let blocked = !keywords.is_empty();
         assert_eq!(
             lab.validate(&body(fixture)).await.err(),
-            Some(ProtocolError::Unsupported),
+            blocked.then_some(ProtocolError::Unsupported),
             "{name}"
         );
         let mut found = BTreeSet::new();

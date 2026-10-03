@@ -24,6 +24,9 @@ export const gateways = {
   noUpstream: env("GATEWAY_NOUPSTREAM"),
   deadProvider: env("GATEWAY_DEADPROVIDER"),
   overload: env("GATEWAY_OVERLOAD"),
+  policyForward: env("GATEWAY_POLICYFORWARD"),
+  policyCommon: env("GATEWAY_POLICYCOMMON"),
+  concurrent: env("GATEWAY_CONCURRENT"),
 };
 
 const admin = env("QUAL_ADMIN");
@@ -124,7 +127,7 @@ export async function closedPort(): Promise<number> {
 }
 
 export function leaks(text: string): string[] {
-  return [synthetic.secret_prefix, "ghp_SYNTH", synthetic.prompt_marker_prefix, synthetic.api_key].filter((m) =>
+  return [synthetic.secret_prefix, "ghp_SYNTH", synthetic.prompt_marker_prefix, synthetic.api_key, "hunter2xyz", "U1lOVEhFVElDUkVWT0tFRFNZTlRIRVRJQ0tFWQ"].filter((m) =>
     text.includes(m),
   );
 }

@@ -12,7 +12,8 @@
     "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter=spec test/*.test.ts"
   },
   "dependencies": {
-    "openai": "7.27.0"
+    "openai": "7.27.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/node": "24.19.1",

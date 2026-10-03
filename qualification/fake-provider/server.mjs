@@ -8,6 +8,7 @@
 //
 // The scenario is chosen by the request `model` (a transmitted-verbatim structural field), so
 // it survives the gateway's sanitizing rewrite and SDK retries hit the same script:
+//   qual-json-tool-call, qual-json-tool-calls-parallel (assistant tool_calls replies), qual-json-structured (a JSON object as content; #57),
 //   qual-example (json-ok, or sse-ok when stream:true), qual-json-ok, qual-json-slow (replies after 150 ms), qual-json-4mib (a 4 MB reply, just under the default response bound; #58 load runs), qual-json-large, qual-json-oversize, qual-json-truncated, qual-hang,
 //   qual-err-<status> (400 401 403 404 408 409 422 429 500 502 503 504),
 //   qual-err-429-retry-after (Retry-After: 0), qual-err-500-hint-no-retry (500 + x-should-retry: false), qual-retry-429-then-ok (two 429s, then 200),
@@ -157,6 +158,31 @@ async function runScenario(call, req, res, json) {
 
   if (model === "qual-json-ok") {
     return sendJson(res, 200, completion(call.seq, PIECES.join("")));
+  }
+  // Alpha 2 tool and structured-output replies (#57). The message is shaped like a real provider's
+  // (`refusal: null`, `annotations: []`), so an SDK that replays it verbatim shows what the field
+  // contract does with it.
+  if (model === "qual-json-tool-call" || model === "qual-json-tool-calls-parallel") {
+    const calls = [
+      { id: "call_qual_1", type: "function", function: { name: "get_weather", arguments: '{"city":"Seoul","days":3}' } },
+      { id: "call_qual_2", type: "function", function: { name: "get_weather", arguments: '{"city":"서울","days":1}' } },
+    ];
+    const body = completion(call.seq, null);
+    body.choices[0].message = {
+      role: "assistant",
+      content: null,
+      refusal: null,
+      annotations: [],
+      tool_calls: model === "qual-json-tool-call" ? calls.slice(0, 1) : calls,
+    };
+    body.choices[0].finish_reason = "tool_calls";
+    return sendJson(res, 200, body);
+  }
+  if (model === "qual-json-structured") {
+    const body = completion(call.seq, '{"city":"Seoul","days":3}');
+    body.choices[0].message.refusal = null;
+    body.choices[0].message.annotations = [];
+    return sendJson(res, 200, body);
   }
   if (model === "qual-json-slow") {
     await sleep(150);

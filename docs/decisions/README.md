@@ -42,6 +42,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0026](0026-request-policy-over-pinned-core.md) | Request block/redact policy over the pinned core: the core action set only, four operator keys, startup activation check | Accepted; implemented | #56 |
 | [0027](0027-write-budget-and-bounded-response-frames.md) | Cumulative write budget and bounded response frames | Accepted; implemented (#59) | #59 |
 | [0028](0028-aggregate-load-qualification.md) | Aggregate load qualification: measurement aids, findings, no change to defaults | Accepted; measured, decision recorded (figures provisional) | #58 |
+| [0029](0029-schema-title-keyword.md) | Admit the `title` schema keyword as inspected free text | Accepted | #57 |
 
 ## Contracts
 

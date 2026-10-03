@@ -533,7 +533,7 @@ mod tests {
             tool(r#"{"type":"object","properties":{"a":{"type":"string","format":"email"}}}"#),
             tool(r#"{"type":"object","properties":{"a":{"type":"string","default":"x"}}}"#),
             tool(r#"{"type":"object","properties":{"a":{"type":"string","examples":["x"]}}}"#),
-            tool(r#"{"type":"object","title":"T"}"#),
+            tool(r#"{"type":"object","title":5}"#),
             tool(r#"{"type":"object","x-vendor":1}"#),
             tool(r#"{"type":"object","properties":{"a":{"type":"string","unknownKeyword":1}}}"#),
             // schema: value shapes
