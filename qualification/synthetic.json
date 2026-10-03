@@ -1,11 +1,15 @@
 {
   "_comment": "Synthetic, revoked-looking values only. Shared by the Node, Python, and shell qualification code.",
   "api_key": "sk-SYNTHETIC-REVOKED-QUAL-NOT-A-KEY",
+  "local_token": "SYNTHETIC-QUAL-LOCAL-TOKEN-0123456789-ABCDEFGHIJ",
+  "local_token_decoy": "SYNTHETIC-QUAL-DECOY-TOKEN-9876543210-ZYXWVUTSRQ",
   "secret_prefix": "ghp_SYNTHETICREVOKED",
   "prompt_marker_prefix": "RSG-QUAL-PROMPT-",
   "stream_text": "Hello 안녕하세요 🙂!",
   "log_forbidden": [
     "ghp_SYNTH",
+    "SYNTHETIC-QUAL-LOCAL-TOKEN",
+    "SYNTHETIC-QUAL-DECOY-TOKEN",
     "sk-SYNTHETIC-REVOKED-QUAL",
     "RSG-QUAL-PROMPT-",
     "synthetic reply",

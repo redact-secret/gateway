@@ -49,4 +49,52 @@ code=0
 (cd "$root/examples/python" && OPENAI_API_KEY='' "$py" openai_via_gateway.py) >/dev/null 2>&1 || code=$?
 test "$code" -eq 2
 
+# Beta 1 dual-credential demonstration (#65): the same two examples against a gateway that enforces
+# deployment.local_auth. The provider key (OPENAI_API_KEY) and the local caller token
+# (GATEWAY_LOCAL_TOKEN, sent as X-Gateway-Local-Token) are independent: each example works only
+# with both, a swap of either is refused locally with a safe code, and the fake provider's own
+# record shows it received the provider key, never the local token, and no request when refused.
+if [ -n "${GATEWAY_AUTHFILE:-}" ]; then
+  LOCAL_TOKEN="$(jq -r .local_token "$QUAL_SYNTHETIC")"
+  base_auth="$GATEWAY_AUTHFILE/v1"
+  # run_example <node|python> VAR=value...  (the environment is exactly what the README tells a user to set)
+  run_example() {
+    lang="$1"; shift
+    if [ "$lang" = node ]; then
+      (cd "$root/examples/node" && env GATEWAY_BASE_URL="$base_auth" "$@" npm start --silent -- --demo-redaction)
+    else
+      (cd "$root/examples/python" && env GATEWAY_BASE_URL="$base_auth" "$@" "$py" openai_via_gateway.py --demo-redaction)
+    fi
+  }
+  # The two accepted calls carried the provider key and no trace of the local token.
+  verify_dual() {
+    verify_calls
+    sha="$(printf 'Bearer %s' "$OPENAI_API_KEY" | shasum -a 256 | cut -d' ' -f1)"
+    curl -s "$QUAL_ADMIN/__admin/calls" | jq -e --arg sha "$sha" '
+      [.calls[] | (.authorization_sha256 == $sha) and (.local_token_seen | not)
+        and (.header_names | index("x-gateway-local-token") | not)] | all' >/dev/null
+  }
+  # refused <lang> <label> <code> VAR=value...: exits non-zero with the safe code, prints neither
+  # credential, and the fake provider saw no connection and no request.
+  refused() {
+    lang="$1"; label="$2"; want="$3"; shift 3
+    reset
+    if out="$(run_example "$lang" "$@" 2>&1)"; then echo "$lang $label: unexpectedly succeeded" >&2; exit 1; fi
+    case "$out" in *"code $want"*) ;; *) echo "$lang $label: expected code $want" >&2; exit 1 ;; esac
+    case "$out" in *"$LOCAL_TOKEN"*|*"$OPENAI_API_KEY"*) echo "$lang $label: output exposes a credential" >&2; exit 1 ;; esac
+    curl -s "$QUAL_ADMIN/__admin/calls" | jq -e '.connections == 0 and (.calls | length) == 0' >/dev/null
+    echo "$lang $label -> refused locally ($want), nothing reached the provider"
+  }
+
+  for lang in node python; do
+    echo "== examples/$lang with both credentials against the local-auth gateway"
+    reset
+    run_example "$lang" GATEWAY_LOCAL_TOKEN="$LOCAL_TOKEN"
+    verify_dual
+    refused "$lang" "provider key only" local_auth_required GATEWAY_LOCAL_TOKEN=
+    refused "$lang" "provider key sent as the local token" local_auth_invalid GATEWAY_LOCAL_TOKEN="$OPENAI_API_KEY"
+    refused "$lang" "local token sent as the provider key" local_auth_required OPENAI_API_KEY="$LOCAL_TOKEN" GATEWAY_LOCAL_TOKEN=
+  done
+fi
+
 echo "examples verified against the qualification build"

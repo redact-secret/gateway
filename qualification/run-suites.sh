@@ -4,7 +4,7 @@
 #   sh qualification/run-suites.sh [--binary PATH] [--evidence DIR] [--suites node,python,examples|none]
 #   QUAL_COMMAND='shell line' runs one extra command against the same stack.
 #
-# Starts the scripted fake provider and eight gateway instances of the qualification binary
+# Starts the scripted fake provider and ten gateway instances of the qualification binary
 # (standard, tight limits, no upstream, dead provider, overload, and the Alpha 2 policy and concurrency instances), runs the pinned-SDK suites against
 # them, stops everything gracefully, and scans the captured gateway stdout/stderr for any
 # synthetic marker. Everything is synthetic and loopback only; no secret, key, or network
@@ -30,7 +30,7 @@ evidence="$(cd "$evidence" && pwd)"
 rm -f "$evidence"/gateway-*.out "$evidence"/gateway-*.err "$evidence"/fake-provider.out
 
 pids=""
-gateway_names="standard tight noupstream deadprovider overload policyforward policycommon concurrent"
+gateway_names="standard tight noupstream deadprovider overload policyforward policycommon concurrent authfile authenv"
 cleanup() {
   for p in $pids; do kill "$p" 2>/dev/null || true; done
 }
@@ -54,8 +54,8 @@ provider_port="$(jq -r .provider_port "$evidence/fake-provider.out")"
 admin_port="$(jq -r .admin_port "$evidence/fake-provider.out")"
 
 # 2. Gateways (qualification binary only; the shipped binary cannot do this by design).
-start_gateway() { # name config provider-port
-  "$bin" serve "$here/configs/$2.json" --fake-provider "127.0.0.1:$3" \
+start_gateway() { # name config provider-port [NAME=value for the gateway process only]
+  env ${4:-QUAL_UNUSED=1} "$bin" serve "${cfg_of:-$here/configs/$2.json}" --fake-provider "127.0.0.1:$3" \
     >"$evidence/gateway-$1.out" 2>"$evidence/gateway-$1.err" &
   eval "gw_$1_pid=$!"
   pids="$pids $!"
@@ -71,6 +71,16 @@ start_gateway policyforward policy-forward "$provider_port" # full profile, on_w
 start_gateway policycommon policy-common "$provider_port" # common profile (narrower detector set)
 start_gateway concurrent concurrent "$provider_port" # wider capacity for the isolation runs
 
+# Beta 1 local caller authentication instances (#65), one per delivery mechanism, with different
+# static content policy: `authfile` (token mounted as a mode-0600 file, full profile) and
+# `authenv` (token from the process environment of that one gateway only, common profile,
+# on_warn forward). The token values are the synthetic ones in synthetic.json.
+token_file="$evidence/local-auth-token"
+(umask 077 && jq -j .local_token "$here/synthetic.json" >"$token_file")
+sed "s|@TOKEN_FILE@|$token_file|" "$here/configs/local-auth-file.json" >"$evidence/local-auth-file.json"
+cfg_of="$evidence/local-auth-file.json" start_gateway authfile local-auth-file "$provider_port"
+cfg_of="" start_gateway authenv local-auth-env "$provider_port" "QUAL_LOCAL_TOKEN=$(jq -r .local_token "$here/synthetic.json")"
+
 addr_of() { sed -n 's/^listening //p' "$evidence/gateway-$1.out" | head -n 1; }
 metrics_of() { sed -n 's/^qualification-metrics //p' "$evidence/gateway-$1.out" | head -n 1; }
 
@@ -84,13 +94,15 @@ GATEWAY_OVERLOAD="http://$(addr_of overload)"
 GATEWAY_POLICYFORWARD="http://$(addr_of policyforward)"
 GATEWAY_POLICYCOMMON="http://$(addr_of policycommon)"
 GATEWAY_CONCURRENT="http://$(addr_of concurrent)"
+GATEWAY_AUTHFILE="http://$(addr_of authfile)"
+GATEWAY_AUTHENV="http://$(addr_of authenv)"
 QUAL_METRICS_STANDARD="http://$(metrics_of standard)"
 QUAL_SYNTHETIC="$here/synthetic.json"
 QUAL_BINARY="$bin"
 case "$bin" in */release/*) QUAL_PROFILE=release ;; *) QUAL_PROFILE=debug ;; esac
 QUAL_EVIDENCE="$evidence"
 export QUAL_BINARY QUAL_PROFILE QUAL_ADMIN QUAL_PROVIDER GATEWAY_STANDARD GATEWAY_TIGHT GATEWAY_NOUPSTREAM GATEWAY_DEADPROVIDER GATEWAY_OVERLOAD \
-  GATEWAY_POLICYFORWARD GATEWAY_POLICYCOMMON GATEWAY_CONCURRENT \
+  GATEWAY_POLICYFORWARD GATEWAY_POLICYCOMMON GATEWAY_CONCURRENT GATEWAY_AUTHFILE GATEWAY_AUTHENV \
   QUAL_METRICS_STANDARD QUAL_SYNTHETIC QUAL_EVIDENCE
 
 # 3. Suites.
@@ -148,7 +160,7 @@ for f in "$evidence"/gateway-*.out "$evidence"/gateway-*.err; do
     leaks=1
   fi
 done
-rm -f "$patterns"
+rm -f "$patterns" "$token_file"
 [ "$leaks" -eq 0 ] || status=1
 for name in $gateway_names; do
   grep -q 'QUALIFICATION BUILD' "$evidence/gateway-$name.err" || { echo "missing banner for $name" >&2; status=1; }

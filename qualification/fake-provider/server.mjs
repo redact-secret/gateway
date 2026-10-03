@@ -27,11 +27,18 @@
 //   GET  /__admin/await-calls?count=N&timeout_ms=T    resolves when >= N calls were received
 //   POST /__admin/release?call=N             -> let a gated stream continue
 //   GET  /__admin/stats                      -> {received, secret_bodies, bytes}: counts that survive keep_bodies=0
+//   (every recorded call carries local_token_seen: true if a #65 synthetic local token appeared anywhere)
 //   POST /__admin/mode?keep_bodies=0|1       -> 0 keeps no request body text (aggregate load runs, #58)
 // Waiting is event-driven (no polling, no sleeping): a deadline only turns a hang into a failure.
 
 import http from "node:http";
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
+
+// The synthetic local caller tokens (#65): the provider never needs them, it only reports whether
+// either value (the valid one or the decoy) reached it in any header, the target, or the body.
+const synthetic = JSON.parse(readFileSync(new URL("../synthetic.json", import.meta.url), "utf8"));
+const LOCAL_TOKENS = [synthetic.local_token, synthetic.local_token_decoy];
 
 const MAX_BODY = 8 * 1024 * 1024;
 const PIECES = ["Hel", "lo ", "안녕", "하세요", " 🙂", "!"];
@@ -380,6 +387,9 @@ const provider = http.createServer((req, res) => {
       ? crypto.createHash("sha256").update(req.headers.authorization).digest("hex")
       : null,
     content_type: req.headers["content-type"] ?? null,
+    local_token_seen: LOCAL_TOKENS.some(
+      (t) => req.url.includes(t) || Object.values(req.headers).some((v) => String(v).includes(t)),
+    ),
     user_agent: req.headers["user-agent"] ?? null,
     body: "",
     body_bytes: 0,
@@ -420,6 +430,7 @@ const provider = http.createServer((req, res) => {
     if (raw.includes("ghp_SYNTH")) stats.secret_bodies += 1;
     call.body = keepBodies ? raw.toString("utf8") : "";
     const text = keepBodies ? call.body : raw.toString("utf8");
+    if (LOCAL_TOKENS.some((t) => text.includes(t))) call.local_token_seen = true;
     call.body_bytes = size;
     let json = null;
     try {
