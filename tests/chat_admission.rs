@@ -493,10 +493,6 @@ async fn unsupported_payloads_are_rejected_with_zero_upstream_bytes() {
             r#"{"model":"m","messages":[{"role":"user","content":"x"}],"n":2}"#.into(),
         ),
         (
-            "metadata",
-            r#"{"model":"m","messages":[{"role":"user","content":"x"}],"metadata":{"k":"v"}}"#.into(),
-        ),
-        (
             "json_schema format",
             r#"{"model":"m","messages":[{"role":"user","content":"x"}],"response_format":{"type":"json_schema","json_schema":{}}}"#.into(),
         ),

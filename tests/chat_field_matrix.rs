@@ -5,7 +5,7 @@
 //! tables are `docs/contracts/chat-completions-request.md` and
 //! `docs/contracts/field-classification.md`; ADR 0025 assigns each planned row to an owner.
 //!
-//! How a follow-up flips its rows (#53 tool history, #54 tools and schemas, #55 metadata):
+//! How a follow-up flips its rows (#53 tool history, #54 tools and schemas; #55 metadata is done):
 //!
 //! 1. Set the row's `implemented` to `true` (the row then asserts `target`, which was
 //!    written from the contract) and fix `target` if the contract's slot layout was refined.
@@ -228,7 +228,7 @@ fn rows() -> Vec<Row> {
         r(Class::Rejected, "schema property key outside the identifier charset",
           r#"{"model":"m","messages":[{"role":"user","content":"q"}],"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object","properties":{"bad key":{"type":"string"}}}}}]}"#, Expect::Unsupported, None),
 
-        // ---- Planned for #55: metadata -------------------------------------------------
+        // ---- Implemented by #55: metadata ----------------------------------------------
         r(Class::Label, "metadata (key label, string value text)",
           r#"{"model":"m","messages":[{"role":"user","content":"q"}],"metadata":{"trace_id":"abc","team":"synthetic"}}"#,
           ACC(vec![
@@ -237,7 +237,18 @@ fn rows() -> Vec<Row> {
               (TextSlot::MetadataValue { entry: 0 }, "abc"),
               (TextSlot::MetadataKey { entry: 1 }, "team"),
               (TextSlot::MetadataValue { entry: 1 }, "synthetic"),
-          ]), Some("#55")),
+          ]), None),
+        r(Class::Label, "metadata, empty object",
+          r#"{"model":"m","messages":[{"role":"user","content":"q"}],"metadata":{}}"#,
+          ACC(vec![(msg(0), "q")]), None),
+        r(Class::Rejected, "metadata null, array, or boolean value",
+          r#"{"model":"m","messages":[{"role":"user","content":"q"}],"metadata":{"k":null}}"#, Expect::Unsupported, None),
+        r(Class::Rejected, "metadata that is not an object",
+          r#"{"model":"m","messages":[{"role":"user","content":"q"}],"metadata":["k","v"]}"#, Expect::Unsupported, None),
+        r(Class::Rejected, "metadata with an empty key",
+          r#"{"model":"m","messages":[{"role":"user","content":"q"}],"metadata":{"":"v"}}"#, Expect::Unsupported, None),
+        r(Class::Rejected, "metadata with a duplicate key (parser rejects)",
+          r#"{"model":"m","messages":[{"role":"user","content":"q"}],"metadata":{"k":"a","k":"b"}}"#, Expect::Malformed, None),
         r(Class::Rejected, "metadata with a non-string value",
           r#"{"model":"m","messages":[{"role":"user","content":"q"}],"metadata":{"k":1}}"#, Expect::Unsupported, None),
         r(Class::Rejected, "metadata with a nested object",
@@ -366,10 +377,4 @@ async fn check_target(owner: &str) {
 #[tokio::test]
 async fn target_rows_for_54_tool_definitions_and_schemas() {
     check_target("#54").await;
-}
-
-#[tokio::test]
-#[ignore = "rejected-until-#55: remove this attribute when metadata lands"]
-async fn target_rows_for_55_metadata() {
-    check_target("#55").await;
 }

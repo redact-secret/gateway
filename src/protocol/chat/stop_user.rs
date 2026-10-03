@@ -3,6 +3,7 @@
 use std::fmt;
 use std::io::{self, Write};
 
+use super::SerializeError;
 use super::serialize::{Bounded, json_str};
 use super::slots::TextSlot;
 use super::{Checked, MAX_STOP_SEQUENCES, MAX_USER_BYTES, string, unsupported};
@@ -42,6 +43,16 @@ pub(super) fn parse_stop(value: Json) -> Checked<Stop> {
             .collect::<Checked<Vec<_>>>()
             .map(Stop::Many),
         _ => Err(unsupported()),
+    }
+}
+
+/// Revalidation after redaction: `user` keeps its parse-time bound (a replacement that
+/// outgrew it is refused, never truncated). `stop` has no per-string bound beyond the
+/// request-wide output bound the serializer enforces.
+pub(super) const fn revalidate_user(user: Option<&str>) -> Result<(), SerializeError> {
+    match user {
+        Some(user) if user.len() > MAX_USER_BYTES => Err(SerializeError::Limit),
+        _ => Ok(()),
     }
 }
 

@@ -54,7 +54,7 @@ describe("unsupported or unknown inputs are rejected locally (422 unsupported_in
       "unknown field inside a text part",
       { model: base.model, messages: [{ role: "user", content: [{ type: "text", text: "hi", cache_control: 1 }] }] },
     ],
-    ["metadata", { ...base, metadata: { k: "v" } }],
+    ["metadata with a nested object (string-only since #55)", { ...base, metadata: { k: { a: "b" } } }],
     ["logprobs", { ...base, logprobs: true }],
     ["participant name on a message", { model: base.model, messages: [{ role: "user", name: "alice", content: "hi" }] }],
     ["tool role message", { model: base.model, messages: [{ role: "tool", tool_call_id: "x", content: "hi" }] }],

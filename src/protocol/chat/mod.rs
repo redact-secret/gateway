@@ -45,7 +45,9 @@ mod tool_defs;
 
 pub use controls::{Params, StreamOptions};
 pub use messages::{Content, Message, Role};
-pub use metadata::Metadata;
+pub use metadata::{
+    MAX_METADATA_ENTRIES, MAX_METADATA_KEY_BYTES, MAX_METADATA_VALUE_BYTES, Metadata,
+};
 pub use response_format::JsonSchemaFormat;
 pub use response_format::ResponseFormat;
 pub use serialize::SerializeError;
@@ -175,7 +177,7 @@ pub(super) fn classify(document: Json, limits: &RequestLimits) -> Checked<ChatRe
             "tools" | "tool_choice" | "parallel_tool_calls" => {
                 tool_defs::parse_field(&mut tool_defs, key.as_str(), value, &mut derived)?;
             }
-            "metadata" => metadata = metadata::parse(value, limits)?,
+            "metadata" => metadata = metadata::parse(value, &mut derived)?,
             "stream" => stream = Some(boolean(value)?),
             "stream_options" => stream_options = Some(controls::parse_stream_options(value)?),
             "temperature" => params.temperature = Some(float_in(value, 0.0, 2.0)?),
@@ -194,7 +196,7 @@ pub(super) fn classify(document: Json, limits: &RequestLimits) -> Checked<ChatRe
                 response_format =
                     Some(response_format::parse_response_format(value, &mut derived)?);
             }
-            // Everything else, including tools, functions, metadata, logit_bias,
+            // Everything else, including functions, logit_bias,
             // audio/modalities, and any unknown key, is rejected.
             _ => return Err(unsupported()),
         }
@@ -356,7 +358,9 @@ mod tests {
             r#"{"model":"m","messages":[{"role":"user","content":"x"}],"tool_choice":"none"}"#,
             r#"{"model":"m","messages":[{"role":"user","content":"x"}],"functions":[]}"#,
             r#"{"model":"m","messages":[{"role":"user","content":"x"}],"function_call":"none"}"#,
-            r#"{"model":"m","messages":[{"role":"user","content":"x"}],"metadata":{}}"#,
+            r#"{"model":"m","messages":[{"role":"user","content":"x"}],"metadata":null}"#,
+            r#"{"model":"m","messages":[{"role":"user","content":"x"}],"metadata":[]}"#,
+            r#"{"model":"m","messages":[{"role":"user","content":"x"}],"metadata":{"k":1}}"#,
             r#"{"model":"m","messages":[{"role":"user","content":"x"}],"logit_bias":{}}"#,
             r#"{"model":"m","messages":[{"role":"user","content":"x"}],"audio":{}}"#,
             r#"{"model":"m","messages":[{"role":"user","content":"x"}],"modalities":["text"]}"#,
