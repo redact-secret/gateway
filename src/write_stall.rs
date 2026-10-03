@@ -36,7 +36,7 @@ use axum::serve::Listener;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tokio::time::{Sleep, sleep};
+use tokio::time::{Instant, Sleep, sleep};
 
 /// A TCP listener whose accepted connections enforce the write-stall deadline.
 #[derive(Debug)]
@@ -96,6 +96,13 @@ pub(crate) struct StallIo<T> {
     stall: Duration,
     /// Running only while a write or flush is pending.
     timer: Option<Pin<Box<Sleep>>>,
+    /// Cumulative-blocked-time cap (see [`StallIo::with_write_budget`]); `None` is
+    /// unbounded (unit tests only).
+    budget: Option<Duration>,
+    /// Time already spent with a write pending, summed over every pending interval.
+    blocked: Duration,
+    /// When the current pending interval began.
+    pending_since: Option<Instant>,
     /// The connection slot (#40). Declared last so it is returned after the socket closes.
     permit: Option<OwnedSemaphorePermit>,
 }
@@ -106,8 +113,23 @@ impl<T> StallIo<T> {
             inner,
             stall,
             timer: None,
+            budget: None,
+            blocked: Duration::ZERO,
+            pending_since: None,
             permit: None,
         }
+    }
+
+    /// Cap the *total* time writes may spend pending (blocked on a consumer that is not
+    /// reading), summed over the whole connection. The stall deadline restarts on every
+    /// byte of progress, so a consumer that reads a few bytes inside each stall window is
+    /// never "stalled" and could hold a buffered response, its upstream permit, and its
+    /// socket for as long as it likes. One connection carries one request, so this is a
+    /// per-response bound on consumer wait (#59).
+    #[must_use]
+    pub(crate) const fn with_write_budget(mut self, budget: Duration) -> Self {
+        self.budget = Some(budget);
+        self
     }
 
     fn with_permit(mut self, permit: OwnedSemaphorePermit) -> Self {

@@ -81,6 +81,9 @@ pub struct Inspection {
     admission: Arc<Admission>,
     max_output: usize,
     metrics: Option<Arc<Metrics>>,
+    /// Test-only: parks a started job on a worker until opened (see [`test_gate`]).
+    #[cfg(test)]
+    gate: Option<Arc<test_gate::Gate>>,
 }
 
 impl Inspection {
@@ -113,7 +116,19 @@ impl Inspection {
             admission,
             max_output: max_input,
             metrics: None,
+            #[cfg(test)]
+            gate: None,
         })
+    }
+
+    /// Test-only: park every started inspection job on `gate` after its worker picked it
+    /// up and before any core call, so a test can hold a request in the "inspection
+    /// running" state deterministically. Compiled only under `cfg(test)`.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_test_gate(mut self, gate: Arc<test_gate::Gate>) -> Self {
+        self.gate = Some(gate);
+        self
     }
 
     /// Record the serialization stage timing (measured on the worker) into `metrics`.
@@ -159,7 +174,13 @@ impl Inspection {
         let spec = Arc::clone(&self.spec);
         let max_output = self.max_output;
         let metrics = self.metrics.clone();
+        #[cfg(test)]
+        let gate = self.gate.clone();
         let handle = self.pool.submit_job(permit, move |inspector| {
+            #[cfg(test)]
+            if let Some(gate) = &gate {
+                gate.enter();
+            }
             inspect_request(inspector, &spec, max_output, validated, metrics.as_deref())
         })?;
         let (validated, inspection) = handle.await??;
@@ -259,6 +280,57 @@ pub fn approve(
         route,
         validated.into_memory(),
     ))
+}
+
+/// A re-closable barrier a started inspection job parks on (test-only).
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+pub(crate) mod test_gate {
+    use std::sync::{Condvar, Mutex};
+
+    use tokio::sync::Semaphore;
+
+    /// Jobs call [`Gate::enter`] on the worker thread; the test awaits [`Gate::entered`]
+    /// for each, then [`Gate::open`]s the gate. Events, not sleeps.
+    #[derive(Debug)]
+    pub(crate) struct Gate {
+        open: Mutex<bool>,
+        cv: Condvar,
+        entered: Semaphore,
+    }
+
+    impl Gate {
+        pub(crate) fn new_closed() -> Self {
+            Self {
+                open: Mutex::new(false),
+                cv: Condvar::new(),
+                entered: Semaphore::new(0),
+            }
+        }
+
+        /// Worker side: announce the start, then block until the gate is open.
+        pub(crate) fn enter(&self) {
+            self.entered.add_permits(1);
+            let mut open = self.open.lock().unwrap();
+            while !*open {
+                open = self.cv.wait(open).unwrap();
+            }
+        }
+
+        /// Test side: wait until one more job has started and parked.
+        pub(crate) async fn entered(&self) {
+            self.entered.acquire().await.unwrap().forget();
+        }
+
+        pub(crate) fn open(&self) {
+            *self.open.lock().unwrap() = true;
+            self.cv.notify_all();
+        }
+
+        pub(crate) fn close(&self) {
+            *self.open.lock().unwrap() = false;
+        }
+    }
 }
 
 #[cfg(test)]
