@@ -157,9 +157,11 @@ def load(seconds, clients, size, shape):
             rows.extend(result)
     times = sorted(row['milliseconds'] for row in rows)
     statuses = {str(code): sum(row['status'] == code for row in rows) for code in sorted({row['status'] for row in rows})}
+    successful_times=sorted(row['milliseconds'] for row in rows if row['status']==200)
     print(json.dumps({'requests': len(rows), 'clients': clients, 'text_bytes': size,
                       'seconds': seconds, 'shape':shape, 'statuses': statuses,
-                      'roundtrip_ms': {f'p{percent}': times[min(len(times)-1, len(times)*percent//100)] if times else None for percent in (50,95,99)}}))
+                      'roundtrip_ms': {f'p{percent}': times[min(len(times)-1, len(times)*percent//100)] if times else None for percent in (50,95,99)},
+                      'successful_roundtrip_ms':{f'p{percent}':successful_times[min(len(successful_times)-1,len(successful_times)*percent//100)] if successful_times else None for percent in (50,95,99)}}))
 
 
 if __name__ == '__main__':

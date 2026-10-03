@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import selectors
 import subprocess
 import sys
 import tempfile
@@ -301,7 +302,12 @@ def shipped_manifest():
 def start_egress_watch(pod):
     info=json.loads(kube('get','pod',pod,'-o','json'))
     process=subprocess.Popen(['kubectl','--context','kind-'+CLUSTER,'-n',NS,'exec',pod,'-c','app','--','python','/tools/actor.py','watch-egress',info['status']['podIP'],'fd00:be7a:2::1'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-    started=json.loads(process.stdout.readline())
+    with selectors.DefaultSelector() as selector:
+        selector.register(process.stdout,selectors.EVENT_READ)
+        if not selector.select(timeout=10):
+            process.kill()
+            raise RuntimeError('egress watcher start deadline exceeded')
+        started=json.loads(process.stdout.readline(1024))
     assert started['watch_started'] is True
     return process,started['pid']
 
