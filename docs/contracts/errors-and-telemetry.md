@@ -1,6 +1,6 @@
 # Contract: safe errors and telemetry
 
-Status: SDK retry behavior and stream truncation behavior verified with the pinned Node.js and Python SDKs in #22 ([ADR 0020](../decisions/0020-sdk-qualification-test-build.md); section "SDK retry guidance" below). Approved categories; code spellings fixed in #4; HTTP status mappings for the Chat Completions admission path fixed in #18 (below); header and credential outcomes added in #24 ([contract](headers-and-credentials.md)). Mappings for transport failures and relayed ordinary JSON responses fixed in #20 ([ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md); below); the SSE stream termination contract and stream timings fixed in #21 ([ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md); below).
+Status: transport framing, the frozen status mapping, and the SDK retry, duplicate-work and truncation matrix qualified in #60 (sections "Frozen status mapping" and "Alpha 2 transport qualification"). SDK retry behavior and stream truncation behavior verified with the pinned Node.js and Python SDKs in #22 ([ADR 0020](../decisions/0020-sdk-qualification-test-build.md); section "SDK retry guidance" below). Approved categories; code spellings fixed in #4; HTTP status mappings for the Chat Completions admission path fixed in #18 (below); header and credential outcomes added in #24 ([contract](headers-and-credentials.md)). Mappings for transport failures and relayed ordinary JSON responses fixed in #20 ([ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md); below); the SSE stream termination contract and stream timings fixed in #21 ([ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md); below).
 
 ## Gateway-owned error categories
 
@@ -100,7 +100,7 @@ The response is buffered under hard bounds and relayed only when complete, so ev
 | Connect refused, name not allowed or not resolvable, address policy refusal | 502 | `upstream_unavailable` | no | yes |
 | TLS failure (certificate, hostname, handshake) | 502 | `upstream_tls_failure` | no | yes |
 | Connect, response-header, or total deadline elapsed | 504 | `upstream_timeout` | maybe (see below) | yes |
-| Malformed or truncated response; provider closed the connection after the request was sent; response `Content-Encoding` other than `identity` | 502 | `upstream_invalid_response` | yes | yes |
+| Malformed or truncated response; provider closed the connection after the request was sent; response `Content-Encoding` other than `identity`; a final `1xx` status such as `101` (#60) | 502 | `upstream_invalid_response` | yes | yes |
 | Response header block over `max_response_header_bytes`, or body over `max_response_body_bytes` (declared or counted) | 502 | `upstream_response_too_large` | yes | yes |
 | Caller disconnected, or shutdown cancelled the request | none deliverable / 503 `not_ready` | n/a | maybe | n/a |
 
@@ -226,8 +226,92 @@ What to tell integrators:
 1. The default retry policy is status-based and the gateway does not change it, except that the gateway drops the provider's `x-should-retry` and `retry-after-ms` hints (its response-header allowlist relays only `content-type`, `cache-control`, `retry-after`, `x-request-id`, `openai-processing-ms`, `openai-version`, and `x-ratelimit-*`). A provider that says "do not retry" is therefore retried through the gateway. This was observed with the fake provider; the headers a real provider sends were not observed.
 2. With the defaults, a failure after the request reached the provider is sent to the provider up to three times (duplicate and possibly billed work). Set `maxRetries: 0` (Node) or `max_retries=0` (Python) unless duplicates are acceptable; the shipped examples do.
 3. A retry of a request the gateway rejected locally (`4xx`, `501`, `503 overload`, `502 upstream_unavailable`) never reaches the provider, so it is safe; retries of `501` are wasted work.
-4. Stream truncation: Python raises `APIConnectionError`; Node.js raises on Node 24 but ended normally on Node 22.16.0 (see the SSE section). Require `finish_reason` on Node.js.
+4. Stream truncation: Python raises `APIConnectionError`; Node.js raises on Node 24 but ended normally on Node 22.16.0 (see the SSE section), and any SDK ends normally when the provider ends a stream cleanly without a completion. Require `finish_reason` everywhere ("Detecting an incomplete stream"). The #60 matrix re-measured all of this, with retries disabled as well as at the default.
 5. This is not a statement about other SDK versions or other HTTP clients, and not a statement about the real provider.
+
+## Detecting an incomplete stream (#60)
+
+A stream the Gateway could not finish ends abruptly, with no terminating chunk and nothing written into it (see "SSE streams"). Whether that cut is *reported* depends on the client stack, and a stream can also end cleanly and still be incomplete (a provider that closes early, or an intermediary that does). Callers must therefore decide completeness from the content, not from the iteration:
+
+1. **Require the provider's completion indicator.** For Chat Completions, a chunk whose `choices[0].finish_reason` is non-null, and (where you read the raw events) the final `data: [DONE]` line. If you use an SDK, track `finish_reason` while iterating; if the loop ends without one, treat the text as truncated, discard it or mark it partial, and do not act on it.
+2. **The end of an SDK iteration is not evidence of a valid completion.** Observed with the pinned SDKs (below): Node.js 22.16.0 ended the iteration normally for every broken stream; every SDK ended the iteration normally for a stream the provider ended cleanly after two events, with no `finish_reason` and no `[DONE]`. `[DONE]` is consumed by the SDKs and is not visible to SDK users, so `finish_reason` is the practical check.
+3. **A raised error is a truncation signal, not the only one.** Python raised `APIConnectionError` and Node.js 24 raised in every cut case; neither is a guarantee for other versions.
+4. **The Gateway never fabricates a completion**: it adds no event, no `finish_reason`, no `[DONE]` and no error event to any stream. Nothing a caller sees as complete was invented by the Gateway.
+5. **Do not retry blindly.** A retried stream is a new request to the provider; see "SDK retry guidance" and the duplicate-work evidence below. Both SDKs never retry once the response headers are committed.
+
+The shipped examples (`examples/node`, `examples/python`) check `finish_reason` and fail when it is absent; both run in the Qualification workflow.
+
+## Alpha 2 transport qualification (2026-10-03, #60)
+
+What was added to the qualification (everything synthetic, loopback only, NON-RELEASE build per [ADR 0020](../decisions/0020-sdk-qualification-test-build.md); nothing here is a statement about a real provider, other SDK versions, other runtimes, or an intermediary):
+
+- **Status mapping frozen and enforced** ("Frozen status mapping (#60)" above; `src/status_contract_tests.rs`).
+- **HTTP-level framing, coding and header qualification** in the crate's own test suite (`src/transport/tests/framing_matrix_tests.rs`, plus the request-head matrix already in `attack_tests.rs` and `header_cap_tests.rs`), against the loopback fake provider.
+- **SDK matrix** (`qualification/sdk/node/test/matrix.test.ts`, `qualification/sdk/python/tests/test_matrix.py`): every scenario run twice per SDK, once with the SDK's default retries (2) and once with retries explicitly disabled, recording attempts, provider-side requests and bodies, and stream completion. Evidence is uploaded by the Qualification workflow as `matrix-observations-node.json` and `matrix-observations-python.json`.
+- **Two Node.js runtimes in CI**: Node.js 24 runs everything; Node.js 22.16.0 (undici 6.21.2) runs the whole Node.js SDK suite, so the runtime difference is a tested fact.
+
+### Request and response framing at the HTTP level
+
+Rejected request framing never reaches the provider (`attack_tests.rs`: every case in `rejected_framing_cases` leaves the fake with zero connections or zero request bytes; `header_cap_tests.rs`: every head-size class). Request `Content-Encoding` of any value and any transfer coding other than `chunked` are `415 unsupported_input`. Provider-side, each case below is a single attempt, leak-scanned, and answered with the fixed body:
+
+| Provider response | Caller sees |
+| --- | --- |
+| Declared `Content-Length` longer than the bytes sent; truncated chunked body; chunk larger than what follows; headers or status line cut short | `502 upstream_invalid_response` |
+| Two different `Content-Length` values; a `Content-Length` that is not a number, has a sign, or overflows; chunk size not hexadecimal; status line that is not HTTP; header line with no colon | `502 upstream_invalid_response` |
+| `101 Switching Protocols` (an informational final status; found by this work: it was relayed to the caller before, now refused) | `502 upstream_invalid_response` |
+| `Content-Encoding` other than `identity`: `gzip`, `x-gzip`, `deflate`, `br`, `zstd`, `compress`, a list containing a coding, an unknown coding, `identity` followed by `gzip` on a second line | `502 upstream_invalid_response` |
+| `Content-Length` shorter than the bytes sent | `200`; only the declared bytes are relayed, the extra provider bytes are dropped |
+| Both `Content-Length` and `Transfer-Encoding: chunked` | `200`; the pinned HTTP client lets the chunked framing win and drops the length; neither framing header is relayed. A dependency upgrade that changes this fails `provider_response_ambiguities_the_client_resolves_are_pinned` |
+| JSON with no length at all and `Connection: close` | `200`; read to the end of the connection (valid close-delimited framing). Event streams refuse this form (ADR 0018) |
+| `Content-Encoding: identity` | `200`; the header itself is not relayed |
+
+Hop-by-hop and connection-nominated headers are stripped in both directions: a provider `Keep-Alive`, `Proxy-Authenticate`, `Proxy-Connection`, `Trailer`, `TE`, `Upgrade`, `Set-Cookie` and any header named in the provider's `Connection` (including an otherwise allowlisted `X-Request-Id`) are not relayed; a caller's `Connection`-nominated header, `Keep-Alive`, `Proxy-Authorization`, `Proxy-Connection`, `TE`, `Trailer` and `X-Forwarded-For` never reach the provider. Error bodies and headers in every case above carry no provider byte, request credential or payload text (leak scan with synthetic markers).
+
+### Observed SDK matrix: failures before the response is committed
+
+Same counts for the Node.js SDK (openai 7.27.0, Node.js 24.21.0 and 22.16.0) and the Python SDK (openai 3.24.0, Python 3.14.7 locally, 3.13 in CI). "Requests" are what the fake provider received; every retry arrived with the same sanitized body (identical bytes), as a fresh request: the Gateway sent each attempt once and replayed nothing.
+
+| Scenario | Gateway answer | Default retries: SDK attempts / provider requests | Retries disabled: SDK attempts / provider requests |
+| --- | --- | --- | --- |
+| Provider closes before any response byte | `502 upstream_invalid_response` | 3 / 3 | 1 / 1 |
+| Partial response head, then close | `502 upstream_invalid_response` | 3 / 3 | 1 / 1 |
+| Non-HTTP status line | `502 upstream_invalid_response` | 3 / 3 | 1 / 1 |
+| Two different `Content-Length` values | `502 upstream_invalid_response` | 3 / 3 | 1 / 1 |
+| `Content-Encoding: gzip` | `502 upstream_invalid_response` | 3 / 3 | 1 / 1 |
+| JSON body truncated | `502 upstream_invalid_response` | 3 / 3 | 1 / 1 |
+| Provider stops reading a ~200 KB request body part way (partial upstream send; the provider kept about 65,000 bytes per attempt) | `502 upstream_invalid_response` | 3 / 3 | 1 / 1 |
+| Response over the body bound | `502 upstream_response_too_large` | 3 / 3 | 1 / 1 |
+| Provider never answers (tight limits) | `504 upstream_timeout` | 3 / 3 | 1 / 1 |
+| Stream requested, provider closes before any response byte | `502 upstream_invalid_response` | 3 / 3 | 1 / 1 |
+| Gateway overload (`Retry-After: 1`) | `503 overload` | 3 / 0 (the SDK waited the relayed second twice) | 1 / 0 |
+| Connection to the Gateway refused | none (`APIConnectionError`) | 3 / 0 | 1 / 0 |
+
+**Duplicate upstream work after delivery uncertainty.** In every `502`/`504` row the request had reached the provider, the Gateway could not tell whether the provider acted on it, and it answered once with a safe error. With the SDK default the application then sent it again twice: the provider received three requests, with identical bodies except in the partial-send row (where each attempt was cut at a different point). The Gateway performed no retry and no replay; the duplication is the client's. Explicitly disabling retries (`maxRetries: 0` / `max_retries=0`) limited every row to one provider request. Retries of the rows that never reached the provider (overload, refused) are safe.
+
+### Observed SDK matrix: streams after the response is committed
+
+Retry counts: every stream scenario below was one SDK attempt and one provider request, with the SDK default and with retries disabled; the SDK never retries once the headers are committed. "Raised" is whether the SDK iteration threw. Completeness is decided by `finish_reason`, not by "raised".
+
+| Scenario | `finish_reason` seen | Python 3.24.0 | Node.js 24 (undici 7.29.1) | Node.js 22.16.0 (undici 6.21.2) |
+| --- | --- | --- | --- | --- |
+| Complete stream | yes (8 events) | ends normally | ends normally | ends normally |
+| `finish_reason` arrives, no `[DONE]`, clean end | yes (8 events) | ends normally | ends normally | ends normally |
+| Provider ends cleanly after two events (no `finish_reason`, no `[DONE]`) | **no** (2 events) | **ends normally** | **ends normally** | **ends normally** |
+| Provider cut after two events | no (2) | raised `APIConnectionError` | raised | **ended normally** |
+| Provider cut after the headers, before any event | no (0) | raised | raised | **ended normally** |
+| Invalid chunk framing after the headers | no (1) | raised | raised | **ended normally** |
+| Gateway idle deadline cut a stalled stream | no (2) | raised | raised | **ended normally** |
+
+Reading the table: an iteration that ends normally says nothing about completeness. Node.js 22.16.0 never raised for a cut stream through the Gateway (which sends `Connection: close`); the same Node.js 22.16.0 fetch does raise for a cut on a keep-alive response (control in `streaming.test.ts`). The "ended cleanly after two events" row is not a transport fault at all and is invisible to any iteration-based check. No row shows a fabricated completion event.
+
+A provider that closes in the same instant as it sends the headers can be observed either as a `502` before the commit or as a committed stream that is then truncated; which one the caller sees depends on whether the Gateway read the headers first. The matrix scenario waits 150 ms after the headers to be deterministic. Either way no completion is invented, and a retried pre-commit `502` duplicates provider work as above.
+
+### Residual limitations
+
+- Versions: pinned `openai` 7.27.0 (Node.js) and 3.24.0 (Python); Node.js 24 as resolved by `setup-node` and 22.16.0; Python 3.13 (CI). Nothing is claimed for other versions, other runtimes, other HTTP clients, or a real provider.
+- The fake provider and a loopback network only: no TLS, no intermediary, no proxy, no real provider hints (`x-should-retry` and `retry-after-ms` are dropped by the Gateway, so a provider "do not retry" does not reach the SDK).
+- Timing-dependent races (a provider closing exactly as headers are sent; delivery of a head-guard answer to a peer still sending) are documented as best effort, not asserted beyond the deterministic scenarios.
+- No retry broker, no exactly-once or at-most-once claim, and no transparent interception claim. The Gateway never retries.
 
 ## Stage timings (ADR 0008)
 

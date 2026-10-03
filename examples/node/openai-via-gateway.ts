@@ -63,9 +63,11 @@ async function main(): Promise<void> {
     text += chunk.choices[0]?.delta?.content ?? "";
     finishReason = chunk.choices[0]?.finish_reason ?? finishReason;
   }
-  // The gateway ends a broken stream abruptly and never invents a completion. Depending on the
-  // Node.js version, fetch may report that as a normal end (observed on 22.16.0, not on 24), so
-  // the version-independent completeness check is the completion indicator the provider sends.
+  // The gateway ends a broken stream abruptly and never invents a completion. The loop ending is
+  // NOT evidence that the answer is complete: depending on the Node.js version, fetch reports a
+  // cut stream as a normal end (observed on 22.16.0, not on 24), and a provider can also end a
+  // stream cleanly without a completion. The completion indicator the provider sends
+  // (finish_reason on a chunk) is the check that holds on every runtime.
   if (finishReason === null) {
     throw new Error("the stream ended without a completion event: treat the output as truncated");
   }

@@ -360,3 +360,7 @@ mod stream_tests {
         assert!(!format!("{m:?}").contains("data:"));
     }
 }
+
+#[cfg(test)]
+#[path = "status_contract_tests.rs"]
+mod status_contract_tests;
