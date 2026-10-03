@@ -192,7 +192,7 @@ async fn redact_slot_count(
         protocol::validate_with(received, Protocol::ChatCompletionsText, &rig.limits).unwrap();
     let mut redact = 0_usize;
     let mut with_secret = 0_usize;
-    validated.chat().for_each_text(|slot, text| {
+    validated.chat().expect("chat").for_each_text(|slot, text| {
         if slot.mode() == SlotMode::Redact {
             redact += 1;
             if text.contains("SYNTHETICREVOKED") {

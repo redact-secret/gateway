@@ -61,3 +61,7 @@ Requiring `store:false` makes the first-call experience stricter than the provid
 ## Implementation status
 
 Planned. Contract frozen by #82. Nothing in this ADR is implemented in code.
+
+## Implementation note (#83)
+
+The typed dispatch is in place: `protocol::RequestBody::{Chat, Responses}`, `protocol::Protocol::ResponsesText` (canonical route id `openai.responses`), and `boundary::ProtocolRoute` binding a protocol to its route at approval. `protocol::responses::ResponsesRequest` is a skeleton that carries only `model`, `instructions` and string `input` so the shared inspection path is exercised; the classifier (#84), remaining slots (#85), route and destination (#86) and relay (#87) are not implemented, and `POST /v1/responses` is still unrouted.

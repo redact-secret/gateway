@@ -44,7 +44,12 @@ fn sealed(admission: &Admission, body: &[u8]) -> boundary::SanitizedRequest {
             .unwrap(),
         admission.try_receipt().unwrap(),
     );
-    boundary::approve(v, CompleteInspection::for_test(body.to_vec()), route()).unwrap()
+    boundary::approve(
+        v,
+        CompleteInspection::for_test(body.to_vec()),
+        chat_route(route()),
+    )
+    .unwrap()
 }
 
 #[tokio::test]
@@ -281,8 +286,12 @@ fn profile_and_deployment_state_do_not_alter_header_policy() {
             adm.try_reserve_memory(2).unwrap(),
             adm.try_receipt().unwrap(),
         );
-        let request =
-            boundary::approve(v, CompleteInspection::for_test(b"{}".to_vec()), route).unwrap();
+        let request = boundary::approve(
+            v,
+            CompleteInspection::for_test(b"{}".to_vec()),
+            chat_route(route),
+        )
+        .unwrap();
         let req = up
             .outbound(vetted(KEY_A, &[("openai-project", "proj_1")]), &request)
             .unwrap()

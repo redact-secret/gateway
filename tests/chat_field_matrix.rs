@@ -299,6 +299,7 @@ async fn outcome(body: &str) -> Result<Vec<(TextSlot, String)>, Reject> {
     let mut out = Vec::new();
     admitted
         .chat()
+        .expect("chat request")
         .for_each_text(|slot, text| out.push((slot, text.to_owned())));
     Ok(out)
 }

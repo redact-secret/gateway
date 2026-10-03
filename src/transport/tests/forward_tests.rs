@@ -283,7 +283,7 @@ async fn upstream_receives_exactly_the_sanitized_body_and_only_vetted_headers() 
         protocol::validate_with(received, Protocol::ChatCompletionsText, &rig.limits).unwrap();
     let expected = rig
         .inspection
-        .inspect_and_approve(validated, RouteId::new(ROUTE))
+        .inspect_and_approve(validated, chat_route(RouteId::new(ROUTE)))
         .await
         .unwrap();
     assert_eq!(call.body, expected.body(), "exactly the sanitized body");
@@ -975,7 +975,7 @@ async fn upstream_response_debug_never_prints_the_provider_body() {
     let sealed = boundary::approve(
         v,
         CompleteInspection::for_test(GOOD.as_bytes().to_vec()),
-        route(),
+        chat_route(route()),
     )
     .unwrap();
     let up = http_upstream(rig.fake.addr());

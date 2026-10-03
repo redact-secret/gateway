@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use redact_secret::Profile;
 use redact_secret_gateway::admission::{Admission, AdmissionError, CapacityPlan, RequestLimits};
 use redact_secret_gateway::boundary::Inspection;
+use redact_secret_gateway::boundary::ProtocolRoute;
 use redact_secret_gateway::config::{ContentPolicy, RouteId};
 use redact_secret_gateway::protocol::{self, Protocol};
 use serde_json::{Value, json};
@@ -646,7 +647,13 @@ pub async fn memory_phase(shape: Shape, size: usize, phase: &str, n: usize) -> V
             _ => {
                 if let Some(v) = one(body.clone()).await
                     && let Ok(s) = inspection
-                        .inspect_and_approve(v, RouteId::new("synthetic-route"))
+                        .inspect_and_approve(
+                            v,
+                            ProtocolRoute::new(
+                                Protocol::ChatCompletionsText,
+                                RouteId::new("synthetic-route"),
+                            ),
+                        )
                         .await
                 {
                     approved.push(s);

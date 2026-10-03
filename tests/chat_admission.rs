@@ -676,6 +676,7 @@ async fn texts_of(body: &str) -> Vec<(TextSlot, String)> {
     let mut out = Vec::new();
     validated
         .chat()
+        .expect("chat request")
         .for_each_text(|slot, text| out.push((slot, text.to_owned())));
     out
 }
@@ -690,7 +691,7 @@ async fn supported_forms_parse_into_the_typed_contract() {
           {"role":"assistant","content":"ok"}],
         "stop":["END"],"user":"tester"}"#;
     let v = route.admit(request(body.as_bytes())).await.unwrap();
-    let chat = v.chat();
+    let chat = v.chat().expect("chat request");
     assert_eq!(chat.model(), "gpt-4o");
     assert_eq!(chat.messages().len(), 3);
     assert_eq!(chat.stream(), Some(false));

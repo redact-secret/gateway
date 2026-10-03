@@ -1062,7 +1062,7 @@ async fn forward_stream_hands_both_permits_to_the_body_and_hides_provider_conten
     let sealed = boundary::approve(
         v,
         CompleteInspection::for_test(br#"{"model":"m","messages":[],"stream":true}"#.to_vec()),
-        route(),
+        chat_route(route()),
     )
     .unwrap();
     let up = http_upstream(rig.fake.addr());

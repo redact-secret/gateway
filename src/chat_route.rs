@@ -62,7 +62,7 @@ use axum::routing::any;
 use tokio::sync::watch;
 
 use crate::admission::{Admission, AdmissionError, RequestLimits};
-use crate::boundary::{BoundaryError, Inspection};
+use crate::boundary::{BoundaryError, Inspection, ProtocolRoute};
 use crate::config::RouteId;
 use crate::core_bridge::CoreBridgeError;
 use crate::protocol::chat::ChatRequest;
@@ -251,7 +251,7 @@ impl Admitted {
 
     /// The typed request (shorthand for `validated().chat()`).
     #[must_use]
-    pub const fn chat(&self) -> &ChatRequest {
+    pub const fn chat(&self) -> Option<&ChatRequest> {
         self.validated.chat()
     }
 
@@ -393,7 +393,7 @@ impl ChatRoute {
     /// Inspect, approve, forward, and relay an admitted request. Every Gateway-side
     /// failure is a fixed safe rejection; a provider answer is relayed as received.
     async fn process(&self, mut admitted: Admitted) -> Response {
-        let streaming = admitted.chat().stream() == Some(true);
+        let streaming = admitted.validated().body().stream() == Some(true);
         // A streamed response to an HTTP/1.0 caller would end with the connection, so an
         // interrupted stream could not be told from a finished one: not served.
         if streaming && admitted.legacy_http {
@@ -405,6 +405,7 @@ impl ChatRoute {
         let headers = admitted.take_headers();
         let (validated, route) = admitted.into_parts();
         let started = Instant::now();
+        let route = ProtocolRoute::new(Protocol::ChatCompletionsText, route);
         let sanitized = match inspection.inspect_and_approve(validated, route).await {
             Ok(sanitized) => sanitized,
             Err(error) => return Reject::Inspection(error).into_response(),
@@ -706,6 +707,7 @@ mod tests {
             Reject::Transport(TransportError::UnknownRoute),
             Reject::Inspection(BoundaryError::OutputLimit),
             Reject::Inspection(BoundaryError::Serialization),
+            Reject::Inspection(BoundaryError::RouteMismatch),
             Reject::Inspection(BoundaryError::Core(CoreBridgeError::Blocked)),
             Reject::Inspection(BoundaryError::Core(CoreBridgeError::Incomplete)),
             Reject::Inspection(BoundaryError::Core(CoreBridgeError::Overload)),

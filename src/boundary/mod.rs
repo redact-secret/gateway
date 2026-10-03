@@ -23,8 +23,7 @@ use crate::core_bridge::pool::InspectionPool;
 use crate::core_bridge::{
     CompleteInspection, CoreBridgeError, Inspector, InspectorSpec, RequestScope,
 };
-use crate::protocol::ValidatedRequest;
-use crate::protocol::chat::{SerializeError, SlotMode};
+use crate::protocol::{Protocol, SerializeError, SlotMode, ValidatedRequest};
 use crate::telemetry::{Metrics, SafeCode, Stage};
 
 /// Most inspection worker threads, whatever the configured inspection capacity.
@@ -32,6 +31,33 @@ const MAX_WORKERS: usize = 16;
 /// Largest job queue, whatever the configured inspection capacity. Queued plus running jobs
 /// can never exceed the inspection permits, so this only matters for huge capacities.
 const MAX_QUEUE: usize = 1024;
+
+/// An approved route paired with the protocol it serves. The pairing is made where the
+/// route is built from the startup plan (never from the request), and approval refuses a
+/// validated request of another protocol, so a Chat payload cannot be sealed for the
+/// Responses route or the reverse.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProtocolRoute {
+    protocol: Protocol,
+    id: RouteId,
+}
+
+impl ProtocolRoute {
+    #[must_use]
+    pub const fn new(protocol: Protocol, id: RouteId) -> Self {
+        Self { protocol, id }
+    }
+
+    #[must_use]
+    pub const fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> &RouteId {
+        &self.id
+    }
+}
 
 /// Safe boundary failure. Carries no body or offending text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +67,9 @@ pub enum BoundaryError {
     OutputLimit,
     /// The transformed request could not be serialized.
     Serialization,
+    /// The validated request's protocol is not the route's protocol. A wiring bug, never
+    /// caused by client input; nothing was inspected or sent.
+    RouteMismatch,
     /// Core inspection did not complete successfully (limit, finding limit, detector,
     /// policy or placeholder failure, `Block`/`Warn` rejection, overload, shutdown).
     Core(CoreBridgeError),
@@ -52,6 +81,7 @@ impl BoundaryError {
         match self {
             Self::OutputLimit => SafeCode::LimitExceeded,
             Self::Serialization => SafeCode::UnsupportedInput,
+            Self::RouteMismatch => SafeCode::IncompleteInspection,
             Self::Core(e) => e.code(),
         }
     }
@@ -165,8 +195,12 @@ impl Inspection {
     pub async fn inspect_and_approve(
         &self,
         validated: ValidatedRequest,
-        route: RouteId,
+        route: ProtocolRoute,
     ) -> Result<SanitizedRequest, BoundaryError> {
+        // Before a permit or a worker is spent: a mismatched pair never reaches the core.
+        if validated.protocol() != route.protocol() {
+            return Err(BoundaryError::RouteMismatch);
+        }
         let permit = self
             .admission
             .try_inspection()
@@ -199,18 +233,18 @@ fn inspect_request(
     metrics: Option<&Metrics>,
 ) -> Result<(ValidatedRequest, CompleteInspection), BoundaryError> {
     // `model` is a validated identifier that is never rewritten; any finding rejects.
-    inspector.reject_if_findings(validated.chat().model())?;
-    let expected_redact = validated.chat().redactable_count();
-    let expected_all = validated.chat().text_count();
+    inspector.reject_if_findings(validated.body().model())?;
+    let expected_redact = validated.body().redactable_count();
+    let expected_all = validated.body().text_count();
     let mut scope = RequestScope::new(spec);
     let mut failure: Option<CoreBridgeError> = None;
     let mut visited = 0_usize;
-    validated.chat_mut().for_each_text_mut(|slot, text| {
+    validated.body_mut().for_each_text_mut(|mode, text| {
         if failure.is_some() {
             return;
         }
         visited = visited.saturating_add(1);
-        match slot.mode() {
+        match mode {
             // Structural labels (identifiers, keys, enum values) are never rewritten:
             // any finding blocks the request (ADR 0025).
             SlotMode::DetectOnly => {
@@ -232,14 +266,14 @@ fn inspect_request(
         return Err(CoreBridgeError::Incomplete.into());
     }
     // Replacement can break bounds or derived structure; fail closed before serializing.
-    validated.chat().revalidate().map_err(|e| match e {
+    validated.body().revalidate().map_err(|e| match e {
         SerializeError::Limit => BoundaryError::OutputLimit,
         SerializeError::Invalid => BoundaryError::Serialization,
     })?;
     let bound = max_output.min(reserved_bytes(&validated));
     let serializing = std::time::Instant::now();
     let output = validated
-        .chat()
+        .body()
         .serialize_bounded(bound)
         .map_err(|e| match e {
             SerializeError::Limit => BoundaryError::OutputLimit,
@@ -265,19 +299,24 @@ fn reserved_bytes(validated: &ValidatedRequest) -> usize {
 /// reservation moves into the sanitized value and is released only when it is dropped.
 ///
 /// # Errors
-/// [`BoundaryError::OutputLimit`] when the output is empty or exceeds the reservation.
+/// [`BoundaryError::OutputLimit`] when the output is empty or exceeds the reservation;
+/// [`BoundaryError::RouteMismatch`] when the protocols differ.
 pub fn approve(
     validated: ValidatedRequest,
     inspection: CompleteInspection,
-    route: RouteId,
+    route: ProtocolRoute,
 ) -> Result<SanitizedRequest, BoundaryError> {
+    if validated.protocol() != route.protocol() {
+        return Err(BoundaryError::RouteMismatch);
+    }
     let output = inspection.into_output();
     if output.is_empty() || output.len() > reserved_bytes(&validated) {
         return Err(BoundaryError::OutputLimit);
     }
     Ok(SanitizedRequest::new(
         output,
-        route,
+        route.protocol,
+        route.id,
         validated.into_memory(),
     ))
 }
@@ -340,6 +379,10 @@ mod tests {
     use super::*;
     use crate::admission::{Admission, CapacityPlan};
 
+    fn chat_route(id: &str) -> ProtocolRoute {
+        ProtocolRoute::new(Protocol::ChatCompletionsText, RouteId::new(id))
+    }
+
     fn validated(units: u32) -> (Admission, ValidatedRequest) {
         let one = NonZeroU32::new(1).expect("nonzero");
         let big = NonZeroU32::new(64).expect("nonzero");
@@ -356,7 +399,7 @@ mod tests {
         let s = approve(
             v,
             CompleteInspection::for_test(b"{}".to_vec()),
-            RouteId::new("synthetic-route"),
+            chat_route("synthetic-route"),
         )
         .expect("approved");
         assert_eq!(s.body(), b"{}");
@@ -374,23 +417,126 @@ mod tests {
         let err = approve(
             v,
             CompleteInspection::for_test(vec![0; 4 * 1024 + 1]),
-            RouteId::new("r"),
+            chat_route("r"),
         );
         assert_eq!(err.unwrap_err(), BoundaryError::OutputLimit);
         let (_a, v) = validated(4);
         let ok = approve(
             v,
             CompleteInspection::for_test(vec![b'x'; 4 * 1024]),
-            RouteId::new("r"),
+            chat_route("r"),
         );
         assert!(ok.is_ok());
         let (_a, v) = validated(4);
+        let err = approve(v, CompleteInspection::for_test(Vec::new()), chat_route("r"));
+        assert_eq!(err.unwrap_err(), BoundaryError::OutputLimit);
+    }
+
+    #[test]
+    fn approve_refuses_a_protocol_route_mismatch_in_both_directions() {
+        let (admission, v) = validated(16);
+        let responses = ProtocolRoute::new(Protocol::ResponsesText, RouteId::new("r"));
+        let err = approve(v, CompleteInspection::for_test(b"{}".to_vec()), responses);
+        assert_eq!(err.unwrap_err(), BoundaryError::RouteMismatch);
+        // The refused request released its reservation.
+        assert!(admission.try_reserve_memory(64).is_ok());
+
+        let one = NonZeroU32::new(1).expect("nonzero");
+        let big = NonZeroU32::new(64).expect("nonzero");
+        let admission = Admission::new(&CapacityPlan::new(one, big, one, one, one));
+        let memory = admission.try_reserve_memory(16).expect("reserve");
+        let receipt = admission.try_receipt().expect("receipt");
+        let v = ValidatedRequest::for_test_responses(memory, receipt);
         let err = approve(
             v,
-            CompleteInspection::for_test(Vec::new()),
-            RouteId::new("r"),
+            CompleteInspection::for_test(b"{}".to_vec()),
+            chat_route("r"),
         );
-        assert_eq!(err.unwrap_err(), BoundaryError::OutputLimit);
+        assert_eq!(err.unwrap_err(), BoundaryError::RouteMismatch);
+        assert!(admission.try_reserve_memory(64).is_ok());
+    }
+
+    #[test]
+    fn matching_responses_pair_approves_and_records_the_protocol() {
+        let one = NonZeroU32::new(1).expect("nonzero");
+        let big = NonZeroU32::new(64).expect("nonzero");
+        let admission = Admission::new(&CapacityPlan::new(one, big, one, one, one));
+        let memory = admission.try_reserve_memory(16).expect("reserve");
+        let receipt = admission.try_receipt().expect("receipt");
+        let v = ValidatedRequest::for_test_responses(memory, receipt);
+        let route = ProtocolRoute::new(Protocol::ResponsesText, RouteId::new("r"));
+        let s = approve(v, CompleteInspection::for_test(b"{}".to_vec()), route).expect("ok");
+        assert_eq!(s.protocol(), Protocol::ResponsesText);
+    }
+
+    fn lab(permits: u32) -> (Arc<Admission>, Inspection) {
+        let n = |v| NonZeroU32::new(v).expect("nonzero");
+        let plan = CapacityPlan::new(n(2), n(64), n(permits), n(1), n(1));
+        let admission = Arc::new(Admission::new(&plan));
+        let inspection = Inspection::start(
+            Arc::clone(&admission),
+            &ContentPolicy::new(redact_secret::Profile::Full),
+            &RequestLimits::provisional(),
+            &plan,
+        )
+        .expect("start");
+        (admission, inspection)
+    }
+
+    fn responses_validated(admission: &Admission, input: &str) -> ValidatedRequest {
+        let request = crate::protocol::responses::ResponsesRequest::for_test(
+            "synthetic-model",
+            Some("be brief"),
+            input,
+        );
+        let memory = admission.try_reserve_memory(16).expect("reserve");
+        let receipt = admission.try_receipt().expect("receipt");
+        ValidatedRequest::for_test_with(
+            crate::protocol::RequestBody::Responses(request),
+            memory,
+            receipt,
+        )
+    }
+
+    #[tokio::test]
+    async fn responses_variant_shares_the_inspection_path_and_redacts() {
+        let (admission, inspection) = lab(2);
+        let secret = format!("ghp_SYNTHETICREVOKED{:020}", 7);
+        let validated = responses_validated(&admission, &format!("token {secret} end"));
+        let route = ProtocolRoute::new(Protocol::ResponsesText, RouteId::new("openai.responses"));
+        let sealed = inspection
+            .inspect_and_approve(validated, route)
+            .await
+            .expect("approved");
+        let body = String::from_utf8(sealed.body().to_vec()).expect("utf8");
+        assert!(!body.contains("SYNTHETICREVOKED"), "a secret survived");
+        assert!(body.contains("<SECRET_1>"));
+        assert!(body.starts_with(
+            "{\"model\":\"synthetic-model\",\"instructions\":\"be brief\",\"input\":"
+        ));
+        assert_eq!(sealed.protocol(), Protocol::ResponsesText);
+        drop(sealed);
+        assert!(admission.try_reserve_memory(64).is_ok());
+    }
+
+    #[tokio::test]
+    async fn mismatch_is_refused_before_a_permit_or_worker_is_spent() {
+        let (admission, inspection) = lab(1);
+        // Chat payload on the Responses route, and the reverse.
+        let memory = admission.try_reserve_memory(16).expect("reserve");
+        let receipt = admission.try_receipt().expect("receipt");
+        let chat = ValidatedRequest::for_test(memory, receipt);
+        let route = ProtocolRoute::new(Protocol::ResponsesText, RouteId::new("openai.responses"));
+        let err = inspection.inspect_and_approve(chat, route).await;
+        assert_eq!(err.unwrap_err(), BoundaryError::RouteMismatch);
+        let validated = responses_validated(&admission, "hello");
+        let err = inspection
+            .inspect_and_approve(validated, chat_route("openai.chat_completions"))
+            .await;
+        assert_eq!(err.unwrap_err(), BoundaryError::RouteMismatch);
+        // Reservation released on the refusal; the single inspection permit was never taken.
+        assert!(admission.try_reserve_memory(64).is_ok());
+        assert!(admission.try_inspection().is_ok());
     }
 
     #[test]
@@ -399,7 +545,7 @@ mod tests {
         let s = approve(
             v,
             CompleteInspection::for_test(b"SYNTHETIC".to_vec()),
-            RouteId::new("r"),
+            chat_route("r"),
         )
         .expect("approved");
         assert!(!format!("{s:?}").contains("SYNTHETIC"));
@@ -411,6 +557,10 @@ mod tests {
         assert_eq!(
             BoundaryError::Serialization.code(),
             SafeCode::UnsupportedInput
+        );
+        assert_eq!(
+            BoundaryError::RouteMismatch.code(),
+            SafeCode::IncompleteInspection
         );
         for (error, code) in [
             (CoreBridgeError::LimitExceeded, SafeCode::LimitExceeded),

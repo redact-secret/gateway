@@ -1,7 +1,7 @@
 error[E0308]: mismatched types
- --> tests/ui/fail_approve_raw_output.rs:8:24
+ --> tests/ui/fail_approve_raw_output.rs:9:24
   |
-8 |     approve(validated, original_body, RouteId::new("r")).unwrap()
+9 |     approve(validated, original_body, route).unwrap()
   |     -------            ^^^^^^^^^^^^^ expected `CompleteInspection`, found `Vec<u8>`
   |     |
   |     arguments to this function are incorrect

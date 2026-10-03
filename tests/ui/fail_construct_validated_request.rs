@@ -4,7 +4,6 @@ use redact_secret_gateway::protocol::ValidatedRequest;
 // fields are private, so a caller cannot assemble one around unchecked data.
 fn forge() -> ValidatedRequest {
     ValidatedRequest {
-        protocol: todo!(),
         request: todo!(),
         memory: todo!(),
         _receipt: todo!(),
