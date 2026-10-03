@@ -105,6 +105,23 @@ impl Rig {
         limits: RequestLimits,
         caps: Caps,
     ) -> Self {
+        Self::over_auth(
+            fake,
+            upstream,
+            limits,
+            caps,
+            crate::transport::local_auth::LocalAuth::Disabled,
+        )
+    }
+
+    /// Like [`Self::over`] with local caller authentication configured (#63).
+    pub(super) fn over_auth(
+        fake: FakeUpstream,
+        upstream: Upstream,
+        limits: RequestLimits,
+        caps: Caps,
+        local_auth: crate::transport::local_auth::LocalAuth,
+    ) -> Self {
         let metrics = Arc::new(Metrics::new());
         let upstream = Upstream {
             metrics: Some(Arc::clone(&metrics)),
@@ -132,6 +149,7 @@ impl Rig {
             ChatRoute::new(Arc::clone(&admission), limits, RouteId::new(ROUTE))
                 .with_inspection(Arc::clone(&inspection))
                 .with_upstream(Arc::new(upstream))
+                .with_local_auth(local_auth)
                 .with_metrics(Arc::clone(&metrics)),
         );
         Self {

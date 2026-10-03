@@ -17,7 +17,9 @@ file, or in version control.
     .venv/bin/python openai_via_gateway.py --demo-redaction   # also sends a synthetic token
 
 Environment: GATEWAY_BASE_URL (default http://127.0.0.1:8787/v1), EXAMPLE_MODEL (default
-gpt-4o-mini; use a chat model your account can call).
+gpt-4o-mini; use a chat model your account can call), and GATEWAY_LOCAL_TOKEN when the gateway
+enforces deployment.local_auth (the container and Compose shape does): the local caller token is a
+separate credential from OPENAI_API_KEY, sent in X-Gateway-Local-Token and never forwarded.
 
 Verified how: this file is run in CI against the NON-RELEASE qualification build with a scripted
 fake provider and a synthetic key (.github/workflows/qualification.yml). It has never been run
@@ -43,7 +45,15 @@ demo_redaction = "--demo-redaction" in sys.argv[1:]
 # default is 2 retries for 408/409/429/5xx and connection errors, and a retry of a request that
 # already reached the provider can duplicate (and bill) provider-side work. Raise it only if you
 # accept that. See docs/contracts/errors-and-telemetry.md ("SDK retry guidance").
-client = OpenAI(base_url=base_url, api_key=api_key, max_retries=0)
+# The local caller token, when the gateway requires one, travels in its own header and is consumed by
+# the gateway; the provider key stays in `api_key`. Never log or commit either.
+local_token = os.environ.get("GATEWAY_LOCAL_TOKEN")
+client = OpenAI(
+    base_url=base_url,
+    api_key=api_key,
+    max_retries=0,
+    default_headers={"X-Gateway-Local-Token": local_token} if local_token else None,
+)
 
 # Synthetic and revoked-looking. It is not a credential; the gateway replaces it with a
 # placeholder before anything leaves your machine.

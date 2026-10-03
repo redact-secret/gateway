@@ -13,11 +13,14 @@ after each case. The intermediary logs that request, which lets the orchestrator
 log stream per case without sleeping.
 """
 import json
+import os
 import socket
 import sys
 import time
 
 KEY = "sk-SYNTHETIC-REVOKED-CI-NOT-A-KEY"
+# Per-run throwaway local caller token (#63), passed in the environment; never printed.
+LOCAL_TOKEN = os.environ.get("LOCAL_TOKEN")
 BODY = json.dumps(
     {"model": "synthetic-model", "messages": [{"role": "user", "content": "synthetic evidence ping"}]}
 ).encode()
@@ -32,6 +35,8 @@ def head(extra=(), cl=True, ctype=True, target=PATH, version=b"HTTP/1.1", host=b
     if ctype:
         lines.append(b"Content-Type: application/json")
     lines.append(b"Authorization: Bearer " + KEY.encode())
+    if LOCAL_TOKEN:
+        lines.append(b"X-Gateway-Local-Token: " + LOCAL_TOKEN.encode())
     if cl:
         lines.append(b"Content-Length: " + N)
     lines.extend(extra)

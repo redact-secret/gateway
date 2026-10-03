@@ -26,6 +26,9 @@ axum = { version = "0.8", default-features = false, features = ["http1", "tokio"
 # pinned exactly, no features exist.
 http-body = "=1.1.0"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+# Constant-time comparison of the local caller token (#63, ADR 0030). Already in the graph
+# through the TLS stack; promoted to a direct exact pin under the ADR 0011 policy.
+subtle = { version = "=2.6.1", default-features = false }
 serde = { version = "1", default-features = false, features = ["std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 

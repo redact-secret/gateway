@@ -9,10 +9,18 @@ set -eu
 file="$1"
 out="$2"
 here="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/lib-local-token.sh
+. "$here/lib-local-token.sh"
 mkdir -p "$out"
+# The example mounts a local caller token from GATEWAY_LOCAL_TOKEN_FILE (#63).
+tokdir="$(mktemp -d)"
+make_local_token "$tokdir"
 
 docker compose -f "$file" config -q
-cleanup() { docker compose -f "$file" down --timeout 10 >/dev/null 2>&1 || true; }
+cleanup() {
+  docker compose -f "$file" down --timeout 10 >/dev/null 2>&1 || true
+  rm -rf "$tokdir"
+}
 trap cleanup EXIT
 
 docker compose -f "$file" up -d
@@ -26,7 +34,7 @@ until curl -s -f -o /dev/null "http://127.0.0.1:8787/readyz"; do
   fi
   sleep 0.1
 done
-sh "$here/probe-endpoints.sh" "http://127.0.0.1:8787" "$out" | tee "$out/compose-smoke.txt"
+GATEWAY_LOCAL_TOKEN="$GATEWAY_LOCAL_TOKEN" sh "$here/probe-endpoints.sh" "http://127.0.0.1:8787" "$out" | tee "$out/compose-smoke.txt"
 docker compose -f "$file" logs >"$out/compose.log" 2>&1 || true
 docker compose -f "$file" down --timeout 10
 trap - EXIT

@@ -120,6 +120,7 @@ impl Services {
             )
             .with_inspection(inspection)
             .with_upstream(upstream)
+            .with_local_auth(plan.deployment().local_auth().clone())
             .with_metrics(metrics),
         );
         Ok(Self {

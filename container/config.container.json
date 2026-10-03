@@ -7,6 +7,12 @@
     },
     "upstream": {
       "provider": "openai"
+    },
+    "local_auth": {
+      "mode": "token",
+      "token": {
+        "file": "/run/secrets/gateway-local-token"
+      }
     }
   },
   "content": {

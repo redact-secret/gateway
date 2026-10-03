@@ -40,6 +40,7 @@
 pub mod credential;
 pub mod destination;
 pub mod headers;
+pub mod local_auth;
 mod relay;
 pub mod resolver;
 pub mod stream;

@@ -12,7 +12,7 @@ Normative rules for interfaces and behavior. Each contract has a status line tha
 - [errors-and-telemetry](errors-and-telemetry.md)
 - [upstream-destinations](upstream-destinations.md)
 - [headers-and-credentials](headers-and-credentials.md)
-- [local-caller-auth](local-caller-auth.md) (planned, frozen design)
+- [local-caller-auth](local-caller-auth.md) (implemented for Chat Completions, #63)
 - [config-schema](config-schema.md) (frozen, implemented; schema file `docs/schema/gateway-config.v1.schema.json`)
 - [request-lifecycle](request-lifecycle.md)
 
@@ -26,6 +26,6 @@ The Beta 1 stateless Responses text subset (`POST /v1/responses`; frozen design;
 
 Alpha 1 qualification evidence (the threat-control map, stack pins, residual risks) is in [`docs/qualification/`](../qualification/alpha1-threat-control-map.md); the head guard and one-request-per-connection rule are in [ADR 0019](../decisions/0019-request-head-guard-and-one-request-per-connection.md).
 
-The local caller token, the listener combinations it adds, and the health/probe authority split are frozen as a planned design in [local-caller-auth](local-caller-auth.md) ([ADR 0030](../decisions/0030-local-caller-auth-listener-health.md), #61); enforcement is #63.
+The local caller token, the listener combinations it adds, and the health/probe authority split are specified in [local-caller-auth](local-caller-auth.md) ([ADR 0030](../decisions/0030-local-caller-auth-listener-health.md), #61) and enforced by #63; #86 reuses the same boundary for the Responses route.
 
 A contract-changing PR updates the contract and its ADR together.

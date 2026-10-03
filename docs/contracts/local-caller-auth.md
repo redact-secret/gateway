@@ -1,6 +1,6 @@
 # Contract: local caller authentication, listener and health authority
 
-Status: **planned (frozen design, #61; not implemented).** Decision and threat review: [ADR 0030](../decisions/0030-local-caller-auth-listener-health.md). Implementation owner: #63 (token type, startup resolution, enforcement before body collection); #86 applies the same boundary to the Responses route; #62 and #64 carry the schema and compatibility rules for the new config keys. Until #63 lands, none of the names below exist in code, any caller that can reach the listener is served, and the shipped behavior is the one in [headers-and-credentials](headers-and-credentials.md).
+Status: **implemented for `POST /v1/chat/completions` (#63).** Frozen design: #61. Decision and threat review: [ADR 0030](../decisions/0030-local-caller-auth-listener-health.md). Code: `src/transport/local_auth.rs` (`LocalToken`, `LocalAuth`, `AuthReject`, `resolve_reference`), `src/config.rs` (`deployment.local_auth`), `ChatRoute::with_local_auth` and the first lines of `ChatRoute::handle` in `src/chat_route.rs`. #86 applies the same boundary to the Responses route by calling `LocalAuth::screen` first and mapping `AuthReject` through `Reject::from`; it must not re-implement it. #62 and #64 carry the schema ([config-schema](config-schema.md)) and compatibility rules. Authentication is off only when `deployment.local_auth` is absent or `disabled`, which is supported on a loopback listener only. Tests: `src/transport/local_auth.rs`, `src/transport/tests/local_auth_tests.rs`, `tests/local_auth_startup.rs`.
 
 This contract fixes names, syntax, ordering, and outcomes so that #63, #62, #65, and #86 do not each invent them. A change to any name here is an ADR 0030 amendment.
 
@@ -16,8 +16,8 @@ The local caller token answers one question: "may this local process use this ga
 | Config object | `deployment.local_auth` (deployment authority) |
 | Config keys | `deployment.local_auth.mode` (`"disabled"` or `"token"`), `deployment.local_auth.token` (object with exactly one of `env`, `file`) |
 | Error codes | `local_auth_required`, `local_auth_invalid` (new `SafeCode` spellings) |
-| Planned types | `LocalToken` (secret, in `transport::local_auth`), `LocalAuth` (immutable plan field: `Disabled` or `Token(LocalToken)`) |
-| Constant-time primitive | `subtle::ConstantTimeEq` (crate `subtle`, already in `Cargo.lock` through the TLS stack; #63 promotes it to an exact-pinned direct dependency under the ADR 0011 policy) |
+| Types | `LocalToken` (secret, in `transport::local_auth`), `LocalAuth` (immutable plan field of `DeploymentAuthority`: `Disabled` or `Token(Arc<LocalToken>)`), `AuthReject` (`Required`, `Invalid`) |
+| Constant-time primitive | `subtle::ConstantTimeEq` (crate `subtle` `=2.6.1` without default features, an exact-pinned direct dependency under the ADR 0011 policy; it was already in `Cargo.lock` through the TLS stack) |
 
 No token value, no token length, and no secret reference value ever appears in config examples, CLI arguments, logs, errors, `Debug`, snapshots, or this documentation. Examples use the synthetic placeholder `<SYNTHETIC_LOCAL_TOKEN>`.
 
@@ -76,7 +76,7 @@ The check is one boundary shared by every proxy route (ADR 0005 central enforcem
 
 ## Configuration
 
-Planned, additive to `schema_version` 1 while unreleased; the schema artifact and compatibility rules are #62 and #64.
+Implemented, additive to `schema_version` 1 while unreleased; the schema artifact and compatibility rules are in [config-schema](config-schema.md) (#62, #64).
 
 ```json
 {
@@ -142,12 +142,21 @@ Health and readiness bodies are fixed and frozen: they never contain configurati
 
 The gateway emits no request logs today and #63 adds none containing request data. Permitted: a coarse counter of local-auth rejections by the two codes, with no peer address, header length, or value. Excluded: the token, a prefix or hash of it, its length, its source reference (variable name or path), and the candidate value. The token must not appear in `Debug`, panics, error chains, diagnostics, snapshots, fixtures, or documentation.
 
-## Documentation of limits (to be repeated in README, SECURITY, configuration when #63 lands)
+## Documentation of limits (repeated in README, SECURITY and configuration)
 
 - Same-host and same-Pod trust: every container or process that can read the token source or share the user is trusted. Mount the token only into the application and gateway containers.
 - Local HTTP: no confidentiality or integrity on the local hop.
 - Loopback is not authentication; a token is the only caller check, and it is optional on loopback.
 
-## Verification owed by #63 (and #65)
+## Verification (#63 done; #65 owes the SDK demonstration)
 
-Unit and served-stack tests: every row of the header table (absent, nominated, duplicate identical and different, comma list, whitespace, over and under bounds, out-of-alphabet, `Bearer` form, wrong, correct, case-varied header name); rejection before body read (a body that never arrives, a declared huge length, `Expect: 100-continue` receiving no `100`), before any permit or reservation (capacity counters unchanged), and before upstream (fake upstream sees nothing); token never on the wire and never in responses or `Debug`; provider `Authorization` alone does not authenticate and the local token alone does not satisfy `missing_credential`; every startup combination and failure kind including no echo of reference names or paths; mode bits; health and readiness identical with and without the header and with auth enabled; config variation tests (profile, `on_warn`, PII, limits) leaving authentication unchanged; comparison helper handles every length 0 to beyond 128 without panic and its code path has no early return on content. #65 demonstrates both credentials independently through the pinned Node and Python SDKs (the SDKs send the token through `default_headers`/`defaultHeaders`; the provider key stays in the SDK's `api_key`).
+Done in #63: unit and served-stack tests: every row of the header table (absent, nominated, duplicate identical and different, comma list, whitespace, over and under bounds, out-of-alphabet, `Bearer` form, wrong, correct, case-varied header name); rejection before body read (a body that never arrives, a declared huge length, `Expect: 100-continue` receiving no `100`), before any permit or reservation (capacity counters unchanged), and before upstream (fake upstream sees nothing); token never on the wire and never in responses or `Debug`; provider `Authorization` alone does not authenticate and the local token alone does not satisfy `missing_credential`; every startup combination and failure kind including no echo of reference names or paths; mode bits; health and readiness identical with and without the header and with auth enabled; config variation tests (profile, `on_warn`, PII, limits) leaving authentication unchanged; comparison helper handles every length 0 to beyond 128 without panic and its code path has no early return on content. #65 demonstrates both credentials independently through the pinned Node and Python SDKs (the SDKs send the token through `default_headers`/`defaultHeaders`; the provider key stays in the SDK's `api_key`).
+
+## Implementation notes (#63)
+
+- The decision lives in `LocalAuth::screen(&Method, &HeaderMap)`; `ChatRoute::handle` calls it before anything else, so the head guard (connection level) and exact route/method matching come first and the body is never polled on a rejected request (hyper sends `100 Continue` only when the body is first polled, so none is sent). Only `POST` is authenticated; another method on the served route gets the route's own `405`.
+- A `Connection` header that nominates `X-Gateway-Local-Token` removes it (`local_auth_required`); a `Connection` header that is itself malformed is `local_auth_invalid` here (the same input is `400 malformed_input` for an authenticated caller, from `vet_inbound`).
+- Rejections are counted per code in `Metrics::local_auth_rejections` (no peer, no length, no value); nothing is logged.
+- The token file is checked twice, by path (so a FIFO or device cannot block the open) and again on the opened handle (`fstat`: regular file, size, mode). A symlink is followed by the OS open. The residual window between the two checks needs a local attacker who can already replace the token file, which is inside the trust boundary.
+- Secure erasure is not promised: the token is read through ordinary buffers, held for the process lifetime inside the plan (a zero-padded 128-byte buffer plus its length), and can remain in freed memory, swap, or a core dump. Rotation is a restart.
+- Tests cannot mutate the process environment (`unsafe` is forbidden), so environment resolution is tested through an injectable lookup and the real binary is tested with `Command::env`.

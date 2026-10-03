@@ -19,13 +19,60 @@ fn read(path: &str) -> String {
     fs::read_to_string(root().join(path)).unwrap_or_else(|_| panic!("read {path}"))
 }
 
+/// A throwaway token file the real binary can resolve (mode 0600, synthetic content).
+fn temp_token_file(tag: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("rsg-shipped-{}-{tag}", std::process::id()));
+    fs::create_dir_all(&dir).expect("mkdir");
+    let path = dir.join("gateway-local-token");
+    fs::write(&path, "SYNTHETIC-shipped-example-local-token-0123456789\n").expect("write");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("chmod");
+    path
+}
+
+#[test]
+fn the_container_config_enforces_a_token_and_fails_closed_without_the_mount() {
+    // No token is mounted at /run/secrets on a build host: the shipped container config must
+    // refuse to validate, with the static unreadable diagnostic and no echo of the path.
+    let file = root().join("container/config.container.json");
+    let out = Command::new(env!("CARGO_BIN_EXE_redact-secret-gateway"))
+        .arg("validate-config")
+        .arg(&file)
+        .output()
+        .expect("run");
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("invalid_config: unreadable at deployment.local_auth.token"));
+    assert!(
+        !err.contains("/run/secrets"),
+        "the reference path is never echoed"
+    );
+    // The same config with the token file reference pointed at a valid file validates.
+    let doc = read("container/config.container.json").replace(
+        "/run/secrets/gateway-local-token",
+        temp_token_file("container").to_str().expect("utf-8 path"),
+    );
+    let copy =
+        std::env::temp_dir().join(format!("rsg-shipped-container-{}.json", std::process::id()));
+    fs::write(&copy, doc).expect("write");
+    let out = Command::new(env!("CARGO_BIN_EXE_redact-secret-gateway"))
+        .arg("validate-config")
+        .arg(&copy)
+        .output()
+        .expect("run");
+    assert!(
+        out.status.success(),
+        "container config with a mounted token validates"
+    );
+}
+
 #[test]
 fn every_shipped_config_validates_with_the_real_binary() {
+    // The container config needs its mounted token: covered by the test above.
     for file in [
         "examples/config.skeleton.json",
         "examples/config.openai.json",
         "examples/config.reference.json",
-        "container/config.container.json",
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_redact-secret-gateway"))
             .arg("validate-config")
@@ -44,6 +91,10 @@ fn the_example_config_names_the_reviewed_provider_and_no_credential() {
     ] {
         let text = read(file);
         assert!(text.contains("\"provider\": \"openai\""), "{file}");
+        // The container config names (never contains) a local token file reference.
+        let text = text
+            .replace("/run/secrets/gateway-local-token", "")
+            .replace("\"token\"", "");
         for forbidden in ["sk-", "Bearer", "api_key", "apikey", "token", "password"] {
             assert!(
                 !text.to_ascii_lowercase().contains(forbidden),
@@ -54,6 +105,9 @@ fn the_example_config_names_the_reviewed_provider_and_no_credential() {
     // The container config is the only one that binds a non-loopback address, and says so.
     let container = read("container/config.container.json");
     assert!(container.contains("\"allow_non_loopback\": true"));
+    // ... and, because of that, enforces the local token from a mounted file, never a value.
+    assert!(container.contains("\"mode\": \"token\""));
+    assert!(container.contains("\"file\": \"/run/secrets/gateway-local-token\""));
     assert!(!read("examples/config.openai.json").contains("0.0.0.0"));
 }
 
@@ -196,5 +250,9 @@ fn examples_and_compose_keep_their_safety_labels() {
     assert!(!compose.contains("0.0.0.0:"));
     assert!(compose.contains("cap_drop"));
     assert!(!compose.to_ascii_lowercase().contains("environment:"));
+    // The local token is a mounted Compose secret read from a file the operator names; the
+    // example holds no value.
+    assert!(compose.contains("target: gateway-local-token"));
+    assert!(compose.contains("GATEWAY_LOCAL_TOKEN_FILE"));
     assert!(!Path::new(&root().join("examples/compose/compose.skeleton.yaml")).exists());
 }

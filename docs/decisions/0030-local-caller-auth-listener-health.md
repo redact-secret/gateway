@@ -1,6 +1,6 @@
 # ADR 0030: Local caller token, listener and health authority
 
-Status: Accepted (design), by maintainer delegation to the #61 author under epic #12. Implementation status: **planned** (#63 enforces; #86 shares the boundary with the Responses route; #62/#64 freeze the schema and compatibility; #65 qualifies with Node and Python). Date: 2026-10-03. Builds on [ADR 0006](0006-runtime-plan-and-authority-separation.md), [ADR 0009](0009-credential-and-upstream-trust-model.md), [ADR 0016](0016-header-allowlists-and-request-local-credentials.md), [ADR 0019](0019-request-head-guard-and-one-request-per-connection.md), [ADR 0022](0022-connection-bound-at-accept.md). Normative rules: [local-caller-auth contract](../contracts/local-caller-auth.md).
+Status: Accepted (design), by maintainer delegation to the #61 author under epic #12. Implementation status: **implemented for Chat Completions in #63** (enforcement, startup resolution, schema keys, container config); #86 shares the boundary with the Responses route; #64 owns upgrade and rollback examples; #65 qualifies with Node and Python. Date: 2026-10-03. Builds on [ADR 0006](0006-runtime-plan-and-authority-separation.md), [ADR 0009](0009-credential-and-upstream-trust-model.md), [ADR 0016](0016-header-allowlists-and-request-local-credentials.md), [ADR 0019](0019-request-head-guard-and-one-request-per-connection.md), [ADR 0022](0022-connection-bound-at-accept.md). Normative rules: [local-caller-auth contract](../contracts/local-caller-auth.md).
 
 ## Context
 
@@ -74,3 +74,7 @@ Whether to add a rate limit or lockout, a second accepted token for zero-downtim
 ## Implementation status
 
 Planned. Nothing in this ADR is implemented; the shipped behavior remains Alpha (no caller authentication, loopback default).
+
+## Amendment (#63): implementation notes
+
+Implemented as frozen, with these recorded details. `subtle` is a direct dependency at the exact version `=2.6.1` with default features off. `LocalAuth::screen` is the single boundary; `Reject::LocalAuthRequired` and `Reject::LocalAuthInvalid` carry the two new `SafeCode` spellings and appear in the frozen status table. A `Connection` header that cannot be parsed is `local_auth_invalid` at this boundary. The schema, loader, fixtures and container config were updated in the same change (ADR 0032 amendment). The non-loopback tightening is enforced by `DeploymentAuthority::with_local_auth`, so an acknowledged non-loopback listener without a token cannot be constructed. The container image config now requires a token file mounted at `/run/secrets/gateway-local-token`.

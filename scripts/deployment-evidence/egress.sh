@@ -32,6 +32,7 @@ say() { echo "$*" | tee -a "$log"; }
 
 PROVIDER_IP=93.184.216.34
 gen_certs "$work/certs"
+make_local_token "$work/token"
 appnet="$RUN_ID-app"
 upnet="$RUN_ID-up"
 docker network create --internal "$appnet" >/dev/null
@@ -53,7 +54,8 @@ wait_log "$provider" listening
 
 gw="$RUN_ID-gateway"
 docker create --name "$gw" --network "$appnet" --network-alias gateway "${HARDEN[@]}" \
-  -v "$work/bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro" "$gimage" >/dev/null
+  -v "$work/bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro" \
+  --mount "$(local_token_mount)" "$gimage" >/dev/null
 docker network connect "$upnet" "$gw"
 docker start "$gw" >/dev/null
 wait_log "$gw" listening
@@ -62,7 +64,7 @@ gw_up_ip="$(docker inspect --format "{{(index .NetworkSettings.Networks \"$upnet
 app="$RUN_ID-app"
 docker run -d --name "$app" --network "$appnet" "${HARDEN[@]}" \
   -v "$DE_DIR/tools:/tools:ro" "$PY_IMAGE" tail -f /dev/null >/dev/null
-appc() { docker exec "$app" python /tools/client.py "$@"; }
+appc() { docker exec -e LOCAL_TOKEN="$GATEWAY_LOCAL_TOKEN" "$app" python /tools/client.py "$@"; }
 
 say "== Application behind the operator policy (attached only to an internal network with the gateway)"
 res="$(appc post http://gateway:8787/v1/chat/completions)"

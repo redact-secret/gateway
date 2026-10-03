@@ -22,6 +22,9 @@ PY_IMAGE="$(image_ref python)"
 NGINX_IMAGE="$(image_ref nginx)"
 HAPROXY_IMAGE="$(image_ref haproxy)"
 
+# shellcheck source=scripts/lib-local-token.sh
+. "$REPO_ROOT/scripts/lib-local-token.sh"
+
 # Hardened flags for every container we start (the gateway uses its own documented flags too).
 HARDEN=(--read-only --cap-drop ALL --security-opt no-new-privileges)
 

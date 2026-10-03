@@ -31,6 +31,29 @@ fn manifest_pins_core_exactly() {
     assert!(manifest.contains("redact-secret = \"=0.1.0-beta.12\""));
 }
 
+/// The local caller token comparison primitive is a deliberate direct dependency at an exact
+/// version (#63, ADR 0011), not an inherited transitive one, and it is the only comparison
+/// crate the token path may use.
+#[test]
+fn constant_time_primitive_is_an_exact_direct_pin() {
+    let manifest = include_str!("../Cargo.toml");
+    assert!(manifest.contains("subtle = { version = \"=2.6.1\", default-features = false }"));
+    let lock = include_str!("../Cargo.lock");
+    let block = lock
+        .split("[[package]]")
+        .find(|b| b.contains("name = \"subtle\"\n"))
+        .expect("subtle is locked");
+    assert!(block.contains("version = \"2.6.1\""));
+    let gateway = lock
+        .split("[[package]]")
+        .find(|b| b.contains("name = \"redact-secret-gateway\"\n"))
+        .expect("the gateway is locked");
+    assert!(
+        gateway.contains("\"subtle\""),
+        "subtle is a direct dependency"
+    );
+}
+
 fn rust_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     for entry in fs::read_dir(dir).expect("read dir") {
         let path = entry.expect("entry").path();
