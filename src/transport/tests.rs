@@ -55,6 +55,7 @@ mod header_cap_tests;
 #[path = "../../tests/support/leak.rs"]
 #[allow(dead_code)]
 mod leak;
+mod lifecycle_tests;
 mod stream_tests;
 mod tool_history_tests;
 mod wire_tests;

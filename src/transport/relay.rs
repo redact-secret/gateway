@@ -64,7 +64,7 @@ impl UpstreamResponse {
     #[must_use]
     pub fn into_parts(self) -> (StatusCode, HeaderMap, HeldBody) {
         let body = HeldBody {
-            data: Some(Bytes::from(self.body)),
+            data: Bytes::from(self.body),
             _permit: self.permit,
         };
         (self.status, self.headers, body)
@@ -81,18 +81,27 @@ impl fmt::Debug for UpstreamResponse {
     }
 }
 
-/// A single-frame response body that owns the upstream permit. Dropping it (the caller
-/// disconnected, the write finished, or the server shut down) releases the permit and the
-/// buffer together.
+/// Largest frame the buffered body hands to the HTTP server at once. The server requests
+/// the next frame only when its own write buffer has room, and drops the body as soon as
+/// it has taken the last frame, so the permit is held until all but the last few frames
+/// (a bounded window inside the server) have been accepted by the socket (#59, ADR 0026).
+/// A single frame would let the server take the whole buffer in one call, drop the body
+/// (and so return the permit) at once, and keep up to the response bound queued per
+/// connection behind a slow reader with no permit accounting it.
+pub(super) const FRAME_BYTES: usize = 16 * 1024;
+
+/// A response body of bounded frames that owns the upstream permit. Dropping it (the
+/// caller disconnected, the write finished, or the server shut down) releases the permit
+/// and the buffer together.
 pub struct HeldBody {
-    data: Option<Bytes>,
+    data: Bytes,
     _permit: UpstreamPermit,
 }
 
 impl fmt::Debug for HeldBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HeldBody")
-            .field("remaining", &self.data.as_ref().map_or(0, Bytes::len))
+            .field("remaining", &self.data.len())
             .finish_non_exhaustive()
     }
 }
@@ -107,23 +116,18 @@ impl Body for HeldBody {
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         // `HeldBody` is `Unpin` (no self-references), so a plain mutable borrow is safe.
         let this = Pin::into_inner(self);
-        Poll::Ready(
-            this.data
-                .take()
-                .filter(|d| !d.is_empty())
-                .map(|d| Ok(Frame::data(d))),
-        )
+        if this.data.is_empty() {
+            return Poll::Ready(None);
+        }
+        let take = this.data.len().min(FRAME_BYTES);
+        Poll::Ready(Some(Ok(Frame::data(this.data.split_to(take)))))
     }
 
     fn is_end_stream(&self) -> bool {
-        self.data.as_ref().is_none_or(Bytes::is_empty)
+        self.data.is_empty()
     }
 
     fn size_hint(&self) -> SizeHint {
-        SizeHint::with_exact(
-            self.data
-                .as_ref()
-                .map_or(0, |d| u64::try_from(d.len()).unwrap_or(u64::MAX)),
-        )
+        SizeHint::with_exact(u64::try_from(self.data.len()).unwrap_or(u64::MAX))
     }
 }

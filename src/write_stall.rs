@@ -36,7 +36,7 @@ use axum::serve::Listener;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tokio::time::{Sleep, sleep};
+use tokio::time::{Instant, Sleep, sleep};
 
 /// A TCP listener whose accepted connections enforce the write-stall deadline.
 #[derive(Debug)]
@@ -45,6 +45,8 @@ pub(crate) struct StallListener {
     stall: Duration,
     /// Connection slots (#40); `None` means unbounded (unit tests only).
     slots: Option<Arc<Semaphore>>,
+    /// Cumulative write-blocked-time cap for every accepted connection (#59).
+    budget: Option<Duration>,
 }
 
 impl StallListener {
@@ -53,6 +55,23 @@ impl StallListener {
             inner,
             stall,
             slots: None,
+            budget: None,
+        }
+    }
+
+    /// Cap the total time any accepted connection's writes may spend blocked (see
+    /// [`StallIo::with_write_budget`]).
+    #[must_use]
+    pub(crate) const fn with_write_budget(mut self, budget: Duration) -> Self {
+        self.budget = Some(budget);
+        self
+    }
+
+    fn wrap(&self, io: TcpStream) -> StallIo<TcpStream> {
+        let io = StallIo::new(io, self.stall);
+        match self.budget {
+            Some(budget) => io.with_write_budget(budget),
+            None => io,
         }
     }
 
@@ -72,10 +91,10 @@ impl Listener for StallListener {
         loop {
             let (io, addr) = Listener::accept(&mut self.inner).await;
             let Some(slots) = &self.slots else {
-                return (StallIo::new(io, self.stall), addr);
+                return (self.wrap(io), addr);
             };
             if let Ok(permit) = Arc::clone(slots).try_acquire_owned() {
-                return (StallIo::new(io, self.stall).with_permit(permit), addr);
+                return (self.wrap(io).with_permit(permit), addr);
             }
             // Over the bound: close now. No queue, no wait, no task. Yield so a flood of
             // refused connections cannot monopolize the worker.
@@ -96,6 +115,13 @@ pub(crate) struct StallIo<T> {
     stall: Duration,
     /// Running only while a write or flush is pending.
     timer: Option<Pin<Box<Sleep>>>,
+    /// Cumulative-blocked-time cap (see [`StallIo::with_write_budget`]); `None` is
+    /// unbounded (unit tests only).
+    budget: Option<Duration>,
+    /// Time already spent with a write pending, summed over every pending interval.
+    blocked: Duration,
+    /// When the current pending interval began.
+    pending_since: Option<Instant>,
     /// The connection slot (#40). Declared last so it is returned after the socket closes.
     permit: Option<OwnedSemaphorePermit>,
 }
@@ -106,8 +132,23 @@ impl<T> StallIo<T> {
             inner,
             stall,
             timer: None,
+            budget: None,
+            blocked: Duration::ZERO,
+            pending_since: None,
             permit: None,
         }
+    }
+
+    /// Cap the *total* time writes may spend pending (blocked on a consumer that is not
+    /// reading), summed over the whole connection. The stall deadline restarts on every
+    /// byte of progress, so a consumer that reads a few bytes inside each stall window is
+    /// never "stalled" and could hold a buffered response, its upstream permit, and its
+    /// socket for as long as it likes. One connection carries one request, so this is a
+    /// per-response bound on consumer wait (#59).
+    #[must_use]
+    pub(crate) const fn with_write_budget(mut self, budget: Duration) -> Self {
+        self.budget = Some(budget);
+        self
     }
 
     fn with_permit(mut self, permit: OwnedSemaphorePermit) -> Self {
@@ -115,23 +156,57 @@ impl<T> StallIo<T> {
         self
     }
 
-    /// A write returned `Pending`: run (or continue) the stall timer.
+    /// Pending time spent so far, including the interval in progress.
+    fn spent(&self, now: Instant) -> Duration {
+        self.pending_since.map_or(self.blocked, |since| {
+            self.blocked
+                .saturating_add(now.saturating_duration_since(since))
+        })
+    }
+
+    /// A write returned `Pending`: run (or continue) the stall timer, which also never
+    /// outlasts what is left of the cumulative write budget.
     fn pending<R>(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<R>> {
-        let stall = self.stall;
-        let timer = self.timer.get_or_insert_with(|| Box::pin(sleep(stall)));
-        if timer.as_mut().poll(cx).is_ready() {
+        let now = Instant::now();
+        self.pending_since.get_or_insert(now);
+        let spent = self.spent(now);
+        let remaining = self.budget.map(|budget| budget.saturating_sub(spent));
+        if remaining.is_some_and(|left| left.is_zero()) {
             self.timer = None;
             return Poll::Ready(Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "write stalled",
+                "write budget exhausted",
+            )));
+        }
+        let stall = self.stall;
+        let wait = remaining.map_or(stall, |left| left.min(stall));
+        let timer = self.timer.get_or_insert_with(|| Box::pin(sleep(wait)));
+        if timer.as_mut().poll(cx).is_ready() {
+            self.timer = None;
+            let over = self
+                .budget
+                .is_some_and(|budget| self.spent(Instant::now()) >= budget);
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                if over {
+                    "write budget exhausted"
+                } else {
+                    "write stalled"
+                },
             )));
         }
         Poll::Pending
     }
 
-    /// Progress was made (or the operation failed): the stall clock stops.
+    /// Progress was made (or the operation failed): the stall clock stops and the pending
+    /// interval is added to the cumulative total.
     fn settle<R>(&mut self, result: io::Result<R>) -> Poll<io::Result<R>> {
         self.timer = None;
+        if let Some(since) = self.pending_since.take() {
+            self.blocked = self
+                .blocked
+                .saturating_add(Instant::now().saturating_duration_since(since));
+        }
         Poll::Ready(result)
     }
 }
@@ -285,6 +360,62 @@ mod tests {
         });
         io.write_all(&[7_u8; 64]).await.unwrap();
         assert_eq!(reader.await.unwrap(), 64);
+    }
+
+    #[tokio::test]
+    async fn steady_slow_progress_is_cut_by_the_cumulative_write_budget() {
+        // The reader drains a byte every 40 ms, well inside the 250 ms stall deadline, so
+        // no single pending period ever stalls; the 300 ms budget still ends the write.
+        let (near, mut far) = duplex(1);
+        let mut io = StallIo::new(near, Duration::from_millis(250))
+            .with_write_budget(Duration::from_millis(300));
+        let reader = tokio::spawn(async move {
+            let mut buf = [0_u8; 1];
+            while far.read(&mut buf).await.is_ok_and(|n| n > 0) {
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+        });
+        let started = tokio::time::Instant::now();
+        let err = io.write_all(&[7_u8; 4096]).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert!(err.to_string().contains("budget"), "{err}");
+        let took = started.elapsed();
+        assert!(took >= Duration::from_millis(250), "too early: {took:?}");
+        assert!(took < Duration::from_secs(3), "too late: {took:?}");
+        drop(io);
+        reader.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_budget_larger_than_the_transfer_changes_nothing() {
+        let (near, mut far) = duplex(8);
+        let mut io = StallIo::new(near, Duration::from_millis(250))
+            .with_write_budget(Duration::from_secs(30));
+        let reader = tokio::spawn(async move {
+            let mut got = 0_usize;
+            let mut buf = [0_u8; 8];
+            while got < 64 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                got += far.read(&mut buf).await.unwrap();
+            }
+            got
+        });
+        io.write_all(&[7_u8; 64]).await.unwrap();
+        assert_eq!(reader.await.unwrap(), 64);
+    }
+
+    #[tokio::test]
+    async fn idle_time_with_nothing_to_write_does_not_spend_the_budget() {
+        let (near, mut far) = duplex(64);
+        let mut io = StallIo::new(near, Duration::from_millis(50))
+            .with_write_budget(Duration::from_millis(100));
+        // Longer than the budget, but no write was pending, so nothing was spent.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        io.write_all(b"ok").await.unwrap();
+        io.flush().await.unwrap();
+        let mut buf = [0_u8; 2];
+        far.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"ok");
     }
 
     #[tokio::test]

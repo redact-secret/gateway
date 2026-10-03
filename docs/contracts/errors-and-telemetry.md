@@ -190,7 +190,7 @@ A provider's own `4xx`/`5xx` is a provider response, relayed as received, and is
 | Lifetime | Stream older than `stream_lifetime_ms` (recorded as `upstream_timeout`) | closed |
 | Buffer | One provider chunk over `stream_buffer_bytes` (recorded as `upstream_response_too_large`) | closed |
 | Shutdown | Drain deadline passed (recorded as `not_ready`) | closed |
-| Abandoned | Caller disconnected, or no write progress for `stream_write_stall_ms` (the connection is closed) | closed |
+| Abandoned | Caller disconnected, or no write progress for `stream_write_stall_ms`, or blocked-write time over the write budget (the connection is closed; [request-lifecycle](request-lifecycle.md)) | closed |
 
 Only a clean provider end (the provider's own final chunk) produces a normal end. Bytes already transmitted to the caller cannot be retracted.
 
