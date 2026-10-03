@@ -147,12 +147,31 @@ print(json.dumps({'pid':pid,'rss_kib':int(status.get('VmRSS','0 kB').split()[0])
     # kind nodes have no Python assumption: read host-visible proc/cgroup through
     # a transient pinned helper sharing node PID/cgroup namespaces, read-only.
     raw = command('docker', 'run', '--rm', '--pid', 'container:' + node, '--cgroupns', 'host',
-                  '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--cap-add', 'SYS_PTRACE', '--security-opt', 'apparmor=unconfined', '--security-opt', 'no-new-privileges',
+                  '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--cap-add', 'SYS_PTRACE', '--cap-add', 'DAC_READ_SEARCH', '--security-opt', 'apparmor=unconfined', '--security-opt', 'no-new-privileges',
                   '-e', f'GATEWAY_PID={pid}', HELPER, 'python', '-c', script, diagnostic=True)
     result=json.loads(raw)
+    assert all(result['cgroup'][key] is not None for key in ['cpu.max','cpu.stat','memory.max','memory.current','memory.peak','memory.events'])
     assert result['identity']['Uid'].split()==['65532']*4
     assert int(result['identity']['CapEff'],16)==0 and result['identity']['NoNewPrivs']=='1' and result['identity']['Seccomp']=='2'
     assert result['root_read_only'] is True and result['api_token_mounted'] is False
+    return result
+
+
+def sampled_load(pod, seconds, clients, size, shape='safe'):
+    process=subprocess.Popen(['kubectl','--context','kind-'+CLUSTER,'-n',NS,'exec',pod,'-c','app','--','python','/tools/actor.py','load',str(seconds),str(clients),str(size),shape],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    samples=[]
+    deadline=time.monotonic()+60
+    while process.poll() is None:
+        if time.monotonic()>deadline:
+            process.kill()
+            raise RuntimeError('sampled workload deadline exceeded')
+        samples.append(runtime_sample(pod))
+        time.sleep(1)
+    output,_=process.communicate(timeout=5)
+    if process.returncode: raise RuntimeError('sampled workload client failed')
+    result=json.loads(output)
+    assert result['statuses'].get('200',0)>0
+    result['runtime_samples']=samples
     return result
 
 
@@ -405,7 +424,7 @@ def main():
         for size in [1024,16384,65536]:
             for clients in [1,8,32]:
                 before = {'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')}
-                load = actor(name,'load',10,clients,size,timeout=60)
+                load = sampled_load(name,10,clients,size)
                 after = {'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')}
                 assert all(after['metrics']['provider']['body'][key]==0 for key in ['local_header_received','provider_key_mismatch','local_token_value_received'])
                 row={'cpu_limit':cpu,'load':load,'before':before,'after':after,'provisional':True}
@@ -413,7 +432,7 @@ def main():
                 evidence('load',all_rows)
         for shape in ['findings','dense']:
             before={'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')}
-            load=actor(name,'load',10,8,16384,shape,timeout=60)
+            load=sampled_load(name,10,8,16384,shape)
             after={'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')}
             assert after['metrics']['provider']['body']['synthetic_plaintext_received']==0
             all_rows.append({'cpu_limit':cpu,'load':load,'before':before,'after':after,'provisional':True})
@@ -431,7 +450,7 @@ def main():
     cycles=[]
     started=time.monotonic()
     while time.monotonic()-started < duration:
-        cycles.append({'load':actor(name,'load',10,8,16384,timeout=60),'cancel':actor(name,'cancel'),
+        cycles.append({'load':sampled_load(name,10,8,16384),'cancel':actor(name,'cancel'),
                        'slow':actor(name,'slow'),'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')})
         evidence('soak-progress',{'declared_seconds':duration,'cycles':cycles})
     time.sleep(3)

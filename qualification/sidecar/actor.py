@@ -52,10 +52,12 @@ class Provider(BaseHTTPRequestHandler):
                 self.end_headers()
                 if scenario == 'stall-sse':
                     time.sleep(20)
-                for _ in range(50):
-                    self.wfile.write(b'data: {"synthetic":"safe"}\n\n')
+                chunks=1000 if scenario=='slow-downstream' else 50
+                chunk=b'data: '+b'x'*32768+b'\n\n' if scenario=='slow-downstream' else b'data: {"synthetic":"safe"}\n\n'
+                for _ in range(chunks):
+                    self.wfile.write(chunk)
                     self.wfile.flush()
-                    time.sleep(0.2)
+                    time.sleep(0.005 if scenario=='slow-downstream' else 0.2)
                 terminal = b'data: [DONE]\n\n' if self.path.endswith('completions') else b'event: response.completed\ndata: {"type":"response.completed","response":{"status":"completed"}}\n\n'
                 self.wfile.write(terminal)
                 self.wfile.flush()
@@ -79,7 +81,9 @@ def call(endpoint='chat', size=1024, stream=False, invalid=False, auth=True, slo
     if shape == 'findings':
         text = ' '.join(f'ghp_SYNTHETICREVOKED{i:020}' for i in range(100))
     request = {'model': 'gpt-4o-mini', 'stream': stream}
-    if shape.startswith('stall-'):
+    if slow:
+        shape='slow-downstream'
+    if shape.startswith('stall-') or shape=='slow-downstream':
         request['metadata']={'synthetic_scenario':shape}
     if endpoint == 'chat':
         request['messages'] = [{'role': 'user', 'content': text}]
@@ -106,7 +110,7 @@ def call(endpoint='chat', size=1024, stream=False, invalid=False, auth=True, slo
         if cancel:
             response.read(1)
         elif slow:
-            for _ in range(5):
+            for _ in range(12):
                 response.read(1)
                 time.sleep(0.3)
         else:
