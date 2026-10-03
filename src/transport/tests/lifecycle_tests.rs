@@ -1244,7 +1244,7 @@ async fn shutdown_with_many_open_connections_and_streams_ends_within_the_drain()
     });
     let caps = Caps4 {
         receipt: 64,
-        inspection: 4,
+        inspection: 16,
         upstream: 16,
         stream: 8,
     };
@@ -1282,6 +1282,9 @@ async fn shutdown_with_many_open_connections_and_streams_ends_within_the_drain()
         let head = read_head(&mut c).await;
         assert!(head.starts_with(b"HTTP/1.1 200"));
         streams.push(c);
+    }
+    for _ in 0..8 {
+        lab.up.received().await; // the streams' requests, so the next waits are for the JSON ones
     }
     // Six JSON requests stuck waiting for upstream headers.
     let mut stuck = Vec::new();
