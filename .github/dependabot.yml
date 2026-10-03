@@ -19,6 +19,17 @@ updates:
     commit-message:
       prefix: "deps"
 
+  # Digest-pinned helper images of the deployment-chain evidence (#44): the python helper, and
+  # the nginx and HAProxy intermediaries under test. A bump changes the evidence subject, so the
+  # evidence workflow runs on the PR and the evidence document's pins are updated with it.
+  - package-ecosystem: docker
+    directory: /scripts/deployment-evidence/images
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
+
   # Pinned SDK qualification and example dependencies (ADR 0020). The `openai` SDK itself is
   # ignored: its version is an explicit qualification decision (examples and qualification must
   # stay equal, and tests/shipped_examples.rs checks that). Everything else, including the
