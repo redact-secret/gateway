@@ -21,7 +21,7 @@ Unknown fields, at any nesting depth, are rejected by default.
 - Never replace text in raw serialized JSON.
 - Contracts are needed for: prompt/instructions, messages, tool results, app-submitted tool arguments, metadata, and tool descriptions/schema text. Chat Completions has them in [chat-completions-request](chat-completions-request.md) (Alpha 2 rows are planned); Responses `instructions` and its distinct field model stay with #13.
 - Free text is redacted in place; a label is never rewritten (block, not redact). Where redaction would corrupt an identifier, a key, an enum value, or tool linkage, the field is a label. A new field must be classified as text, label, structural, or rejected in the same change that admits it.
-- App-submitted tool arguments may be JSON inside a string. The dedicated contract (planned, #53) parses only the designated `function.arguments` string, with bounded duplicate-key-rejecting parsing, inspects decoded string leaves, treats keys as labels, and re-encodes. Blind nested parsing of every string is not allowed. Gateway does not execute tools, and redaction grants no execution permission.
+- App-submitted tool arguments may be JSON inside a string. The dedicated contract (implemented, #53) parses only the designated `function.arguments` string, with bounded duplicate-key-rejecting parsing, inspects decoded string leaves, treats keys as labels, and re-encodes. Blind nested parsing of every string is not allowed. Gateway does not execute tools, and redaction grants no execution permission.
 
 ## Rejected forms (initial)
 
@@ -29,15 +29,15 @@ Files, images, audio, URL content, stored conversation/file references, encrypte
 
 ## Scope
 
-Alpha 1: Chat Completions text subset. Alpha 2: the recursive Chat Completions subset with tool history, function tool definitions, structured-output schemas, and metadata (contract frozen in #52, implemented by #53 to #55). Beta 1: Responses API text subset. Anything else needs its own ADR. The field-by-field table is [chat-completions-request](chat-completions-request.md).
+Alpha 1: Chat Completions text subset. Alpha 2: the recursive Chat Completions subset with tool history, function tool definitions, structured-output schemas, and metadata (contract frozen in #52; tool history implemented by #53, the rest by #54 and #55). Beta 1: Responses API text subset. Anything else needs its own ADR. The field-by-field table is [chat-completions-request](chat-completions-request.md).
 
 ## Keys, structural strings, and `Warn`/`Block` (#19)
 
-- Object keys are not inspected as text: in the implemented subset every key is a fixed schema name validated by the field matrix, and every free-form-keyed object (`metadata`, `logit_bias`, tool schemas) is rejected, so no user-controlled key text reaches upstream. The Alpha 2 contract admits free-form keys only as labels (metadata keys, schema property keys, argument keys): a constrained charset and length plus a detect-only core scan, never a rewrite (planned, #53 to #55).
+- Object keys are not inspected as text: in the implemented subset every key is a fixed schema name validated by the field matrix, and every free-form-keyed object (`metadata`, `logit_bias`, tool schemas) is rejected, so no user-controlled key text reaches upstream. The Alpha 2 contract admits free-form keys only as labels (metadata keys, schema property keys, argument keys): a constrained charset and length plus a detect-only core scan, never a rewrite (implemented for tool-call ids, names and argument keys in #53; planned for the rest, #54 and #55).
 - The validated structural string `model` is checked by the core in detect-only mode: any finding rejects the request, and it is never rewritten.
 - A `Block` finding in inspected text rejects the request; a `Warn` finding rejects unless `content.on_warn` is `"forward"` ([ADR 0015](../decisions/0015-core-inspection-and-request-transformation.md)).
 - Pre-redacted input: a client-supplied `<SECRET_n>`-shaped string is ordinary text, not a finding. No client claim that input was scanned has any effect.
 
 ## Status
 
-Implemented for the Chat Completions text subset (#18): the matrix, the recursive unknown-field rejection, and the decoded-string and duplicate-key rules. The Alpha 2 contract for tool results, app-submitted tool arguments, metadata, and tool descriptions or schema text is frozen (#52) and **planned** for implementation (#53, #54, #55); until then those forms are rejected. The slot-mode mechanism (redact versus detect-only) and the post-mutation revalidation hook are implemented and behavior-neutral for Alpha 1.
+Implemented for the Chat Completions text subset (#18): the matrix, the recursive unknown-field rejection, and the decoded-string and duplicate-key rules. Tool results and app-submitted tool arguments (assistant `tool_calls`, `role: tool`) are implemented (#53). The Alpha 2 contract for metadata and tool descriptions or schema text is frozen (#52) and **planned** for implementation (#54, #55); until then those forms are rejected. The slot-mode mechanism (redact versus detect-only) and the post-mutation revalidation hook are implemented and behavior-neutral for Alpha 1.

@@ -28,7 +28,7 @@ Every category below is finite, configurable through the validated static config
 - Overload fails before unbounded allocation, with a safe error.
 - A number is published as a default only with a recorded measurement and pins. The values below are the exception the issue (#18) asks for: finite, conservative, justified, and **explicitly provisional**. They are not measured on a quiet host, and the only available data (the [core probe](../probes/core-bridge-probe.md)) was taken on a loaded host. Treat them as ceilings chosen to be safe, not as tuned values or performance claims.
 
-Planned (Alpha 2, #52, [ADR 0025](../decisions/0025-alpha2-field-contract.md)): request-wide derived budgets for strings decoded out of tool arguments and for schema trees (nodes, decoded bytes, depth 8), at most 64 tools, 32 tool calls per message, 64 schema properties, 64 enum entries, 8 `anyOf` entries, 16 metadata entries; all provisional and not implemented until #53 to #55.
+Implemented for tool-call arguments (#53: request-wide derived node and decoded-byte counters, argument depth 8, 32 tool calls per message); planned for the rest (Alpha 2, #52, [ADR 0025](../decisions/0025-alpha2-field-contract.md)): request-wide derived budgets for strings decoded out of tool arguments and for schema trees (nodes, decoded bytes, depth 8), at most 64 tools, 32 tool calls per message, 64 schema properties, 64 enum entries, 8 `anyOf` entries, 16 metadata entries; all provisional and not implemented until #53 to #55.
 
 ## Request limits (provisional pending quiet-host measurement)
 

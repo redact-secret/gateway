@@ -58,6 +58,8 @@ enum Expect {
     Accepted(Vec<(TextSlot, &'static str)>),
     /// Rejected as `unsupported_input`.
     Unsupported,
+    /// Rejected as `malformed_input` (400): syntax, duplicate keys, malformed arguments.
+    Malformed,
 }
 
 struct Row {
@@ -142,7 +144,7 @@ fn rows() -> Vec<Row> {
           r#"{"model":"m","messages":[{"role":"user","content":"x"}],"redacted":true}"#, Expect::Unsupported, None),
 
         // ---- Planned for #53: tool history ---------------------------------------------
-        r(Class::Text, "assistant tool_calls with null content and a tool result (arguments decoded, leaves inspected)",
+        r(Class::Label, "assistant tool_calls with null content and a tool result (arguments decoded, leaves inspected)",
           r#"{"model":"m","messages":[{"role":"user","content":"q"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"서울\",\"n\":3}"}}]},{"role":"tool","tool_call_id":"call_1","content":"sunny"}]}"#,
           ACC(vec![
               (msg(0), "q"),
@@ -153,8 +155,8 @@ fn rows() -> Vec<Row> {
               (TextSlot::ToolCallArgumentKey { message: 1, call: 0, leaf: 2 }, "n"),
               (TextSlot::ToolResultId { message: 2 }, "call_1"),
               (msg(2), "sunny"),
-          ]), Some("#53")),
-        r(Class::Text, "assistant content string beside tool_calls; two calls; tool result as text parts",
+          ]), None),
+        r(Class::Label, "assistant content string beside tool_calls; two calls; tool result as text parts",
           r#"{"model":"m","messages":[{"role":"assistant","content":"calling","tool_calls":[{"id":"a","type":"function","function":{"name":"f","arguments":"{}"}},{"id":"b","type":"function","function":{"name":"g","arguments":"{}"}}]},{"role":"tool","tool_call_id":"a","content":[{"type":"text","text":"r1"}]},{"role":"tool","tool_call_id":"b","content":"r2"}]}"#,
           ACC(vec![
               (msg(0), "calling"),
@@ -166,13 +168,15 @@ fn rows() -> Vec<Row> {
               (TextSlot::Message { index: 1, part: Some(0) }, "r1"),
               (TextSlot::ToolResultId { message: 2 }, "b"),
               (msg(2), "r2"),
-          ]), Some("#53")),
+          ]), None),
         r(Class::Rejected, "tool result with no matching assistant tool call",
           r#"{"model":"m","messages":[{"role":"user","content":"q"},{"role":"tool","tool_call_id":"call_9","content":"x"}]}"#, Expect::Unsupported, None),
-        r(Class::Rejected, "tool_calls[].function.arguments that is not a JSON object",
-          r#"{"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"not json"}}]}]}"#, Expect::Unsupported, None),
+        r(Class::Rejected, "tool_calls[].function.arguments that is not JSON",
+          r#"{"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"not json"}}]}]}"#, Expect::Malformed, None),
+        r(Class::Rejected, "tool_calls[].function.arguments that is JSON but not an object",
+          r#"{"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"[1]"}}]}]}"#, Expect::Unsupported, None),
         r(Class::Rejected, "tool_calls[].function.arguments with duplicate keys",
-          r#"{"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{\"a\":1,\"a\":2}"}}]}]}"#, Expect::Unsupported, None),
+          r#"{"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{\"a\":1,\"a\":2}"}}]}]}"#, Expect::Malformed, None),
         r(Class::Rejected, "tool_calls[].type other than function (custom)",
           r#"{"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"custom","custom":{"name":"f","input":"x"}}]}]}"#, Expect::Unsupported, None),
         r(Class::Rejected, "assistant tool_calls: empty array",
@@ -283,7 +287,8 @@ async fn assert_expect(row: &Row, expect: Expect) {
                 want.iter().map(|(s, t)| (*s, (*t).to_owned())).collect();
             assert_eq!(got, want, "texts for: {}", row.field);
         }
-        (Expect::Unsupported, Err(Reject::Unsupported)) => {}
+        (Expect::Unsupported, Err(Reject::Unsupported))
+        | (Expect::Malformed, Err(Reject::Malformed)) => {}
         (expect, got) => panic!(
             "row `{}`: expected {expect:?}, got {:?}",
             row.field,
@@ -316,7 +321,11 @@ fn table_is_well_formed() {
     for row in &rows {
         // A rejected row targets rejection; a planned owner is one of the three field tasks.
         if row.class == Class::Rejected {
-            assert!(matches!(row.target, Expect::Unsupported), "{}", row.field);
+            assert!(
+                matches!(row.target, Expect::Unsupported | Expect::Malformed),
+                "{}",
+                row.field
+            );
         }
         if let Some(owner) = row.owner {
             assert!(["#53", "#54", "#55"].contains(&owner), "{}", row.field);
@@ -343,12 +352,6 @@ async fn check_target(owner: &str) {
     for row in rows().iter().filter(|r| r.owner == Some(owner)) {
         assert_expect(row, row.target.clone()).await;
     }
-}
-
-#[tokio::test]
-#[ignore = "rejected-until-#53: remove this attribute when tool history lands"]
-async fn target_rows_for_53_tool_history() {
-    check_target("#53").await;
 }
 
 #[tokio::test]
