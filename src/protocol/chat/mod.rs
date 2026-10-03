@@ -165,10 +165,12 @@ pub(super) fn classify(document: Json, limits: &RequestLimits) -> Checked<ChatRe
     let mut stop = None;
     let mut user = None;
     let mut response_format = None;
+    // Request-wide counters for strings decoded out of strings (tool arguments, ADR 0025 D11).
+    let mut derived = tool_calls::Derived::new(limits);
     for (key, value) in entries {
         match key.as_str() {
             "model" => model = Some(controls::parse_model(value)?),
-            "messages" => messages = Some(messages::parse_messages(value, limits)?),
+            "messages" => messages = Some(messages::parse_messages(value, limits, &mut derived)?),
             // Dispatch lines for the planned fields are pre-wired and currently reject.
             "tools" | "tool_choice" | "parallel_tool_calls" => {
                 tool_defs::parse_field(&mut tool_defs, key.as_str(), value, limits)?;

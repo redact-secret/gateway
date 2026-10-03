@@ -465,10 +465,6 @@ async fn unsupported_payloads_are_rejected_with_zero_upstream_bytes() {
             r#"{"model":"m","messages":[{"role":"tool","tool_call_id":"c","content":"x"}]}"#.into(),
         ),
         (
-            "assistant tool_calls",
-            r#"{"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{}"}}]}]}"#.into(),
-        ),
-        (
             "functions",
             r#"{"model":"m","messages":[{"role":"user","content":"x"}],"functions":[]}"#.into(),
         ),

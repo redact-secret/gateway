@@ -9,17 +9,19 @@ use std::io::{self, Write};
 
 use super::serialize::{Bounded, json_str};
 use super::slots::TextSlot;
-use super::tool_calls;
+use super::tool_calls::{self, Derived, ToolCall};
 use super::{Checked, MAX_CONTENT_PARTS, ProtocolError, RequestLimits, string, unsupported};
 use crate::protocol::json::Json;
 
-/// Message author role. `tool` and `function` are not supported yet (planned: #53).
+/// Message author role. The legacy role `function` is rejected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
     System,
     Developer,
     User,
     Assistant,
+    /// Tool result (`tool_call_id` plus text content).
+    Tool,
 }
 
 impl Role {
@@ -30,6 +32,7 @@ impl Role {
             Self::Developer => "developer",
             Self::User => "user",
             Self::Assistant => "assistant",
+            Self::Tool => "tool",
         }
     }
 }
@@ -40,6 +43,8 @@ pub enum Content {
     Text(String),
     /// `"content": [{"type":"text","text":"..."}, ...]`; each entry is one part's text.
     Parts(Vec<String>),
+    /// `"content": null`, accepted only on an assistant message that has `tool_calls`.
+    Null,
 }
 
 impl fmt::Debug for Content {
@@ -48,14 +53,18 @@ impl fmt::Debug for Content {
         match self {
             Self::Text(_) => f.write_str("Content::Text"),
             Self::Parts(parts) => write!(f, "Content::Parts({})", parts.len()),
+            Self::Null => f.write_str("Content::Null"),
         }
     }
 }
 
-/// One supported message: `role` plus text `content` and nothing else.
+/// One supported message: `role`, text `content`, and for tool history `tool_calls`
+/// (assistant) or `tool_call_id` (tool result).
 pub struct Message {
     pub(super) role: Role,
     pub(super) content: Content,
+    pub(super) tool_calls: Vec<ToolCall>,
+    pub(super) tool_call_id: Option<String>,
 }
 
 impl Message {
@@ -75,11 +84,16 @@ impl fmt::Debug for Message {
         f.debug_struct("Message")
             .field("role", &self.role)
             .field("content", &self.content)
+            .field("tool_calls", &self.tool_calls.len())
             .finish()
     }
 }
 
-pub(super) fn parse_messages(value: Json, limits: &RequestLimits) -> Checked<Vec<Message>> {
+pub(super) fn parse_messages(
+    value: Json,
+    limits: &RequestLimits,
+    derived: &mut Derived,
+) -> Checked<Vec<Message>> {
     let Json::Array(items) = value else {
         return Err(unsupported());
     };
@@ -90,29 +104,51 @@ pub(super) fn parse_messages(value: Json, limits: &RequestLimits) -> Checked<Vec
     if items.len() > max {
         return Err(ProtocolError::LimitExceeded);
     }
-    items.into_iter().map(parse_message).collect()
+    items
+        .into_iter()
+        .map(|item| parse_message(item, limits, derived))
+        .collect()
 }
 
-fn parse_message(value: Json) -> Checked<Message> {
+fn parse_message(value: Json, limits: &RequestLimits, derived: &mut Derived) -> Checked<Message> {
     let Json::Object(entries) = value else {
         return Err(unsupported());
     };
     let mut role = None;
     let mut content = None;
+    let mut calls = None;
+    let mut call_id = None;
     for (key, value) in entries {
         match key.as_str() {
             "role" => role = Some(parse_role(value)?),
             "content" => content = Some(parse_content(value)?),
-            // EXTENSION (#53): the tool-history keys are routed here and rejected until
-            // #53 lands.
-            "tool_calls" | "tool_call_id" => tool_calls::parse_message_field(&key, value)?,
+            "tool_calls" => calls = Some(tool_calls::parse_calls(value, limits, derived)?),
+            "tool_call_id" => call_id = Some(tool_calls::parse_link(value)?),
             // `name`, `function_call`, `refusal`, `audio`, and any unknown key.
             _ => return Err(unsupported()),
         }
     }
+    let role = role.ok_or_else(unsupported)?;
+    let content = content.ok_or_else(unsupported)?;
+    // Role, content and tool-history consistency (contract table); every violation is
+    // `unsupported_input`, decided before inspection.
+    let consistent = match role {
+        Role::System | Role::Developer | Role::User => {
+            !matches!(content, Content::Null) && calls.is_none() && call_id.is_none()
+        }
+        Role::Assistant => {
+            call_id.is_none() && (calls.is_some() || !matches!(content, Content::Null))
+        }
+        Role::Tool => !matches!(content, Content::Null) && calls.is_none() && call_id.is_some(),
+    };
+    if !consistent {
+        return Err(unsupported());
+    }
     Ok(Message {
-        role: role.ok_or_else(unsupported)?,
-        content: content.ok_or_else(unsupported)?,
+        role,
+        content,
+        tool_calls: calls.unwrap_or_default(),
+        tool_call_id: call_id,
     })
 }
 
@@ -122,6 +158,7 @@ fn parse_role(value: Json) -> Checked<Role> {
         "developer" => Ok(Role::Developer),
         "user" => Ok(Role::User),
         "assistant" => Ok(Role::Assistant),
+        "tool" => Ok(Role::Tool),
         _ => Err(unsupported()),
     }
 }
@@ -142,7 +179,9 @@ fn parse_content(value: Json) -> Checked<Content> {
                 .collect::<Checked<Vec<_>>>()
                 .map(Content::Parts)
         }
-        // null, numbers, objects, booleans: opaque or unclassified content.
+        // Role consistency is checked by the caller.
+        Json::Null => Ok(Content::Null),
+        // numbers, objects, booleans: opaque or unclassified content.
         _ => Err(unsupported()),
     }
 }
@@ -168,11 +207,14 @@ fn parse_text_part(value: Json) -> Checked<String> {
     }
 }
 
-/// Visit every message text in order (parts in order). EXTENSION (#53): after a message's
-/// content, its tool-call slots (`id`, `name`, argument keys, argument text) are visited in
-/// the order fixed by the contract, then the next message.
+/// Visit every message text in order: for a tool result its `tool_call_id`, then content
+/// (parts in order); otherwise content, then each tool call's slots (`id`, `name`, argument
+/// keys and text leaves in document order), then the next message.
 pub(super) fn visit(messages: &[Message], f: &mut impl FnMut(TextSlot, &str)) {
     for (index, message) in messages.iter().enumerate() {
+        if let Some(id) = &message.tool_call_id {
+            f(TextSlot::ToolResultId { message: index }, id);
+        }
         match &message.content {
             Content::Text(text) => f(TextSlot::Message { index, part: None }, text),
             Content::Parts(parts) => {
@@ -186,6 +228,10 @@ pub(super) fn visit(messages: &[Message], f: &mut impl FnMut(TextSlot, &str)) {
                     );
                 }
             }
+            Content::Null => {}
+        }
+        for (call, tool_call) in message.tool_calls.iter().enumerate() {
+            tool_calls::visit_call(index, call, tool_call, f);
         }
     }
 }
@@ -193,6 +239,9 @@ pub(super) fn visit(messages: &[Message], f: &mut impl FnMut(TextSlot, &str)) {
 /// Mutable twin of [`visit`]; the order must be identical.
 pub(super) fn visit_mut(messages: &mut [Message], f: &mut impl FnMut(TextSlot, &mut String)) {
     for (index, message) in messages.iter_mut().enumerate() {
+        if let Some(id) = &mut message.tool_call_id {
+            f(TextSlot::ToolResultId { message: index }, id);
+        }
         match &mut message.content {
             Content::Text(text) => f(TextSlot::Message { index, part: None }, text),
             Content::Parts(parts) => {
@@ -206,11 +255,16 @@ pub(super) fn visit_mut(messages: &mut [Message], f: &mut impl FnMut(TextSlot, &
                     );
                 }
             }
+            Content::Null => {}
+        }
+        for (call, tool_call) in message.tool_calls.iter_mut().enumerate() {
+            tool_calls::visit_call_mut(index, call, tool_call, f);
         }
     }
 }
 
-/// Write `,"messages":[...]` (the caller has already written `model`).
+/// Write `,"messages":[...]` (the caller has already written `model`). Within a message:
+/// `role`, `content`, then `tool_calls` or `tool_call_id`.
 pub(super) fn write(messages: &[Message], w: &mut Bounded) -> io::Result<()> {
     w.write_all(b",\"messages\":[")?;
     for (index, message) in messages.iter().enumerate() {
@@ -234,6 +288,14 @@ pub(super) fn write(messages: &[Message], w: &mut Bounded) -> io::Result<()> {
                 }
                 w.write_all(b"]")?;
             }
+            Content::Null => w.write_all(b"null")?,
+        }
+        if !message.tool_calls.is_empty() {
+            tool_calls::write_calls(&message.tool_calls, w)?;
+        }
+        if let Some(id) = &message.tool_call_id {
+            w.write_all(b",\"tool_call_id\":")?;
+            json_str(w, id)?;
         }
         w.write_all(b"}")?;
     }
