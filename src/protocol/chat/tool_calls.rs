@@ -19,7 +19,9 @@
 //! plain text and never reaches this module's parser.
 
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
 
 use serde_json::Number;
@@ -88,6 +90,8 @@ pub(super) struct ToolCall {
     nodes: usize,
     /// Longest decoded string a replacement may produce.
     max_string: usize,
+    /// Digest of the label slots (`id`, `name`, argument keys in order) at parse time.
+    labels: u64,
 }
 
 impl fmt::Debug for ToolCall {
@@ -111,6 +115,35 @@ fn is_link(text: &str) -> bool {
         && text
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
+}
+
+/// Digest of a call's label slots, in traversal order. Deterministic (fixed-key hasher).
+/// Revalidation compares it so that a label rewritten to another *valid* label is caught too.
+fn call_labels(id: &str, name: &str, args: &Arg) -> u64 {
+    fn keys(arg: &Arg, h: &mut DefaultHasher) {
+        match arg {
+            Arg::Array(items) => items.iter().for_each(|item| keys(item, h)),
+            Arg::Object(entries) => {
+                for (key, value) in entries {
+                    key.hash(h);
+                    keys(value, h);
+                }
+            }
+            Arg::Null | Arg::Bool(_) | Arg::Number(_) | Arg::Text(_) => {}
+        }
+    }
+    let mut h = DefaultHasher::new();
+    id.hash(&mut h);
+    name.hash(&mut h);
+    keys(args, &mut h);
+    h.finish()
+}
+
+/// Digest of a tool result's `tool_call_id` (0 when the message has none).
+pub(super) fn link_digest(id: Option<&str>) -> u64 {
+    let mut h = DefaultHasher::new();
+    id.hash(&mut h);
+    h.finish()
 }
 
 /// `tool_call_id` of a `role: tool` message (a LINK label).
@@ -182,12 +215,14 @@ fn parse_call(value: Json, limits: &RequestLimits, derived: &mut Derived) -> Che
     };
     let max_string = usize::try_from(limits.max_string_bytes).unwrap_or(usize::MAX);
     let (args, nodes) = parse_arguments(&arguments, max_string, derived)?;
+    let labels = call_labels(&id, &name, &args);
     Ok(ToolCall {
         id,
         name,
         args,
         nodes,
         max_string,
+        labels,
     })
 }
 
@@ -334,8 +369,14 @@ pub(super) fn revalidate(messages: &[Message]) -> Result<(), SerializeError> {
         {
             return Err(SerializeError::Invalid);
         }
+        if link_digest(message.tool_call_id.as_deref()) != message.link {
+            return Err(SerializeError::Invalid);
+        }
         for call in &message.tool_calls {
             if !is_link(&call.id) || !is_name(&call.name) {
+                return Err(SerializeError::Invalid);
+            }
+            if call_labels(&call.id, &call.name, &call.args) != call.labels {
                 return Err(SerializeError::Invalid);
             }
             let mut nodes = 0_usize;
@@ -940,6 +981,30 @@ mod tests {
         r.for_each_text_mut(|slot, text| {
             if matches!(slot, TextSlot::ToolCallArgumentKey { leaf: 1, .. }) {
                 *text = "a".to_owned();
+            }
+        });
+        assert_eq!(r.revalidate(), Err(SerializeError::Invalid));
+
+        // A key rewritten to another *valid* name is still a label rewrite.
+        let mut r = run(&with_args(r#"{"a":1}"#)).unwrap();
+        r.for_each_text_mut(|slot, text| {
+            if matches!(slot, TextSlot::ToolCallArgumentKey { .. }) {
+                *text = "zz".to_owned();
+            }
+        });
+        assert_eq!(r.revalidate(), Err(SerializeError::Invalid));
+
+        // A rewritten tool-result id (to another issued id) is caught by the digest.
+        let two = serde_json::json!({"model":"m","messages":[
+            {"role":"assistant","content":null,"tool_calls":[
+                {"id":"a","type":"function","function":{"name":"f","arguments":"{}"}},
+                {"id":"b","type":"function","function":{"name":"f","arguments":"{}"}}]},
+            {"role":"tool","tool_call_id":"a","content":"r"}]})
+        .to_string();
+        let mut r = run(&two).unwrap();
+        r.for_each_text_mut(|slot, text| {
+            if matches!(slot, TextSlot::ToolResultId { .. }) {
+                *text = "b".to_owned();
             }
         });
         assert_eq!(r.revalidate(), Err(SerializeError::Invalid));

@@ -1,8 +1,8 @@
 //! Messages, roles and content (`messages[]`). Owner: #53 (tool-history roles, tool calls,
 //! tool results, nullable content). Nobody else edits this file.
 //!
-//! Alpha 1 accepts `system`, `developer`, `user`, `assistant` with string or text-part
-//! `content` and no other key. The extension points for #53 are marked `EXTENSION (#53)`.
+//! Accepts `system`, `developer`, `user`, `assistant`, `tool` with string or text-part
+//! `content` (nullable only for an assistant with `tool_calls`), plus `tool_calls` / `tool_call_id`.
 
 use std::fmt;
 use std::io::{self, Write};
@@ -65,6 +65,8 @@ pub struct Message {
     pub(super) content: Content,
     pub(super) tool_calls: Vec<ToolCall>,
     pub(super) tool_call_id: Option<String>,
+    /// Digest of `tool_call_id` at parse time; revalidation compares it.
+    pub(super) link: u64,
 }
 
 impl Message {
@@ -148,6 +150,7 @@ fn parse_message(value: Json, limits: &RequestLimits, derived: &mut Derived) -> 
         role,
         content,
         tool_calls: calls.unwrap_or_default(),
+        link: tool_calls::link_digest(call_id.as_deref()),
         tool_call_id: call_id,
     })
 }

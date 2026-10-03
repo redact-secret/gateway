@@ -75,14 +75,14 @@ Status column. **Implemented** rows exist in code and tests today. **Planned #NN
 
 | Field | Class | Status | Contract |
 | --- | --- | --- | --- |
-| `role` | structural | Implemented for `system`, `developer`, `user`, `assistant`; `tool` Planned #53 | Required, exact lowercase. `function` is rejected (legacy). |
-| `content` | text | Implemented | String (any decoded text, including empty) or an array of 1 to 64 text parts. `null` is accepted only for an assistant message that carries `tool_calls` (Planned #53); every other `null`, number, boolean, or object is rejected. |
-| `tool_calls` | see below | Planned #53 | Assistant only. Array of 1 to 32 calls. |
-| `tool_call_id` | label (LINK) | Planned #53 | `role: tool` only, required there. |
+| `role` | structural | Implemented for `system`, `developer`, `user`, `assistant`, `tool` (#53) | Required, exact lowercase. `function` is rejected (legacy). |
+| `content` | text | Implemented | String (any decoded text, including empty) or an array of 1 to 64 text parts. `null` is accepted only for an assistant message that carries `tool_calls` (Implemented, #53); every other `null`, number, boolean, or object is rejected. |
+| `tool_calls` | see below | Implemented (#53) | Assistant only. Array of 1 to 32 calls. |
+| `tool_call_id` | label (LINK) | Implemented (#53) | `role: tool` only, required there. |
 | `name` | rejected | Rejected | Participant names are ambiguous identity text (and the legacy function-name carrier). |
 | `refusal`, `audio`, `annotations`, `function_call`, anything unknown | rejected | Rejected | Provider-generated or non-text output fields. |
 
-Role and content consistency (Planned #53; every violation is `unsupported_input`):
+Role and content consistency (Implemented, #53; every violation is `unsupported_input`):
 
 | Role | `content` | `tool_calls` | `tool_call_id` |
 | --- | --- | --- | --- |
@@ -94,17 +94,17 @@ Role and content consistency (Planned #53; every violation is `unsupported_input
 
 A part is exactly `{"type":"text","text":"<string>"}`. `type` must equal `text` (exact), `text` is inspected text, and any other key is rejected. The array form is kept as an array so serialization preserves the type the caller chose. Tool-result `content` uses the same two forms and is ordinary text: a result that looks like JSON is never parsed.
 
-### Assistant `tool_calls[]` (Planned #53)
+### Assistant `tool_calls[]` (Implemented, #53)
 
 | Field | Class | Contract |
 | --- | --- | --- |
 | `id` | label (LINK) | Required. Unique across the whole request (all assistant messages). |
 | `type` | structural | Required, exactly `function`. `custom` and anything else is rejected. |
 | `function.name` | label (NAME) | Required. It is not required to match a declared tool (history may predate the current `tools`). |
-| `function.arguments` | derived: label keys + text leaves | Required string. Parsed with the strict duplicate-key-rejecting parser under the derived budgets; the top level must be a JSON object (`"{}"` is accepted, `""` is not). Object keys are NAME labels; string values are text leaves; numbers, booleans, `null`, nested objects, and arrays are preserved structure. Re-encoded compactly to a JSON string on output. This is the only string ever parsed as JSON. |
+| `function.arguments` | derived: label keys + text leaves | Required string. Parsed with the strict duplicate-key-rejecting parser under the derived budgets; the top level must be a JSON object (`"{}"` is accepted, `""` is not). Object keys are NAME labels; string values are text leaves; numbers, booleans, `null`, nested objects, and arrays are preserved structure. Re-encoded compactly to a JSON string on output. This is the only string ever parsed as JSON. Failure classes: malformed JSON, trailing bytes, a duplicate key (also after `\u` decoding) and the empty string are `400 malformed_input`; a non-object root, a key outside NAME, or an integer literal outside `i64` is `422 unsupported_input`; depth over 8, or a node or decoded-byte total over the request-wide derived budgets, is `413 limit_exceeded`. At most 32 calls per message (`413 limit_exceeded` beyond). |
 | anything else (`index`, `extra_content`, ...) | rejected | |
 
-Correlation (Planned #53): a `role: tool` message must directly follow the assistant message that issued its `tool_call_id` (or another tool message answering the same assistant message), the id must be one of that message's calls, and each id is answered at most once. Unanswered calls are not enforced by the gateway (the provider rejects them). Tool results never name the tool: `name` stays rejected.
+Correlation (Implemented, #53): a `role: tool` message must directly follow the assistant message that issued its `tool_call_id` (or another tool message answering the same assistant message), the id must be one of that message's calls, and each id is answered at most once. Unanswered calls are not enforced by the gateway (the provider rejects them). Tool results never name the tool: `name` stays rejected.
 
 Example (synthetic):
 
@@ -182,7 +182,7 @@ A JSON object of at most 16 entries (the provider's limit). Keys are LINK labels
 | `n` other than `1` | Larger values multiply response size beyond the relay bounds. |
 | Any unknown key at any depth, any client claim that input is already scanned or redacted | Unknown nested fields get the same classification discipline as top-level fields; no claim is ever read. |
 
-Until a Planned row lands, `tools`, `tool_choice`, `parallel_tool_calls`, `metadata`, `response_format.type = json_schema`, role `tool`, `tool_calls`, `tool_call_id`, and assistant `content: null` are all in this table's rejected set, with zero upstream bytes.
+Until a Planned row lands, `tools`, `tool_choice`, `parallel_tool_calls`, `metadata`, and `response_format.type = json_schema` are all in this table's rejected set, with zero upstream bytes. Role `tool`, `tool_calls`, `tool_call_id`, and assistant `content: null` beside `tool_calls` are implemented (#53).
 
 ## Block versus redact
 
@@ -206,7 +206,7 @@ Text-slot order is fixed and identical for reading and mutation ([ADR 0025](../d
 5. `metadata` entries in input order, key then value.
 6. `response_format.json_schema`: `name`, `description`, then schema leaves.
 
-Today only classes 1 (messages), 3, and 4 produce slots. After the core call on every slot returns `Ok`, and before serialization, the request is revalidated: the visited slot count equals the classified count; every replaced string is rechecked against its slot bound; every decoded argument tree is re-encoded and its shape (container kinds, key sequence, non-string leaves) must equal the pre-inspection shape; label slots must be byte-identical to what was classified; derived budgets are recomputed on the replaced content. Serialization is then bounded as before. Any failure rejects the request with no upstream bytes.
+Today classes 1 (messages, including tool history, #53), 3, and 4 produce slots; classes 2, 5, and 6 are planned (#54, #55). After the core call on every slot returns `Ok`, and before serialization, the request is revalidated: the visited slot count equals the classified count; every replaced string is rechecked against its slot bound; every decoded argument tree is re-encoded and its shape (container kinds, key sequence, non-string leaves) must equal the pre-inspection shape; label slots must be byte-identical to what was classified; derived budgets are recomputed on the replaced content. Implemented for tool history (#53): the call and result labels must still conform and match a digest taken at parse time, linkage and id uniqueness are re-checked, each decoded argument tree must have its parse-time node count with conforming, unique keys, and a replaced string over the per-string bound is `limit_exceeded`; the aggregate size is bounded by the serializer's output bound. Serialization is then bounded as before. Any failure rejects the request with no upstream bytes.
 
 ## Typed boundary representation
 

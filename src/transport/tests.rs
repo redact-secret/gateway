@@ -56,6 +56,7 @@ mod header_cap_tests;
 #[allow(dead_code)]
 mod leak;
 mod stream_tests;
+mod tool_history_tests;
 mod wire_tests;
 
 use fake_upstream::{Behavior, FakeUpstream};
