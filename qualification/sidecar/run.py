@@ -450,6 +450,11 @@ def main():
     oom_pid=oom_inspect['info']['pid']
     oom_group=next(line.split(':',2)[2] for line in command('docker','exec',CLUSTER+'-control-plane','cat',f'/proc/{oom_pid}/cgroup').splitlines() if line.startswith('0::'))
     assert oom_cid in oom_group and '..' not in oom_group
+    oom_parent='/sys/fs/cgroup'+oom_group.rsplit('/',1)[0]
+    def oom_kills():
+        events=command('docker','exec',CLUSTER+'-control-plane','cat',oom_parent+'/memory.events')
+        return int(dict(line.split() for line in events.splitlines())['oom_kill'])
+    kills_before=oom_kills()
     evidence('oom-before',runtime_sample('oom'))
     command('docker','exec',CLUSTER+'-control-plane','/bin/sh','-ec','printf %s 262144 > "$1/memory.max"','--','/sys/fs/cgroup'+oom_group)
     # An idle process can reclaim file-backed pages without dying. Force a
@@ -460,8 +465,9 @@ def main():
         data=json.loads(kube('get','pod','oom','-o','json'))
         statuses=data.get('status',{}).get('initContainerStatuses',[])
         last=next((s.get('lastState',{}).get('terminated',s.get('state',{}).get('terminated')) for s in statuses if s['name']=='gateway'),None)
-        if last and last.get('reason')=='OOMKilled':
-            evidence('oom',{'gateway_exit':last['exitCode'],'reason':'OOMKilled','app_started_before_fault':True,'fault':'cgroup v2 hard limit lowered after readiness','injected_limit_bytes':262144,'configured_limit_bytes':268435456,'cleanup_promised':False})
+        kills_after=oom_kills()
+        if last and last['exitCode']==137 and kills_after>kills_before:
+            evidence('oom',{'gateway_exit':last['exitCode'],'reason':last['reason'],'kernel_oom_kill_delta':kills_after-kills_before,'app_started_before_fault':True,'fault':'cgroup v2 hard limit lowered after readiness','injected_limit_bytes':262144,'configured_limit_bytes':268435456,'cleanup_promised':False})
             break
         time.sleep(1)
     else: raise RuntimeError('OOM evidence deadline exceeded')
@@ -535,6 +541,7 @@ def main():
     started=time.monotonic()
     while time.monotonic()-started < duration:
         completions=actor(name,'complete-stream')
+        evidence('completed-stream-check',completions)
         assert all(result['status']==200 and result['terminal'] is True for result in completions.values())
         cycles.append({'completed_streams':completions,'load':sampled_load(name,10,8,16384),'cancel':actor(name,'cancel'),
                        'slow':actor(name,'slow'),'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')})

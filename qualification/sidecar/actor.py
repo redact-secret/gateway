@@ -48,6 +48,7 @@ class Provider(BaseHTTPRequestHandler):
             if request.get('stream'):
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/event-stream')
+                self.send_header('Transfer-Encoding', 'chunked')
                 self.send_header('Connection', 'close')
                 self.end_headers()
                 if scenario == 'stall-sse':
@@ -55,11 +56,11 @@ class Provider(BaseHTTPRequestHandler):
                 chunks=1000 if scenario=='slow-downstream' else 150 if scenario=='long-sse' else 5 if scenario=='short-sse' else 50
                 chunk=b'data: '+b'x'*32768+b'\n\n' if scenario=='slow-downstream' else b'data: {"synthetic":"safe"}\n\n'
                 for _ in range(chunks):
-                    self.wfile.write(chunk)
+                    self.wfile.write(f'{len(chunk):x}\r\n'.encode()+chunk+b'\r\n')
                     self.wfile.flush()
                     time.sleep(0.005 if scenario=='slow-downstream' else 0.2)
                 terminal = b'data: [DONE]\n\n' if self.path.endswith('completions') else b'event: response.completed\ndata: {"type":"response.completed","response":{"status":"completed"}}\n\n'
-                self.wfile.write(terminal)
+                self.wfile.write(f'{len(terminal):x}\r\n'.encode()+terminal+b'\r\n0\r\n\r\n')
                 self.wfile.flush()
                 self.close_connection = True
             else:
