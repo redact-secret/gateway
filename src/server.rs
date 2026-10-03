@@ -254,7 +254,7 @@ impl BoundServer {
 }
 
 /// The listener every served connection goes through: the connection bound (#40, ADR
-/// 0022), the write-stall deadline (#21) with its cumulative write budget (#59, ADR 0025),
+/// 0022), the write-stall deadline (#21) with its cumulative write budget (#59, ADR 0026),
 /// and the request-head guard (#25, ADR 0019). Tests that serve a router themselves use
 /// this too, so they exercise the production connection handling.
 pub(crate) fn guarded_listener(

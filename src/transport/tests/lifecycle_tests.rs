@@ -1605,3 +1605,88 @@ async fn the_production_listener_cuts_a_trickle_reader_of_a_real_connection() {
     assert!(read < 1_000_000, "the client was nowhere near done: {read}");
     assert_eq!(lab.up.requests(), 1);
 }
+
+#[tokio::test]
+async fn shutdown_during_a_blocked_json_write_returns_at_the_drain_plus_grace() {
+    // A buffered JSON answer is past its headers once the first bytes are written: the
+    // shutdown cancellation cannot change it (there is no second status to send), the
+    // write stays bounded by the stall and budget deadlines, and the server's `serve`
+    // still returns at the drain deadline plus the fixed grace. The process exit that
+    // follows is the final termination of the connection (documented in the lifecycle
+    // contract); here the client closing is what returns the permit.
+    let limits = limits_with(|l| {
+        l.stream_write_stall_ms = 120_000;
+        l.stream_lifetime_ms = 600_000;
+        l.max_response_body_bytes = 32 * 1024 * 1024;
+    });
+    let lab = Lab::new(Script::JsonBig(16 * 1024 * 1024), limits).await;
+    let mut served = Served::start(&lab, Duration::from_millis(300)).await;
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.set_recv_buffer_size(4096).unwrap();
+    let mut client = socket.connect(served.addr).await.unwrap();
+    client
+        .write_all(&raw_post(&chat_body("hello"), KEY))
+        .await
+        .unwrap();
+    // Reading the first bytes is the event "the response write has begun".
+    let head = read_head(&mut client).await;
+    assert!(head.starts_with(b"HTTP/1.1 200"));
+    assert_eq!(lab.free()[2], 15, "held while the write is in progress");
+    let asked = tokio::time::Instant::now();
+    served.stop();
+    let result = within(&mut served.task).await.unwrap();
+    assert!(result.is_ok());
+    assert!(
+        asked.elapsed() < Duration::from_secs(5),
+        "serve returned at the drain plus the grace, not at the 120 s stall deadline"
+    );
+    assert_eq!(
+        lab.free()[2],
+        15,
+        "the unfinished write still owns its permit"
+    );
+    drop(client);
+    lab.settle().await;
+    assert_eq!(lab.up.requests(), 1);
+}
+
+#[tokio::test]
+async fn a_buffered_body_hands_the_server_bounded_frames_and_keeps_the_permit_until_dropped() {
+    use http_body::Body as _;
+    let admission = Admission::new(&plan(&ROOMY));
+    let permit = admission.try_upstream().unwrap();
+    let size = super::super::relay::FRAME_BYTES * 3 + 5;
+    let response = super::super::UpstreamResponse::new(
+        reqwest::StatusCode::OK,
+        reqwest::header::HeaderMap::new(),
+        vec![b'x'; size],
+        permit,
+    );
+    let (_, _, mut body) = response.into_parts();
+    assert_eq!(body.size_hint().exact(), Some(size as u64));
+    let mut seen = 0_usize;
+    let mut frames = 0_usize;
+    while let Some(frame) = std::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await {
+        let data = frame.unwrap().into_data().unwrap();
+        assert!(
+            data.len() <= super::super::relay::FRAME_BYTES,
+            "bounded frame"
+        );
+        seen += data.len();
+        frames += 1;
+        assert_eq!(body.size_hint().exact(), Some((size - seen) as u64));
+    }
+    assert_eq!((seen, frames), (size, 4));
+    assert!(body.is_end_stream());
+    // Still owned after the last frame was taken: only dropping the body returns it.
+    let held: Vec<_> = (0..ROOMY.upstream)
+        .filter_map(|_| admission.try_upstream().ok())
+        .collect();
+    assert_eq!(held.len(), ROOMY.upstream as usize - 1);
+    drop(held);
+    drop(body);
+    let all: Vec<_> = (0..ROOMY.upstream)
+        .filter_map(|_| admission.try_upstream().ok())
+        .collect();
+    assert_eq!(all.len(), ROOMY.upstream as usize);
+}
