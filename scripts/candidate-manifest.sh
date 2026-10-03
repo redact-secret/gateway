@@ -84,7 +84,7 @@ jq -n -S \
 {
   manifest_version: 2,
   status: "alpha1-release-candidate-unpublished",
-  description: "Alpha 1 MVP candidate: health endpoints and the POST /v1/chat/completions text-subset proxy (JSON and SSE relay, responses not redacted) to the fixed OpenAI route. Not published, not distributable.",
+  description: "Unpublished candidate (gateway 0.1.0-alpha.0): health endpoints and the text-subset proxies for POST /v1/chat/completions and the stateless text subset of POST /v1/responses (JSON and SSE relay, provider responses not redacted) to the fixed OpenAI routes. Both endpoints are qualified only against a separate fake-upstream test build with the pinned SDKs; no real provider is involved and these exact artifacts accept no request in any test. Not published, not distributable.",
   distributable: false,
   distribution_blockers: [
     "registry and image name are not selected; nothing is pushed",
@@ -95,8 +95,16 @@ jq -n -S \
   ],
   capabilities: {
     proxy: {
-      endpoint: "POST /v1/chat/completions",
-      subset: "OpenAI Chat Completions text only; unsupported fields and content forms are rejected",
+      endpoints: [
+        {
+          endpoint: "POST /v1/chat/completions",
+          subset: "OpenAI Chat Completions text only; unsupported fields and content forms are rejected"
+        },
+        {
+          endpoint: "POST /v1/responses",
+          subset: "OpenAI Responses stateless text subset only (store:false required; instructions, text input, function calls and outputs, function tools, text formats, metadata); stored or referenced state, hosted tools, images, files, audio, background processing, reasoning and unknown fields are rejected"
+        }
+      ],
       json_relay: true,
       sse_relay: true,
       response_redaction: false,

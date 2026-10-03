@@ -1,10 +1,10 @@
 //! Consistency checks for the frozen Responses request contract (#82, ADR 0031).
 //!
-//! The contract is `docs/contracts/responses-request.md`. Nothing about Responses is
-//! implemented yet, so these tests pin the document itself: its synthetic examples are valid
-//! JSON, they obey the `store` rule, every rejected field family the ADR names is spelled
-//! out, and the route stays unrouted until #86 flips it. Behavior tests for each accepted and
-//! rejected form belong to #84 to #88. All data here is synthetic.
+//! The contract is `docs/contracts/responses-request.md`. These tests pin the document itself:
+//! its synthetic examples are valid JSON, they obey the `store` rule, and every rejected field
+//! family the ADR names is spelled out. Behavior tests for each accepted and rejected form are in
+//! `responses_text.rs`, `responses_tools.rs`, `responses_route.rs` (#84 to #86) and, through the
+//! pinned SDKs, `qualification/responses-cases.json` (#88). All data here is synthetic.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 

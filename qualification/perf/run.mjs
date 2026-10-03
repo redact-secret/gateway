@@ -499,8 +499,162 @@ function shapeBody(shape, model = "qual-json-ok") {
       }
       return { body: base({ tools }, user), expect_findings: 0 };
     }
+    // Responses shapes (#88), same sizes and finding counts as the Chat shapes above so the two
+    // endpoints are compared like for like in one run. Request bodies are POST /v1/responses.
     default:
+      if (shape.startsWith("resp_")) return responsesShape(shape);
       throw new Error("unknown shape");
+  }
+}
+
+
+const RM = "qual-resp-json-ok";
+const RPATH = "/v1/responses";
+
+/** Responses request bodies (#88). Mirrors the Chat shapes: same byte targets, same finding counts. */
+function responsesShape(shape) {
+  const rb = (extra, input = "q") => JSON.stringify({ model: RM, store: false, input, ...extra });
+  const out = (body, expect_findings) => ({ body, expect_findings, path: RPATH });
+  switch (shape) {
+    case "resp_small_4KiB":
+      return out(rb({}, fill(0, 4096)), 0);
+    case "resp_many_findings_16KiB": {
+      let t = "";
+      let k = 0;
+      while (t.length < 16384) t += `token ${tok(k++)} `;
+      return out(rb({}, t), k);
+    }
+    case "resp_large_500KiB":
+      return out(rb({}, fill(1, 500 * 1024)), 0);
+    case "resp_tool_history_4KiB":
+    case "resp_tool_history_16KiB_findings": {
+      const withSecrets = shape.endsWith("findings");
+      const total = withSecrets ? 16 * 1024 : 4 * 1024;
+      const rounds = Math.max(1, Math.round(total / 2048));
+      const per = Math.max(16, Math.floor((total - 400 - rounds * 260) / (rounds * 4)) - (withSecrets ? 40 : 0));
+      const input = [{ role: "user", content: "run the lookups" }];
+      let k = 0;
+      for (let t = 0; t < rounds; t++) {
+        for (let c = 0; c < 2; c++) {
+          const args = { query: `${fill(k, per)}${withSecrets ? ` ${tok(k)}` : ""}`, limit: 5 };
+          input.push({ type: "function_call", call_id: `call_${t}_${c}`, name: "lookup_record", arguments: JSON.stringify(args) });
+          k++;
+        }
+        for (let c = 0; c < 2; c++) {
+          input.push({ type: "function_call_output", call_id: `call_${t}_${c}`, output: `${fill(k, per)}${withSecrets ? ` ${tok(k)}` : ""}` });
+          k++;
+        }
+      }
+      return out(rb({}, input), withSecrets ? k : 0);
+    }
+    case "resp_tool_history": {
+      // 30 rounds of 4 calls and 4 outputs plus one message: 241 items, under the default bound of 256
+      // (a call and its output are two items here, where Chat folds the calls into one message).
+      const per = Math.max(32, Math.floor(600000 / (30 * 8)));
+      const input = [{ role: "user", content: "run the lookups" }];
+      let k = 0;
+      for (let t = 0; t < 30; t++) {
+        for (let c = 0; c < 4; c++) {
+          const args = { query: `${fill(k, per)} ${tok(k)}`, filters: { a: { b: { c: { d: `v${k}` } } } }, limit: 5 };
+          input.push({ type: "function_call", call_id: `call_${t}_${c}`, name: "lookup_record", arguments: JSON.stringify(args) });
+          k++;
+        }
+        for (let c = 0; c < 4; c++) {
+          input.push({ type: "function_call_output", call_id: `call_${t}_${c}`, output: `${fill(k, per)} ${tok(k)}` });
+          k++;
+        }
+      }
+      return out(rb({}, input), k);
+    }
+    case "resp_tool_defs_4KiB":
+    case "resp_tool_defs_16KiB_findings": {
+      const withSecrets = shape.endsWith("findings");
+      const total = withSecrets ? 16 * 1024 : 4 * 1024;
+      const ntools = Math.max(1, Math.round(total / 2048));
+      const props = 6;
+      const desc = Math.max(16, Math.floor((total - 300 - ntools * 200) / (ntools * (props + 1))) - 60 - (withSecrets ? 40 : 0));
+      const tools = [];
+      let secrets = 0;
+      for (let t = 0; t < ntools; t++) {
+        const properties = {};
+        for (let j = 0; j < props; j++) {
+          properties[`p_${j}`] = { type: "string", description: `${fill(t * props + j, desc)}${withSecrets ? ` ${tok(t * props + j)}` : ""}` };
+          if (withSecrets) secrets++;
+        }
+        tools.push({ type: "function", name: `tool_${t}`, description: fill(t, desc), parameters: { type: "object", properties, required: ["p_0"] }, strict: false });
+      }
+      return out(rb({ tools }), secrets);
+    }
+    case "resp_tool_defs": {
+      const desc = Math.min(1024, Math.max(16, Math.floor(700000 / (64 * 32))));
+      const tools = [];
+      let secrets = 0;
+      for (let t = 0; t < 64; t++) {
+        const properties = {};
+        const required = [];
+        for (let j = 0; j < 32; j++) {
+          let text = fill(t * 32 + j, desc);
+          if (j % 8 === 0) {
+            text += ` ${tok(t * 32 + j)}`;
+            secrets++;
+          }
+          properties[`p_${j}`] = { type: "string", description: text };
+          if (j < 4) required.push(`p_${j}`);
+        }
+        tools.push({ type: "function", name: `tool_${t}`, description: fill(t, desc), parameters: { type: "object", properties, required }, strict: false });
+      }
+      return out(rb({ tools }), secrets);
+    }
+    case "resp_format_schema_16KiB_findings": {
+      const properties = {};
+      let secrets = 0;
+      for (let j = 0; j < 24; j++) {
+        properties[`p_${j}`] = { type: "string", description: `${fill(j, 500)} ${tok(j)}` };
+        secrets++;
+      }
+      return out(rb({ text: { format: { type: "json_schema", name: "answer", strict: true, schema: { type: "object", properties, required: ["p_0"], additionalProperties: false } } } }), secrets);
+    }
+    case "resp_metadata": {
+      const metadata = {};
+      let secrets = 0;
+      for (let j = 0; j < 16; j++) {
+        let v = fill(j, 440);
+        if (j % 2 === 0) {
+          v += ` ${tok(j)}`;
+          secrets++;
+        }
+        metadata[`meta_key_${String(j).padStart(2, "0")}`] = v.slice(0, 512);
+      }
+      return out(rb({ metadata }, "hello"), secrets);
+    }
+    // Text-slot-dense Responses cases (#88): many small slots, almost no bytes.
+    case "resp_node_dense": {
+      const tools = [];
+      for (let t = 0; t < 5; t++) {
+        const properties = {};
+        for (let j = 0; j < 64; j++) properties[`p_${j}`] = { type: "string", enum: Array.from({ length: 40 }, (_, e) => `v${e}`) };
+        tools.push({ type: "function", name: `dense_${t}`, parameters: { type: "object", properties }, strict: false });
+      }
+      return out(rb({ tools }), 0);
+    }
+    case "resp_items_dense": {
+      // The most items and parts the default bounds allow: 256 items of 4 short parts each.
+      const input = Array.from({ length: 256 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: i % 2 ? `short answer ${i}` : Array.from({ length: 4 }, (_, p) => ({ type: "input_text", text: `part ${i} ${p}` })) }));
+      return out(rb({}, input), 0);
+    }
+    case "resp_args_dense": {
+      // Function-call arguments with many string leaves (each a separate inspected slot).
+      const input = [{ role: "user", content: "go" }];
+      for (let c = 0; c < 16; c++) {
+        const leaves = {};
+        for (let l = 0; l < 64; l++) leaves[`k_${l}`] = `value ${c} ${l}`;
+        input.push({ type: "function_call", call_id: `call_${c}`, name: "bulk", arguments: JSON.stringify(leaves) });
+        input.push({ type: "function_call_output", call_id: `call_${c}`, output: "ok" });
+      }
+      return out(rb({}, input), 0);
+    }
+    default:
+      throw new Error("unknown responses shape");
   }
 }
 
@@ -670,12 +824,12 @@ async function providerFresh() {
   await providerCall("/__admin/mode?keep_bodies=0", "POST");
 }
 
-async function aggCall(g, body, { abortMs = null } = {}) {
+async function aggCall(g, body, { abortMs = null, path: target = "/v1/chat/completions" } = {}) {
   const t = performance.now();
   const ac = new AbortController();
   const timer = abortMs === null ? null : setTimeout(() => ac.abort(), abortMs);
   try {
-    const res = await fetch(`${g.base}/v1/chat/completions`, {
+    const res = await fetch(`${g.base}${target}`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${SYN.api_key}` },
       body,
@@ -741,17 +895,17 @@ async function aggStages(cap, shapes = SHAPES) {
   for (const shape of shapes) {
     const g = await startAggGateway(cap, {});
     await providerFresh();
-    const { body, expect_findings } = shapeBody(shape);
+    const { body, expect_findings, path } = shapeBody(shape);
     const baseline = await procCounts(g);
     const stage = Object.fromEntries(STAGES.map((s) => [s, []]));
     const e2e = [];
     const gw = [];
     const statuses = {};
-    await aggCall(g, body); // warm-up, not recorded
-    const count = n(shape.startsWith("small") || shape.startsWith("metadata") || shape.startsWith("node") ? 60 : 25);
+    await aggCall(g, body, { path }); // warm-up, not recorded
+    const count = n(/^(resp_)?(small|metadata|node|items|args|format)/.test(shape) ? 60 : 25);
     for (let i = 0; i < count; i++) {
       const before = await snapshot(g);
-      const r = await aggCall(g, body);
+      const r = await aggCall(g, body, { path });
       const after = await snapshot(g);
       statuses[r.status] = (statuses[r.status] ?? 0) + 1;
       e2e.push(r.ms * 1000);
@@ -1419,7 +1573,7 @@ async function aggregateMain() {
 }
 
 // Incremental parse/scan/serialize cost and output growth of the Alpha 2 shapes next to the Alpha 1
-// cases (#57). `--incremental [--quick] [--runs N]` reuses aggStages, the same gateway configuration
+// cases (#57) and of the Responses counterparts (resp_* shapes, #88). `--incremental [--quick] [--runs N]` reuses aggStages, the same gateway configuration
 // and the same shape builders as --aggregate (#58); it only selects the shapes and skips the load
 // sections. Same quiet-host protocol and labelling.
 const INCREMENTAL = process.argv.includes("--incremental");
@@ -1427,6 +1581,10 @@ const INCREMENTAL_SHAPES = [
   "small_4KiB", "tool_history_4KiB", "tool_defs_4KiB", "metadata",
   "many_findings_16KiB", "tool_history_16KiB_findings", "tool_defs_16KiB_findings",
   "large_500KiB", "tool_history", "tool_defs", "node_dense",
+  // Responses (#88), measured in the same pass as the Chat shapes above
+  "resp_small_4KiB", "resp_tool_history_4KiB", "resp_tool_defs_4KiB", "resp_metadata",
+  "resp_many_findings_16KiB", "resp_tool_history_16KiB_findings", "resp_tool_defs_16KiB_findings", "resp_format_schema_16KiB_findings",
+  "resp_large_500KiB", "resp_tool_history", "resp_tool_defs", "resp_node_dense", "resp_items_dense", "resp_args_dense",
 ];
 
 async function incrementalMain() {
@@ -1471,8 +1629,9 @@ async function incrementalMain() {
     .replace(/redact-secret-gateway-qualification/, "qualification binary")
     .replace(/\s*\[RSG-[^\]]*\]/, "");
   const report = {
-    kind: "alpha2-incremental-cost",
-    tool: "qualification/perf/run.mjs --incremental (reuses the --aggregate sequential stage measurement, #58; no performance claim)",
+    kind: "incremental-cost",
+    endpoints: ["POST /v1/chat/completions", "POST /v1/responses"],
+    tool: "qualification/perf/run.mjs --incremental (reuses the --aggregate sequential stage measurement, #58; Chat shapes #57, Responses shapes #88; no performance claim)",
     quick_mode: QUICK,
     build: version,
     profile: process.env.QUAL_PROFILE ?? "unknown",
@@ -1481,7 +1640,7 @@ async function incrementalMain() {
     runs_requested: RUNS,
     all_runs_quiet: runs.every((r) => !r.provisional),
     provisional: runs.some((r) => r.provisional),
-    note: "inspection includes serialization; parse runs on the request thread; stage figures are exact sequential deltas (median of per-run p50 in the summary). output_bytes is the body the fake provider received (the sanitized document). Same-size Alpha 2 shapes (4 KiB and 16 KiB) are compared with small_4KiB and many_findings_16KiB.",
+    note: "inspection includes serialization; parse runs on the request thread; stage figures are exact sequential deltas (median of per-run p50 in the summary). output_bytes is the body the fake provider received (the sanitized document). Same-size Alpha 2 shapes (4 KiB and 16 KiB) are compared with small_4KiB and many_findings_16KiB; resp_* shapes are the POST /v1/responses counterparts measured in the same pass.",
     summary,
     runs,
   };

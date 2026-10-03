@@ -18,6 +18,17 @@
 #   POST tool_calls with malformed JSON arguments      400 malformed_input
 #   POST tool_calls with duplicate argument keys       400 malformed_input
 #   GET  /v1/chat/completions                          405
+#   Responses route (#88), each refused before inspection and forwarding, on the exact binary:
+#   POST /v1/responses, no local token (token gateways) 401 local_auth_required
+#   POST /v1/responses, no credential                  401 missing_credential
+#   POST /v1/responses, {}                             422 unsupported_input
+#   POST /v1/responses, store omitted + synthetic token 422 unsupported_input
+#   POST /v1/responses, previous_response_id           422 unsupported_input
+#   POST /v1/responses, hosted web_search tool         422 unsupported_input
+#   POST /v1/responses, function_call malformed arguments 400 malformed_input
+#   POST /v1/responses, Content-Type text/plain        415 unsupported_input
+#   GET  /v1/responses                                 405
+#   POST /v1/responses/ (trailing slash)               404 unsupported_input
 #   GET  /v1/models                                    404 unsupported_input
 #
 # SAFETY: the gateway under test may have an upstream configured (the shipped example and
@@ -83,5 +94,22 @@ expect "POST tool_calls with duplicate argument keys" 400 malformed_input -X POS
   -d "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"},{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{\\\"a\\\":1,\\\"a\\\":2}\"}}]}]}" \
   "$base/v1/chat/completions"
 expect "GET /v1/chat/completions" 405 unsupported_input "$base/v1/chat/completions"
+if [ -n "${GATEWAY_LOCAL_TOKEN:-}" ]; then
+  expect "POST /v1/responses no local token" 401 local_auth_required -X POST -H "$json" -H "$auth" -d '{}' "$base/v1/responses"
+fi
+expect "POST /v1/responses no credential" 401 missing_credential -X POST -H "$json" -H "$local_hdr" -d '{}' "$base/v1/responses"
+expect "POST /v1/responses {}" 422 unsupported_input -X POST -H "$json" -H "$auth" -H "$local_hdr" -d '{}' "$base/v1/responses"
+# Each body below is refused by the Responses contract; none of them is a valid request, so none can be forwarded.
+expect "POST /v1/responses store omitted with a synthetic token" 422 unsupported_input -X POST -H "$json" -H "$auth" -H "$local_hdr" \
+  -d "{\"model\":\"m\",\"input\":\"$token\"}" "$base/v1/responses"
+expect "POST /v1/responses previous_response_id" 422 unsupported_input -X POST -H "$json" -H "$auth" -H "$local_hdr" \
+  -d "{\"model\":\"m\",\"store\":false,\"previous_response_id\":\"resp_synthetic\",\"input\":\"$token\"}" "$base/v1/responses"
+expect "POST /v1/responses hosted web_search tool" 422 unsupported_input -X POST -H "$json" -H "$auth" -H "$local_hdr" \
+  -d "{\"model\":\"m\",\"store\":false,\"input\":\"$token\",\"tools\":[{\"type\":\"web_search\"}]}" "$base/v1/responses"
+expect "POST /v1/responses function_call with malformed arguments" 400 malformed_input -X POST -H "$json" -H "$auth" -H "$local_hdr" \
+  -d "{\"model\":\"m\",\"store\":false,\"input\":[{\"type\":\"function_call\",\"call_id\":\"c1\",\"name\":\"f\",\"arguments\":\"{bad\"}]}" "$base/v1/responses"
+expect "POST /v1/responses text/plain" 415 unsupported_input -X POST -H 'Content-Type: text/plain' -H "$auth" -H "$local_hdr" -d 'x' "$base/v1/responses"
+expect "GET /v1/responses" 405 unsupported_input "$base/v1/responses"
+expect "POST /v1/responses/ (trailing slash)" 404 unsupported_input -X POST -H "$json" -H "$auth" -H "$local_hdr" -d '{}' "$base/v1/responses/"
 expect "GET /v1/models" 404 unsupported_input "$base/v1/models"
-echo "MVP smoke probes: health OK; every proxy-route probe rejected locally with its safe code"
+echo "smoke probes: health OK; every proxy-route probe (Chat Completions and Responses) rejected locally with its safe code"

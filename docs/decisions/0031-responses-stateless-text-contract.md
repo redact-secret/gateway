@@ -1,6 +1,6 @@
 # ADR 0031: Responses stateless text field and state contract
 
-Status: Accepted (design), by maintainer delegation to the #82 author within the Beta 1 decomposition authorized for epic #13. Implementation status: **request subset, route, fixed destination and caller-auth boundary implemented (#83 to #86)**; relay lifecycle (#87) and qualification (#88) planned. This ADR and its contract freeze the request subset. Date: 2026-10-03. Builds on [ADR 0005](0005-protocol-expansion-and-central-enforcement.md), [ADR 0015](0015-core-inspection-and-request-transformation.md), [ADR 0025](0025-alpha2-field-contract.md). Contract: [responses-request](../contracts/responses-request.md). Issue: #82 (epic #13). Coordinates with #61 (caller-token authority); unblocks #62 (schema freeze), #83 to #88.
+Status: Accepted (design), by maintainer delegation to the #82 author within the Beta 1 decomposition authorized for epic #13. Implementation status: **request subset, route, fixed destination, caller-auth boundary and relay lifecycle implemented (#83 to #87) and qualified with the pinned Node.js and Python SDKs against the non-release fake-upstream build (#88, [ADR 0034](0034-responses-qualification-and-beta1-endpoint-matrix.md))**; no real-provider evidence exists. This ADR and its contract freeze the request subset. Date: 2026-10-03. Builds on [ADR 0005](0005-protocol-expansion-and-central-enforcement.md), [ADR 0015](0015-core-inspection-and-request-transformation.md), [ADR 0025](0025-alpha2-field-contract.md). Contract: [responses-request](../contracts/responses-request.md). Issue: #82 (epic #13). Coordinates with #61 (caller-token authority); unblocks #62 (schema freeze), #83 to #88.
 
 ## Context
 
@@ -60,11 +60,11 @@ Requiring `store:false` makes the first-call experience stricter than the provid
 
 ## Implementation status
 
-Contract frozen by #82. Implemented so far: the #83 dispatch, the #84 text subset and the #85 function-call, tool, structured-output and metadata subset (see the implementation notes). The route, fixed destination and caller-auth boundary are implemented (#86); relay lifecycle (#87) and qualification (#88) are planned.
+Contract frozen by #82. Implemented so far: the #83 dispatch, the #84 text subset and the #85 function-call, tool, structured-output and metadata subset (see the implementation notes). The route, fixed destination and caller-auth boundary are implemented (#86), the relay lifecycle is qualified (#87), and the whole subset is qualified with the pinned SDKs (#88; measured SDK-helper findings are in the contract and corrected two points of the original type-surface review).
 
 ## Implementation note (#83)
 
-The typed dispatch is in place: `protocol::RequestBody::{Chat, Responses}`, `protocol::Protocol::ResponsesText` (canonical route id `openai.responses`), and `boundary::ProtocolRoute` binding a protocol to its route at approval. `protocol::responses::ResponsesRequest` is a skeleton that carries only `model`, `instructions` and string `input` so the shared inspection path is exercised; the classifier (#84), remaining slots (#85), route and destination (#86) and relay (#87) are not implemented, and `POST /v1/responses` is still unrouted.
+The typed dispatch is in place: `protocol::RequestBody::{Chat, Responses}`, `protocol::Protocol::ResponsesText` (canonical route id `openai.responses`), and `boundary::ProtocolRoute` binding a protocol to its route at approval. `protocol::responses::ResponsesRequest` is a skeleton that carries only `model`, `instructions` and string `input` so the shared inspection path is exercised; the classifier (#84), remaining slots (#85), route and destination (#86) and relay (#87) are not implemented, and `POST /v1/responses` was unrouted at that point (routed by #86).
 
 ## Implementation note (#84)
 

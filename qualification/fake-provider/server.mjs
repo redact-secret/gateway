@@ -378,7 +378,7 @@ async function runScenario(call, req, res, json) {
   return sendJson(res, 404, providerError(404));
 }
 
-const runResponsesScenario = makeResponsesScenario({ sendJson, beginSse, mark, tick, providerError });
+const runResponsesScenario = makeResponsesScenario({ sendJson, beginSse, mark, tick, providerError, scenarioCounts: { get: (k) => scenarioCounts.get(k), set: (k, v) => scenarioCounts.set(k, v) } });
 
 const provider = http.createServer((req, res) => {
   const call = {

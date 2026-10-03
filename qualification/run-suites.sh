@@ -5,7 +5,7 @@
 #   QUAL_COMMAND='shell line' runs one extra command against the same stack.
 #
 # Starts the scripted fake provider and ten gateway instances of the qualification binary
-# (standard, tight limits, no upstream, dead provider, overload, and the Alpha 2 policy and concurrency instances), runs the pinned-SDK suites against
+# (standard, tight limits, no upstream, dead provider, overload, the Alpha 2 policy and concurrency instances, and the two authenticated Beta 1 instances; the Chat and Responses suites share them, #88), runs the pinned-SDK suites against
 # them, stops everything gracefully, and scans the captured gateway stdout/stderr for any
 # synthetic marker. Everything is synthetic and loopback only; no secret, key, or network
 # access beyond 127.0.0.1 is used. Exit 0 only if every suite and every check passed.

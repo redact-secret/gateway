@@ -1,6 +1,6 @@
 # Contract: initial field classification
 
-Status: approved design contract. The Chat Completions tables are complete for Alpha 1 (implemented, #18, #19) and frozen for Alpha 2 (#52, [ADR 0025](../decisions/0025-alpha2-field-contract.md)); the Alpha 2 additions are planned until #53 and #55 land; tool definitions and structured-output schemas (#54) are implemented. Owner: `protocol` module.
+Status: approved design contract. The Chat Completions tables are complete for Alpha 1 (implemented, #18, #19) and frozen for Alpha 2 (#52, [ADR 0025](../decisions/0025-alpha2-field-contract.md)); the Alpha 2 additions (tool history #53, tool definitions and structured-output schemas #54, metadata #55) are implemented and qualified with the pinned SDKs (#57). Owner: `protocol` module.
 
 ## Classes
 
@@ -19,7 +19,7 @@ Unknown fields, at any nesting depth, are rejected by default.
 - Parse once. Reject duplicate keys and invalid UTF-8. Inspect decoded strings so escapes cannot bypass checks.
 - Preserve JSON types and keys. Deterministic traversal order and placeholder/session scope are fixed in the contract and tested (#5).
 - Never replace text in raw serialized JSON.
-- Contracts are needed for: prompt/instructions, messages, tool results, app-submitted tool arguments, metadata, and tool descriptions/schema text. Chat Completions has them in [chat-completions-request](chat-completions-request.md) (Alpha 2 rows are planned); Responses `instructions`, items, and its distinct field model are in [responses-request](responses-request.md) (frozen, planned).
+- Contracts are needed for: prompt/instructions, messages, tool results, app-submitted tool arguments, metadata, and tool descriptions/schema text. Chat Completions has them in [chat-completions-request](chat-completions-request.md) (Alpha 2 rows are implemented); Responses `instructions`, items, and its distinct field model are in [responses-request](responses-request.md) (implemented and qualified, #84 to #88).
 - Free text is redacted in place; a label is never rewritten (block, not redact). Where redaction would corrupt an identifier, a key, an enum value, or tool linkage, the field is a label. A new field must be classified as text, label, structural, or rejected in the same change that admits it.
 - App-submitted tool arguments may be JSON inside a string. The dedicated contract (implemented, #53) parses only the designated `function.arguments` string, with bounded duplicate-key-rejecting parsing, inspects decoded string leaves, treats keys as labels, and re-encodes. Blind nested parsing of every string is not allowed. Gateway does not execute tools, and redaction grants no execution permission.
 
@@ -29,7 +29,7 @@ Files, images, audio, URL content, stored conversation/file references, encrypte
 
 ## Scope
 
-Alpha 1: Chat Completions text subset. Alpha 2: the recursive Chat Completions subset with tool history, function tool definitions, structured-output schemas, and metadata (contract frozen in #52; tool history implemented by #53, the rest by #54 and #55). Beta 1: Responses API text subset (contract frozen in #82, planned, not implemented: [responses-request](responses-request.md), [ADR 0031](../decisions/0031-responses-stateless-text-contract.md)). Anything else needs its own ADR. The field-by-field table is [chat-completions-request](chat-completions-request.md).
+Alpha 1: Chat Completions text subset. Alpha 2: the recursive Chat Completions subset with tool history, function tool definitions, structured-output schemas, and metadata (contract frozen in #52; tool history implemented by #53, the rest by #54 and #55). Beta 1: Responses API text subset (contract frozen in #82, implemented in #84 to #87 and qualified with the pinned SDKs in #88 against the fake-upstream build: [responses-request](responses-request.md), [ADR 0031](../decisions/0031-responses-stateless-text-contract.md), [ADR 0034](../decisions/0034-responses-qualification-and-beta1-endpoint-matrix.md)). Anything else needs its own ADR. The field-by-field table is [chat-completions-request](chat-completions-request.md).
 
 ## Keys, structural strings, and `Warn`/`Block` (#19)
 
