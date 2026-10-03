@@ -111,7 +111,7 @@ concurrency before raising workers or queue lengths. No global default or worker
 change is made. Both HTTP connection legs remain unpooled under ADR 0024.
 
 Reservation units, RSS and cgroup memory are different measurements. The
-65,536-unit logical allowance is 256 MiB but does not preallocate that memory.
+65,536-unit logical allowance is 64 MiB (1 KiB per unit) but does not preallocate that memory.
 Bounded metrics serialization adds at most 128 KiB per response (32 MiB at the
 256-connection bound) outside proxy reservations, alongside runtime/allocator/
 core and probe costs. The measured workload is smaller than every theoretical
