@@ -492,6 +492,7 @@ def main():
     name='quota-1'
     stage('declared-soak')
     duration=int(os.environ.get('BETA2_SOAK_SECONDS','600'))
+    evidence('retry-ambiguity',actor(name,'retry-ambiguity',timeout=30))
     stalls=actor(name,'stall',timeout=60)
     evidence('stalled-provider',stalls)
     assert stalls['json']['status']==504 and stalls['sse']['terminal'] is False
