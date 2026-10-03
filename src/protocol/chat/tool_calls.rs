@@ -56,7 +56,11 @@ impl Derived {
         }
     }
 
-    fn charge(&mut self, nodes: usize, bytes: usize) -> Checked<()> {
+    /// Charge `nodes` and `bytes`; shared by tool arguments and schema trees.
+    ///
+    /// # Errors
+    /// [`ProtocolError::LimitExceeded`] when either budget is exhausted.
+    pub(super) fn charge(&mut self, nodes: usize, bytes: usize) -> Checked<()> {
         let nodes = u32::try_from(nodes).map_err(|_| ProtocolError::LimitExceeded)?;
         self.nodes_left = self
             .nodes_left

@@ -46,6 +46,7 @@ mod tool_defs;
 pub use controls::{Params, StreamOptions};
 pub use messages::{Content, Message, Role};
 pub use metadata::Metadata;
+pub use response_format::JsonSchemaFormat;
 pub use response_format::ResponseFormat;
 pub use serialize::SerializeError;
 pub use slots::{SlotMode, TextSlot};
@@ -114,8 +115,8 @@ impl ChatRequest {
     }
 
     #[must_use]
-    pub const fn response_format(&self) -> Option<ResponseFormat> {
-        self.response_format
+    pub const fn response_format(&self) -> Option<&ResponseFormat> {
+        self.response_format.as_ref()
     }
 
     #[cfg(test)]
@@ -171,9 +172,8 @@ pub(super) fn classify(document: Json, limits: &RequestLimits) -> Checked<ChatRe
         match key.as_str() {
             "model" => model = Some(controls::parse_model(value)?),
             "messages" => messages = Some(messages::parse_messages(value, limits, &mut derived)?),
-            // Dispatch lines for the planned fields are pre-wired and currently reject.
             "tools" | "tool_choice" | "parallel_tool_calls" => {
-                tool_defs::parse_field(&mut tool_defs, key.as_str(), value, limits)?;
+                tool_defs::parse_field(&mut tool_defs, key.as_str(), value, &mut derived)?;
             }
             "metadata" => metadata = metadata::parse(value, limits)?,
             "stream" => stream = Some(boolean(value)?),
@@ -191,7 +191,8 @@ pub(super) fn classify(document: Json, limits: &RequestLimits) -> Checked<ChatRe
             "stop" => stop = Some(stop_user::parse_stop(value)?),
             "user" => user = Some(stop_user::parse_user(value)?),
             "response_format" => {
-                response_format = Some(response_format::parse_response_format(value)?)
+                response_format =
+                    Some(response_format::parse_response_format(value, &mut derived)?);
             }
             // Everything else, including tools, functions, metadata, logit_bias,
             // audio/modalities, and any unknown key, is rejected.
@@ -316,7 +317,7 @@ mod tests {
                 include_usage: Some(true)
             })
         );
-        assert_eq!(r.response_format(), Some(ResponseFormat::JsonObject));
+        assert_eq!(r.response_format(), Some(&ResponseFormat::JsonObject));
         assert_eq!(r.params().seed.as_ref().and_then(Number::as_i64), Some(-5));
         let t: Vec<String> = texts(&r).into_iter().map(|(_, s)| s).collect();
         assert_eq!(t, ["s", "d", "a", "b", "r", "x", "y", "u-1"]);

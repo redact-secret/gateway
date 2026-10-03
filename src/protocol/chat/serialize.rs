@@ -113,7 +113,7 @@ impl ChatRequest {
         stop_user::write_stop(self.stop.as_ref(), w)?;
         stop_user::write_user(self.user.as_deref(), w)?;
         metadata::write(&self.metadata, w)?;
-        response_format::write(self.response_format, w)?;
+        response_format::write(self.response_format.as_ref(), w)?;
         w.write_all(b"}")
     }
 }
