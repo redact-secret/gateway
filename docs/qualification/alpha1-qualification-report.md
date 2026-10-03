@@ -242,6 +242,61 @@ Connection cost and reuse (ADR 0024, same host, same load class; [connection-reu
 | Resumed TLS 1.3 / full TLS 1.2 | 187 us / 239 us |
 | Per-connection memory (idle / 60 KiB unfinished head), descriptors | 5.1 to 6.4 KiB / 70.9 to 73.0 KiB, 1 each (ADR 0022: 5 to 7 / about 71) |
 
+### Alpha 2 aggregate load qualification (2026-10-03, #58, ADR 0028): not quiet, five passes, provisional
+
+**What this is.** The existing harness (`qualification/perf/run.mjs --aggregate`, fake provider, qualification build; `examples/perf_workloads.rs --memory` for retention accounting) run against the Alpha 2 request shapes with combined load, finite sockets, overload and recovery. Raw data: [alpha2-aggregate-load-2026-10-03.json](alpha2-aggregate-load-2026-10-03.json) (every pass, with host snapshots) and [alpha2-memory-accounting-2026-10-03.json](alpha2-memory-accounting-2026-10-03.json). The decision record is [ADR 0028](../decisions/0028-aggregate-load-qualification.md); the capacities and failure behavior are in [resource-limits](../contracts/resource-limits.md#aggregate-load-qualification-58-capacities-and-behavior-at-each-limit).
+
+**Environment.** Apple M4, 10 cores, 24 GiB, macOS arm64 (Darwin 25.5.0), Rust 1.98.1, release profile of the qualification build (harness commit `fcba074`; gateway source is main at `97b7b32` plus the counters-only measurement aids of ADR 0028), core `0.1.0-beta.12`, Node.js v22.16.0 as load generator and for the fake provider (same host), profile `full`, loopback, plain HTTP. The gateway ran under `/usr/bin/time -l` so the true peak resident size (`ru_maxrss`) is known; `ps` and `lsof` were sampled every 300 ms for threads, sockets and resident size, and the gateway's own occupancy counters every 15 ms.
+
+**Host state, stated plainly: not quiet, no run is a quiet-host measurement.** The criterion is a one-minute load average at or below 25% of the cores (2.5). Before each pass the harness waited up to three minutes for the load to fall and recorded `uptime` and the busiest processes. Load at the start / end of the five passes: 5.2 / 10.2, 18.4 / 19.6, 9.1 / 10.2, 25.6 / 16.2, 44.0 / 57.7. The busiest processes were macOS system services (`StorageManagementService`, `ApplicationsStorageExtension`, `WindowServer`) and browser helpers, never the gateway. All five passes are labelled `provisional: true`. A first set of five passes (load 7.7 to 42.6) was discarded: it charged the one-time warm-up of the core on each worker (about 7 MiB per worker) to the load and showed combined-load growth of twice the reservation; the second set warms the core first and is the dataset. The memory-accounting runs (5 repeats) ran at load 73 to 112. The Linux runner dataset (the `measure` job: three passes) stays provisional on a shared VM.
+
+**Configurations.** Standard: `receipt 16, memory_units 262144, inspection 4, upstream 16, stream 16`, default limits. Tight: `receipt 8, memory_units 16384, inspection 4, upstream 8, stream 4`, `max_connections 64`, `admission_wait_ms 250`, `admission_queue 16`. Load: 24 closed-loop clients across eight shapes (small, many findings, large text, large text with 900 findings, tool history, tool definitions, metadata, node-dense schemas), a third of the calls held by a 150 ms provider delay, 6 stream readers that read one chunk and stop for 1.5 s, 40 idle sockets, 8 s per pass.
+
+**Per-stage timing, one request at a time (exact deltas; median over five passes; microseconds, p50 / p95 / p99; admission wait was 0 in every case).**
+
+| Shape | Parse | Core inspection (incl. worker hand-off) | Serialization | Upstream first response (loopback) | Client end to end | True peak RSS (KiB) |
+| --- | --- | --- | --- | --- | --- | --- |
+| small 4 KiB | 9 / 10 / 15 | 112 / 122 / 135 | 4 / 4 / 5 | 393 / 767 / 928 | 1347 / 2643 / 8893 | 10128 |
+| many findings 16 KiB (349) | 8 / 13 / 19 | 648 / 756 / 830 | 4 / 6 / 8 | 353 / 451 / 465 | 1656 / 2144 / 2276 | 10880 |
+| large text 500 KiB | 102 / 160 / 189 | 6414 / 7453 / 7855 | 264 / 376 / 431 | 1554 / 2824 / 3470 | 10036 / 11627 / 11985 | 13456 |
+| 500 KiB + 900 findings | 86 / 156 / 178 | 12933 / 15177 / 16442 | 218 / 258 / 269 | 1227 / 1825 / 1883 | 15346 / 18538 / 19678 | 14160 |
+| tool history 661 KB | 1471 / 2432 / 2567 | 15277 / 18007 / 18773 | 480 / 506 / 671 | 1599 / 1871 / 2019 | 19422 / 23528 / 23826 | 15952 |
+| tool definitions 826 KB | 1611 / 2065 / 2085 | 15475 / 18940 / 19248 | 629 / 815 / 983 | 2401 / 3285 / 3756 | 20633 / 26028 / 26206 | 19648 |
+| metadata 16 x 512 | 14 / 22 / 55 | 266 / 361 / 439 | 4 / 8 / 12 | 316 / 450 / 718 | 1213 / 1685 / 1961 | 10240 |
+| node-dense schemas 85 KB | 1105 / 1401 / 1526 | 16736 / 19347 / 21546 | 296 / 412 / 420 | 1215 / 1540 / 2197 | 20544 / 23424 / 25856 | 11936 |
+
+The spread over the five passes is in the dataset (`median_and_spread`); on this loaded host it is wide at p95 and p99. What the table supports: cost follows the number of text slots rather than bytes. An 85 KB node-dense schema (about 12,800 enum labels, each a separate inspected slot) takes about as long in the core as 660 KB of tool history and more than twice as long as 500 KiB of plain text. The worst single inspection job is therefore about 15 to 20 ms here, bounded by `max_nodes`. Parse runs on the single request thread and takes 1.1 to 1.6 ms for the 661 to 826 KB Alpha 2 bodies (p99 up to 2.6 ms sequentially, up to 6 ms under combined load).
+
+**Combined load (median over five passes).**
+
+| | Tight capacity, 64 connections | Standard capacity |
+| --- | --- | --- |
+| Requests / `200` / `503 overload` / closed at accept | 17,452 / 600 / 3,803 / 13,049 (range of requests 2,896 to 25,745) | 5,809 / 1,167 / 4,642 / 0 |
+| Peak occupancy (sampled) | inspection 4/4, receipt 8/8, memory 16,384/16,384 units, upstream 8/8, stream 4/4, queue 16/16 | inspection 4/4, receipt 16/16, memory 89,766 of 262,144 units (83,545 to 93,041), upstream 16/16, stream 6/16 |
+| Gateway threads / sockets at peak | 5 / 75 | 5 / 84 |
+| Admission wait p50 / p95 / p99 (us) | 114,687 / 229,375 / 262,143 | 0 / 0 / 0 |
+| Parse | 13 / 2,559 / 4,095 | 11 / 3,583 / 6,143 |
+| Inspection (queueing included) | 2,559 / 32,767 / 49,151 | 28,671 / 57,343 / 81,919 |
+| Serialization | 6 / 895 / 1,535 | 447 / 1,791 / 5,119 |
+| Upstream first response (a third held 150 ms) | 2,559 / 163,839 / 163,839 | 16,383 / 196,607 / 196,607 |
+| Stream first byte / stream total (relay) | 895 / 6,143 / 6,143 us and 1.57 s | 8,191 / 32,767 / 32,767 us and 1.57 s |
+| True peak RSS (KiB), warm baseline | 45,184 (43,296 to 45,696), 36,032 | 73,680 (65,424 to 79,040), 37,920 |
+| Growth over warm baseline / sampled reserved peak | 0.52 (0.33 to 0.60) | 0.40 (0.31 to 0.51) |
+| Counters back to zero after the load ended | 1 ms (1 to 2) | 1 ms |
+| Probe requests that succeeded afterwards | 10 of 10 in every pass | 10 of 10 in every pass |
+
+Percentiles under load are bucket upper edges of the gateway's own histograms (at most 25% above the true value). Sockets fell back to baseline within 4 s in every pass (the polling loop, `lsof` under load, sets that figure; a gateway with 200 idle sockets attempted returned to baseline 30 ms after they closed). Resident memory did not return to its pre-load level (allocator retention).
+
+**Invariants checked from the provider's side (counters in the fake provider, not logs).** In all five passes and both configurations: provider calls not explained by a forwarded request: 0; provider bodies holding the synthetic credential prefix: 0; five kinds of pre-forward rejection (finding bound, body bound, unsupported field, malformed JSON, duplicate key; 50 requests per pass): 0 provider calls.
+
+**Cancellation while synchronous core work runs.** Twelve clients sent 500 KiB bodies with 900 findings and abandoned each after 2 to 10 ms. Median over five passes: 3,684 requests, 1,961 client aborts, 792 inspection jobs ran to their real end on the workers, 20 were still awaited, 19 reached the provider; the rest were discarded without a forward. Inspection occupancy peaked at 4 of 4 and the counters were back to zero 1 ms after the storm. The deterministic proofs are `tests/inspection_waiter_timeout.rs` (a waiter whose deadline passes cannot return the permits of a started job; queued jobs whose waiters time out never run and return their permits when skipped; repeated refusals leave the counters unchanged), plus the existing `tests/core_probe_scheduling.rs`, `tests/permits_cancellation.rs` and the lifecycle tests.
+
+**Large against small, queue behavior.** No starvation (592 of 592 large and 1,173 of 1,173 small served with a 6,000-unit budget); queues stayed at their bounds (wait queue 16, no unbounded structure, no detached job). Scheduling is unchanged. Details: [resource-limits](../contracts/resource-limits.md#aggregate-load-qualification-58-capacities-and-behavior-at-each-limit).
+
+**Memory accounting.** Reserved bytes against observed bytes for every Alpha 2 shape, per stage, and the costs outside `memory_units`: see the same section. The reservation formula holds; the worst fraction is 0.68 of the reserved bytes (eight held tool-definition bodies). No formula or bound changed, so no new formula test was needed.
+
+**Limitations.** No quiet pass; macOS only for the detailed runs; one load generator on the same host as the gateway and the fake provider; no TLS and no real model delay; the Node client and `lsof` sampling add load of their own; true peaks are per process, one scenario each; the connection-per-request pattern ran into local port limits at the highest rates, so the cancellation clients pace themselves (4 ms) and the harness waits for closed connections to clear between scenarios; the figures are single-machine observations, not a performance claim, and no default changes on them.
+
 ### Measured choices
 
 Nothing measured here is a default, and no choice below is promoted by this report. Each remains **provisional**, with what was and was not measured:
@@ -313,4 +368,4 @@ sh qualification/build.sh --release && QUAL_COMMAND='node qualification/perf/run
 | First CI run (kept as an honest record) | https://github.com/redact-secret/gateway/actions/runs/37043763494 failed one Node test, a control that asserted the Node 22 truncation behavior; Node 24 behaves differently. The assertion was removed and the docs corrected; see "SDK results" |
 | Tests named in this report | `cargo test --locked` (`tests/destination_policy.rs`, `tests/shipped_examples.rs`, `tests/architecture_reconciliation.rs`, `tests/dependency_policy.rs`, `tests/api_boundary.rs`, the permit, parser, diagnostic, and in-crate transport suites) and the SDK suites under `qualification/sdk/` |
 | Decision | [ADR 0020](../decisions/0020-sdk-qualification-test-build.md): the separate non-release build; allowlist of exactly eight files in `tests/destination_policy.rs`; no existing scan was relaxed |
-| Raw measurement data | [alpha1-stage-timing.json](alpha1-stage-timing.json) (local, macOS arm64), [alpha1-stage-timing-quiet-host-rerun-2026-10-02.json](alpha1-stage-timing-quiet-host-rerun-2026-10-02.json) and [connection-reuse-measurement-2026-10-02.json](connection-reuse-measurement-2026-10-02.json) (#42, not-quiet host), [alpha1-stage-timing-ci-linux.json](alpha1-stage-timing-ci-linux.json) (GitHub-hosted Linux) |
+| Raw measurement data | [alpha1-stage-timing.json](alpha1-stage-timing.json) (local, macOS arm64), [alpha2-aggregate-load-2026-10-03.json](alpha2-aggregate-load-2026-10-03.json) and [alpha2-memory-accounting-2026-10-03.json](alpha2-memory-accounting-2026-10-03.json) (#58), [alpha1-stage-timing-quiet-host-rerun-2026-10-02.json](alpha1-stage-timing-quiet-host-rerun-2026-10-02.json) and [connection-reuse-measurement-2026-10-02.json](connection-reuse-measurement-2026-10-02.json) (#42, not-quiet host), [alpha1-stage-timing-ci-linux.json](alpha1-stage-timing-ci-linux.json) (GitHub-hosted Linux) |

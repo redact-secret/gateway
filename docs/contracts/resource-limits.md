@@ -1,6 +1,6 @@
 # Contract: resource limits
 
-Status: categories approved. **Per-request body, parse, and receipt limits have numeric values (#18) that are provisional pending quiet-host measurement.** Capacity counts (receipt, memory, inspection, upstream, stream) still have no defaults and come from configuration. **Upstream connect, response-header, and total deadlines, response header and body byte bounds, and the shutdown drain deadline have provisional values (#20, below).** **Stream idle and lifetime deadlines, the write-stall deadline, and the per-stream relay buffer bound have provisional values (#21, below).** **The accepted-connection bound has a provisional value (#40, below).** Mechanism: [ADR 0003](../decisions/0003-resource-admission-and-lifetime.md); measurement gate: [ADR 0008](../decisions/0008-performance-measurement-gate.md); decision record: [ADR 0014](../decisions/0014-chat-completions-admission.md).
+Status: categories approved. **Per-request body, parse, and receipt limits have numeric values (#18) that are provisional pending quiet-host measurement.** Capacity counts (receipt, memory, inspection, upstream, stream) still have no defaults and come from configuration. **Upstream connect, response-header, and total deadlines, response header and body byte bounds, and the shutdown drain deadline have provisional values (#20, below).** **Stream idle and lifetime deadlines, the write-stall deadline, and the per-stream relay buffer bound have provisional values (#21, below).** **The accepted-connection bound has a provisional value (#40, below).** **Aggregate load, memory accounting against the reservation, failure behavior at each limit, and recommended provisional capacities are in "Aggregate load qualification" (#58, below); no default or formula changed.** **Aggregate load, memory accounting against the reservation, failure behavior at each limit, and recommended provisional capacities are in "Aggregate load qualification" (#58, below); no default or formula changed.** Mechanism: [ADR 0003](../decisions/0003-resource-admission-and-lifetime.md); measurement gate: [ADR 0008](../decisions/0008-performance-measurement-gate.md); decision record: [ADR 0014](../decisions/0014-chat-completions-admission.md).
 
 Every category below is finite, configurable through the validated static configuration, and tested near and across its boundary. A finite per-request limit is never enough alone: there is also an aggregate budget.
 
@@ -118,6 +118,64 @@ Mechanism, measurements, and rationale: [ADR 0023](../decisions/0023-header-size
 | Head, request line through blank line | 65,536 bytes | head guard (fixed `431`) | 543 to 1,127 SDK alone, 15,086 stacked extreme; the largest head the route can admit is under 17 KiB |
 
 Memory. A connection holds at most the head bound plus one read chunk (4 KiB) before its head is judged; that is the figure measured in ADR 0022 (about 71 KiB per connection with a nearly full head, about 17 MiB at 256 connections), unchanged here. No permit is held until the head is complete and judged.
+
+## Aggregate load qualification (#58): capacities and behavior at each limit
+
+Evidence: the [Alpha 2 aggregate load qualification](../qualification/alpha1-qualification-report.md#alpha-2-aggregate-load-qualification-2026-10-03-58) subsection and the datasets [alpha2-aggregate-load-2026-10-03.json](../qualification/alpha2-aggregate-load-2026-10-03.json) and [alpha2-memory-accounting-2026-10-03.json](../qualification/alpha2-memory-accounting-2026-10-03.json); decision: [ADR 0028](../decisions/0028-aggregate-load-qualification.md). **Every figure is provisional**: no pass met the quiet-host condition (one-minute load average at most 25% of the cores; it was 5.2 to 44.0 at the start of each of five passes on a 10-core machine). Nothing here is a default; no default numeric limit and no formula changed.
+
+### Failure behavior at each limit (verified under combined load)
+
+| Limit | What happens at the limit | Caller sees | Upstream body |
+| --- | --- | --- | --- |
+| `max_connections` (accept time) | Connection closed at accept, nothing read or queued; the slot returns when the connection closes | Closed or reset connection (SDK connection error, retried by default) | none |
+| `max_body_bytes`, `max_findings`, depth, nodes, strings, messages, tool and schema bounds | Fixed local rejection before the send (the whole request on the finding bound) | `413 limit_exceeded`, `422 unsupported_input`, `400 malformed_input` | none |
+| `receipt` and `memory_units` | Join the wait queue (at most `admission_queue`, 16) for at most `admission_wait_ms` (250); a full queue or an expired wait fails | `503 overload`, `Retry-After: 1` | none |
+| `inspection` permits (queued plus running jobs) | Refused at once, no waiting; the pool queue is `min(inspection, 1024)` and cannot fill past the permits | `503 overload`, `Retry-After: 1` | none |
+| `upstream` / `stream` permits | Refused at once (`try_*`) after inspection returned its permit | `503 overload`, `Retry-After: 1` | none |
+| Deadlines, shutdown, caller leaves | See [request-lifecycle](request-lifecycle.md); a started inspection keeps its permit and reservation until the core call really returns | per stage | none before the send |
+
+Measured under combined load (24 clients mixing eight body shapes, a third of provider calls held 150 ms, 6 stream readers that stop reading, 40 idle sockets, finite capacities): every occupancy peaked at its capacity and never above it (inspection 4 of 4, receipt 8 of 8, memory 16,384 of 16,384 units, upstream 8 of 8, stream 4 of 4, wait queue 16 of 16, sockets 74 to 75 against a bound of 64 plus listeners and provider connections); every counter was back to zero within 1 to 2 ms of the load ending; ten of ten probe requests then succeeded; the provider received no call that a forwarded request did not explain and no body holding a synthetic credential shape; five kinds of pre-forward rejection (finding bound, body bound, unsupported field, malformed JSON, duplicate key; 50 requests per run) produced zero provider calls in all five runs.
+
+### Memory: reservation against observed bytes
+
+The formula `4*B + min(max_nodes,B)*128` (1 KiB units) held for every Alpha 2 shape. Resident growth as a fraction of the reserved bytes (median over five runs, range in brackets), eight requests held at the provider at once, release build, growth measured after a warm-up request:
+
+| Shape | Body | Reserved per request | Held growth / reserved | True peak growth / reserved |
+| --- | --- | --- | --- | --- |
+| Tool definitions (64 tools, 2048 properties) | 826 KB | 5.1 MiB | 0.68 [0.61 to 0.72] | 0.68 [0.62 to 0.72] |
+| Tool history (48 turns, 4 calls each, nested JSON arguments) | 661 KB | 4.5 MiB | 0.60 [0.56 to 0.62] | 0.61 [0.57 to 0.62] |
+| Node-dense schemas (about 15k parsed nodes) | 85 KB | 2.3 MiB | 0.50 [0.49 to 0.51] | 0.51 [0.50 to 0.52] |
+| Large text (500 KiB) | 512 KB | 4.0 MiB | 0.33 [0.32 to 0.42] | 0.34 [0.32 to 0.42] |
+| Metadata (16 x 512 byte values) | 8 KB | 1.0 MiB | 0.14 [0.12 to 0.14] | 0.16 [0.15 to 0.17] |
+| Many findings (16 KiB, 349 tokens) | 16 KB | 2.1 MiB | 0.12 [0.10 to 0.12] | 0.12 [0.11 to 0.13] |
+
+By stage (retained products, one fresh process each, median of five): the received body costs 1.0x its bytes; the parsed typed request with decoded text 1.0x for plain text, 1.3x for tool history, 1.9x for tool definitions and 11.4x for node-dense schemas (about 66 bytes per node against the 128 charged); the sealed transformed output 1.0x to 1.25x. Body plus parsed plus output is at most 0.62 of the reservation in these shapes. Findings are transient inside the worker and are covered by the end-to-end peak.
+
+Combined load, growth over a warm baseline (the core warmed on every worker before measuring), as a fraction of the sampled peak of reserved bytes: 0.52 [0.33 to 0.60] with the tight 16,384-unit budget, 0.40 [0.31 to 0.51] with the 262,144-unit budget. The 0.60 is the smallest headroom seen (1.7x). The factor 4 and the 128 bytes per node stay.
+
+**Not covered by `memory_units`; add when sizing a host:**
+
+- First use of the core on each inspection worker thread: about 7 MiB per worker, one time (cold process 8 MiB, 36 MiB with four warmed workers). Measured from a cold start, the combined-load growth looked like twice the reservation; this fixed cost was the difference.
+- Buffered provider responses: `upstream x max_response_body_bytes` (16 held replies of about 4 MB cost 4.3 to 4.5 MiB each).
+- Stream relay buffers: at most `stream x stream_buffer_bytes` (193 bytes observed).
+- Connections: about 5 to 7 KiB idle, about 71 KiB with a nearly full head ([ADR 0022](../decisions/0022-connection-bound-at-accept.md)).
+- Allocator retention: resident memory did not return to its pre-load level after any pass.
+
+### Recommended provisional capacities (one application, up to a few agents; not defaults)
+
+| Setting | Recommended (provisional) | Why, and what the data does not show |
+| --- | --- | --- |
+| `inspection` | 4 (workers `min(permits, CPUs, 16)`) | One job per worker, no waiting. Single-job time on this host: 11 ms median for 500 KiB with 900 findings, 13 to 18 ms for slot-dense Alpha 2 bodies (tool definitions, node-dense schemas, tool history), p99 up to 82 ms under combined load. At 4, the extreme load served about 600 of 17,000 requests and refused the rest at once. Size to the application's real parallelism; the excess is `503` by design. |
+| `memory_units` | 65,536 (64 MiB) at least; 262,144 where eight maximum-size bodies (6,144 units each) must be in flight | Eight maximum bodies need 49,152 units. A 16,384 budget exhausted under 24 clients and queued or refused as designed. Resident growth stayed below the reserved bytes. |
+| `receipt` | 16 | At least 2 to 4 times `inspection`, so bodies arrive while jobs run. |
+| `upstream` | 16 | Add 16 x 4 MiB of unreserved response buffering in the worst case. |
+| `stream` | 16 | Streams hold no other permit; 193-byte buffers observed, bound 16 MiB. |
+| `max_connections` | 256 (unchanged) | Above receipt plus upstream plus stream plus connections still sending a head. At 64 with 40 idle holders, about 13,000 of 17,000 legitimate connections were closed at accept: do not set it near the expected concurrency. |
+| `content.max_findings` | 1,024 (unchanged) | 900 findings in 500 KiB took 11 ms median; 1,300 were rejected (`413`) with no upstream call. |
+
+Large against small requests: with a 6,000-unit budget, six clients sending 500 KiB bodies and ten sending 4 KiB bodies, every request of both classes was served (592 of 592 large, 1,173 of 1,173 small, no `503`); small requests waited behind the first-in-first-out reservation queue (median 41 ms against 3.9 ms alone; admission wait p95 65 ms, bounded by the 250 ms wait). Alone, the small class was refused for 7% of requests by the immediate inspection limit; mixed with large ones it was not, because the memory queue paced arrivals. No scheduling change.
+
+Test limitations: one machine; load generator and fake provider on the same host; loopback only, no TLS; immediate or fixed-delay provider replies; a single-thread gateway runtime; macOS allocator behavior; no pass met the quiet-host condition; the Linux dataset comes from a shared runner only. Stage percentiles under load are histogram bucket edges (at most 25% above the true value).
 
 ## Known gaps
 

@@ -41,6 +41,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0025](0025-alpha2-field-contract.md) | Alpha 2 recursive Chat Completions field contract, block-versus-redact rules, and module boundaries | Accepted (design); contract frozen, tool history implemented (#53), other planned fields rejected until #54 and #55; module split, slot modes, and matrix tests implemented | #52 (then #53, #54, #55, #56) |
 | [0026](0026-request-policy-over-pinned-core.md) | Request block/redact policy over the pinned core: the core action set only, four operator keys, startup activation check | Accepted; implemented | #56 |
 | [0027](0027-write-budget-and-bounded-response-frames.md) | Cumulative write budget and bounded response frames | Accepted; implemented (#59) | #59 |
+| [0028](0028-aggregate-load-qualification.md) | Aggregate load qualification: measurement aids, findings, no change to defaults | Accepted; measured, decision recorded (figures provisional) | #58 |
 
 ## Contracts
 
