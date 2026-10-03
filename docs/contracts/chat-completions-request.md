@@ -140,6 +140,7 @@ Used by `tools[].function.parameters` and `response_format.json_schema.schema`. 
 | Keyword | Class | Contract |
 | --- | --- | --- |
 | `type` | structural | One of `object`, `array`, `string`, `number`, `integer`, `boolean`, `null`, or an array of 1 to 4 distinct ones. |
+| `title` | text | Admitted in #57 ([ADR 0029](../decisions/0029-schema-title-keyword.md)). Same bound as `description`; redacted in place; written after `type`. |
 | `description` | text | At most 4096 bytes after redaction. |
 | `properties` | object of schemas | At most 64 entries; keys are NAME labels. |
 | `items` | schema | One schema (no tuple form). |
@@ -151,7 +152,7 @@ Used by `tools[].function.parameters` and `response_format.json_schema.schema`. 
 | `minimum`, `maximum` | structural | Number. |
 | `minLength`, `maxLength`, `minItems`, `maxItems` | structural | Non-negative integer. |
 
-Everything else is rejected, in particular: `$ref`, `$defs`, `definitions`, `$id`, `$schema`, `$anchor`, `$dynamicRef` (no reference of any kind is resolved or fetched, so there are no unresolved, external, or recursive constructs), `allOf`, `oneOf`, `not`, `if`/`then`/`else`, `patternProperties`, `propertyNames`, `prefixItems`, `unevaluated*`, `dependent*`, `pattern` and `format` (free-form strings that only a provider-specific engine interprets), `default`, `examples`, and `title` (arbitrary data or text that the smallest useful subset does not need), and any `x-` or unknown keyword. Schema nesting is also bounded by `max_depth` (default 16 containers including the request wrapper), so deep schemas need a raised limit. Schema depth is at most 8 nested schema objects, at most 256 schema objects per schema, and every node counts against the derived budgets.
+Everything else is rejected, in particular: `$ref`, `$defs`, `definitions`, `$id`, `$schema`, `$anchor`, `$dynamicRef` (no reference of any kind is resolved or fetched, so there are no unresolved, external, or recursive constructs), `allOf`, `oneOf`, `not`, `if`/`then`/`else`, `patternProperties`, `propertyNames`, `prefixItems`, `unevaluated*`, `dependent*`, `pattern` and `format` (free-form strings that only a provider-specific engine interprets), `default` and `examples` (arbitrary data that the smallest useful subset does not need), and any `x-` or unknown keyword. Schema nesting is also bounded by `max_depth` (default 16 containers including the request wrapper), so deep schemas need a raised limit. Schema depth is at most 8 nested schema objects, at most 256 schema objects per schema, and every node counts against the derived budgets.
 
 Implementation notes (#54, `src/protocol/chat/schema.rs`): the root schema must carry `type: "object"` (`{}` and non-object roots are rejected); `type` keeps the caller's shape (string or array); an empty `properties` object and an empty `required` array are accepted, an empty `enum` or `anyOf` is not; `tools: []` is rejected. Count, depth, and size violations (more than 64 tools, 64 properties, 64 `required`, 64 `enum`, 8 `anyOf`, 4 `type` entries, depth 8, 256 schema objects per schema, a description over 4096 bytes before redaction) are `413 limit_exceeded`; every other violation is `422 unsupported_input`; duplicate keys are `400 malformed_input` from the strict parse. Schema nodes, label bytes, and description bytes are charged to one request-wide derived budget (`Derived`, shared by `tools` and `response_format`; #53 charges decoded arguments to the same type). After redaction a description is rechecked against 4096 bytes and every label against its charset and length; the aggregate size is bounded by the output bound. An integer literal beyond `u64` reaches the module as a float (no `arbitrary_precision`), so it is written as a float rather than rejected; this is the D10 limit.
 
@@ -196,10 +197,10 @@ Role `tool`, `tool_calls`, `tool_call_id`, and assistant `content: null` beside 
 
 | Position | Mode | On a core finding | Why |
 | --- | --- | --- | --- |
-| Message, tool-result, and part text; `stop`; `user`; tool and schema `description`; metadata values; string leaves of decoded tool arguments | redact | Replaced in place by the core's placeholder (`<SECRET_n>`) | Free text: a placeholder keeps the request meaningful. Nothing in the gateway interprets the text. |
+| Message, tool-result, and part text; `stop`; `user`; tool and schema `description`; schema `title`; metadata values; string leaves of decoded tool arguments | redact | Replaced in place by the core's placeholder (`<SECRET_n>`) | Free text: a placeholder keeps the request meaningful. Nothing in the gateway interprets the text. |
 | `model`, tool and function names, response-schema name, `tool_choice` name, tool-call ids, `tool_call_id`, metadata keys, schema property keys, `required` entries, `enum`/`const` strings, object keys inside decoded tool arguments | label, detect-only | The request is rejected (`422 unsupported_input`); nothing is rewritten | A placeholder would change an identifier, break id linkage, make two keys collide (a duplicate-key document), or change a schema's meaning. The charset and length limits plus the label scan stop a secret from using a structural label as a channel; a short value that no detector recognizes can still ride (residual risk). |
 | `type`, `role`, `strict`, booleans, numbers, fixed keywords | structural, not scanned | Not applicable | Fixed vocabulary or numeric range; no free text. |
-| `default`, `examples`, `title`, `pattern`, `format`, `$ref`, legacy and unknown fields | rejected | Rejected before inspection | No safe rule that is small enough to justify. |
+| `default`, `examples`, `pattern`, `format`, `$ref`, legacy and unknown fields | rejected | Rejected before inspection | No safe rule that is small enough to justify. |
 
 A redaction that would break a post-replacement bound (a metadata value or description over its limit, an `arguments` tree whose re-encoding changed shape, the output over its bound) is never truncated or patched: the request is rejected (`limit_exceeded` for sizes, `incomplete_inspection` for a shape change). The only action on a finding is replace (text) or reject (label); there is no strip-and-forward and no raw fallback. Warn handling stays ADR 0015's `content.on_warn`; it never applies to label scans, where any finding rejects.
 
@@ -208,7 +209,7 @@ A redaction that would break a post-replacement bound (a metadata value or descr
 Text-slot order is fixed and identical for reading and mutation ([ADR 0025](../decisions/0025-alpha2-field-contract.md), `src/protocol/chat/slots.rs`):
 
 1. `messages` in order. Within a message: for `role: tool`, `tool_call_id`, then content (parts in order); otherwise content (parts in order), then each tool call in order: `id`, `function.name`, then the decoded argument leaves in document order (keys as labels, string values as text; the `leaf` ordinal counts keys and string values together, starting at 0 for each call).
-2. `tools` in order: `function.name`, `function.description`, then schema leaves in canonical keyword order (property keys, `required`, enum, const as labels; `description` as text; the `leaf` ordinal counts them together). Then `tool_choice` function name.
+2. `tools` in order: `function.name`, `function.description`, then schema leaves in canonical keyword order (property keys, `required`, enum, const as labels; `title` then `description` as text; the `leaf` ordinal counts them together). Then `tool_choice` function name.
 3. `stop`.
 4. `user`.
 5. `metadata` entries in input order, key then value.
