@@ -64,7 +64,7 @@ pub(in crate::protocol) fn json_str(w: &mut Bounded, text: &str) -> io::Result<(
     serde_json::to_writer(w, text).map_err(io::Error::from)
 }
 
-pub(super) fn json_bool(w: &mut Bounded, value: bool) -> io::Result<()> {
+pub(in crate::protocol) fn json_bool(w: &mut Bounded, value: bool) -> io::Result<()> {
     w.write_all(if value { b"true" } else { b"false" })
 }
 

@@ -66,7 +66,7 @@ const fn limit() -> ProtocolError {
 }
 
 /// NAME: 1 to 64 bytes of `[A-Za-z0-9_-]`.
-pub(super) fn is_name(text: &str) -> bool {
+pub(in crate::protocol) fn is_name(text: &str) -> bool {
     (1..=MAX_LABEL_BYTES).contains(&text.len())
         && text
             .bytes()
@@ -75,7 +75,7 @@ pub(super) fn is_name(text: &str) -> bool {
 
 /// ENUMTEXT: 1 to 64 bytes; Unicode alphanumerics plus ASCII space and `_ . : / + -`.
 /// Control characters, quotes, backslashes, and angle brackets are not in the set.
-pub(super) fn is_enum_text(text: &str) -> bool {
+pub(in crate::protocol) fn is_enum_text(text: &str) -> bool {
     (1..=MAX_LABEL_BYTES).contains(&text.len())
         && text
             .chars()
@@ -167,7 +167,7 @@ impl fmt::Debug for Schema {
 /// Which kind of leaf the traversal reached, with its ordinal (labels and text counted
 /// together, in canonical order).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Leaf {
+pub(in crate::protocol) enum Leaf {
     Label(usize),
     Text(usize),
 }
@@ -250,7 +250,7 @@ fn parse_description(value: Json, derived: &mut Derived) -> Checked<String> {
 /// # Errors
 /// [`ProtocolError::Unsupported`] for any keyword or value outside the subset;
 /// [`ProtocolError::LimitExceeded`] for a depth, count, or derived-budget violation.
-pub(super) fn parse_root(value: Json, derived: &mut Derived) -> Checked<Schema> {
+pub(in crate::protocol) fn parse_root(value: Json, derived: &mut Derived) -> Checked<Schema> {
     let mut objects = 0_usize;
     let schema = parse_schema(value, 1, &mut objects, derived)?;
     if schema.types == Some(TypeSpec::One(SchemaType::Object)) {
@@ -385,7 +385,11 @@ fn emit(leaf: &mut usize) -> usize {
 }
 
 /// Visit every label and text leaf in canonical order.
-pub(super) fn visit(schema: &Schema, leaf: &mut usize, f: &mut impl FnMut(Leaf, &str)) {
+pub(in crate::protocol) fn visit(
+    schema: &Schema,
+    leaf: &mut usize,
+    f: &mut impl FnMut(Leaf, &str),
+) {
     if let Some(text) = &schema.title {
         f(Leaf::Text(emit(leaf)), text);
     }
@@ -425,7 +429,7 @@ pub(super) fn visit(schema: &Schema, leaf: &mut usize, f: &mut impl FnMut(Leaf, 
 
 /// Mutable twin of [`visit`]. Labels are handed over so the caller can scan them; a caller
 /// must not write to them.
-pub(super) fn visit_mut(
+pub(in crate::protocol) fn visit_mut(
     schema: &mut Schema,
     leaf: &mut usize,
     f: &mut impl FnMut(Leaf, &mut String),
@@ -470,7 +474,7 @@ pub(super) fn visit_mut(
 /// Recheck after text mutation: descriptions within their bound, every label still within
 /// its charset and length. A violation is a bound failure or a structural failure; nothing
 /// is repaired.
-pub(super) fn revalidate(schema: &Schema) -> Result<(), SerializeError> {
+pub(in crate::protocol) fn revalidate(schema: &Schema) -> Result<(), SerializeError> {
     if schema
         .title
         .iter()
@@ -564,7 +568,7 @@ fn write_schemas(w: &mut Bounded, items: &[Schema]) -> io::Result<()> {
 }
 
 /// Write one schema object in canonical keyword order.
-pub(super) fn write(schema: &Schema, w: &mut Bounded) -> io::Result<()> {
+pub(in crate::protocol) fn write(schema: &Schema, w: &mut Bounded) -> io::Result<()> {
     let mut first = true;
     if let Some(types) = &schema.types {
         key(w, &mut first, "type")?;

@@ -1,6 +1,6 @@
-# Contract: `POST /v1/responses` stateless text request subset (frozen, planned)
+# Contract: `POST /v1/responses` stateless request subset (frozen)
 
-Status: **frozen design contract; the #84 subset (`instructions`, string and text-message `input`, `store:false`, `stream`, `stream_options`, `temperature`, `top_p`, `max_output_tokens`) is implemented in `protocol::responses` and tested at the protocol and boundary layers, the rest is planned** (#82, epic #13, [ADR 0031](../decisions/0031-responses-stateless-text-contract.md)). Until the owning issues land, `POST /v1/responses` is an unrouted path and is answered like any other unknown path (`404 unsupported_input`, zero upstream bytes). No part of this is a served feature today: the route is unrouted until #86, and until #85 lands every field it owns (`tools`, `tool_choice`, `parallel_tool_calls`, `text`, `metadata`, function-call items) is rejected like any unknown field. Implementation owners: #83 (typed dispatch), #84 (`instructions`, string and text-message `input`), #85 (function-call items, function outputs, `tools`, structured text formats, `metadata`), #86 (fixed destination and caller-auth boundary), #87 (JSON and SSE relay), #88 (qualification and the Beta 1 endpoint matrix). Config freeze #62 depends on this contract and on the #61 caller-token authority, not on #86 or #88.
+Status: **frozen contract; everything in the request matrix is implemented in `protocol::responses` and tested at the protocol and boundary layers: the #84 subset (`instructions`, string and text-message `input`, `store:false`, `stream`, `stream_options`, `temperature`, `top_p`, `max_output_tokens`) and the #85 subset (`function_call` and `function_call_output` items, function `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `metadata`); only the route, relay and qualification are planned** (#82, epic #13, [ADR 0031](../decisions/0031-responses-stateless-text-contract.md)). Until the owning issues land, `POST /v1/responses` is an unrouted path and is answered like any other unknown path (`404 unsupported_input`, zero upstream bytes). No part of this is a served feature today: the route is unrouted until #86. Implementation owners: #83 (typed dispatch), #84 (`instructions`, string and text-message `input`), #85 (function-call items, function outputs, `tools`, structured text formats, `metadata`; implemented), #86 (fixed destination and caller-auth boundary), #87 (JSON and SSE relay), #88 (qualification and the Beta 1 endpoint matrix). Config freeze #62 depends on this contract and on the #61 caller-token authority, not on #86 or #88.
 
 This is **not generic OpenAI compatibility**. It is the smallest request subset whose every text-bearing byte can pass through the pinned core. Everything not listed is rejected, at every depth, and rejected means rejected, never stripped. Parent rules: [field-classification](field-classification.md), [request-state](request-state.md), [request-policy](request-policy.md). Limits: [resource-limits](resource-limits.md). Errors: [errors-and-telemetry](errors-and-telemetry.md). The Chat Completions counterpart is [chat-completions-request](chat-completions-request.md); the Responses shapes differ and are not derived from it field by field.
 
@@ -74,7 +74,7 @@ Part: exactly `{"type":"input_text","text":"<string>"}`. `type` is exact, `text`
 
 Assistant replay: only the string form of the easy message is supported (`{"role":"assistant","content":"..."}`). The provider output message (`type: message` with `id`, `status`, and `content` of `output_text` parts carrying `annotations`) is rejected as unknown fields and parts, because its annotations carry file ids and URLs and its `id` is a provider handle that is meaningless under `store:false`. An application replaying `response.output` must rebuild each assistant turn from its text.
 
-### `function_call` item (app-submitted, #85)
+### `function_call` item (app-submitted, implemented #85)
 
 | Field | Class | Contract |
 | --- | --- | --- |
@@ -84,7 +84,7 @@ Assistant replay: only the string form of the easy message is supported (`{"role
 | `arguments` | derived: label keys + text leaves | Required string. Parsed by the same strict parser and rules as Chat `function.arguments` (object root, duplicate keys rejected after decoding, keys NAME labels, string leaves text, depth 8, request-wide derived budgets, compact re-encoding, `""` rejected). |
 | `id`, `status`, `caller`, `namespace`, `async` | rejected | Provider-populated or programmatic-calling state. |
 
-### `function_call_output` item (#85)
+### `function_call_output` item (implemented #85)
 
 | Field | Class | Contract |
 | --- | --- | --- |
@@ -101,7 +101,7 @@ An output must come after its call; it need not be adjacent (parallel calls are 
 
 `item_reference` (stored item), `reasoning` (including encrypted or opaque content), provider `message` output objects, `function_call` or `function_call_output` carrying a rejected key, `custom_tool_call` and `custom_tool_call_output`, `file_search_call`, `web_search_call`, `computer_call` and `computer_call_output`, `code_interpreter_call`, `image_generation_call`, `local_shell_call` and output, `shell_call` and output, `apply_patch_call` and output, `mcp_list_tools`, `mcp_approval_request`, `mcp_approval_response`, `mcp_call`, `tool_search_call` and output, `additional_tools`, `compaction` and `compaction_trigger`, `program` and `program_output`, `configuration_update`, and every unknown `type`. An item with neither a known `type` nor `role` and `content` is rejected.
 
-## `tools[]` (function tools only, #85)
+## `tools[]` (function tools only, implemented #85)
 
 | Field | Class | Contract |
 | --- | --- | --- |
@@ -116,7 +116,7 @@ Hosted and remote tools (`file_search`, `web_search`, `web_search_preview`, `com
 
 `tool_choice` is exactly one of `"none"`, `"auto"`, `"required"`, or `{"type":"function","name":N}` (the Responses shape is flat; there is no `function` wrapper) where `N` is a NAME equal to a declared tool. `allowed_tools`, `custom`, `mcp`, hosted-tool types, `shell`, `apply_patch`, `programmatic_tool_calling`, and a Chat-shaped nested form are rejected.
 
-## `text` (structured output, #85)
+## `text` (structured output, implemented #85)
 
 | Field | Class | Contract |
 | --- | --- | --- |
@@ -157,6 +157,30 @@ After the core call on every slot returns `Ok`, and before serialization, the re
 The outbound body is a fresh document serialized from the typed request, never the original bytes, with the same keys, value types, and array order. Canonical key order: `model`, `instructions`, `input`, `store` (always written, `false`), `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `metadata`, `stream`, `stream_options`, `temperature`, `top_p`, `max_output_tokens`; within an item `type` (only if present), `role`, `content`, `phase` for messages, and `type`, `call_id`, `name`, `arguments` or `type`, `call_id`, `output` for calls and outputs. Unicode is emitted as UTF-8.
 
 All limits are finite and reuse the existing configured values, so no new operator key is introduced by this contract: body bytes, node count, depth (the item and part wrappers count as containers, so nested schemas need a depth the operator has configured), decoded bytes, the item-count bound `max_messages` (items), 64 parts per content array, 64 tools, 64 properties, 64 enum entries, 8 `anyOf` entries, the request-wide derived budgets, and the output bound `min(max_body_bytes, reservation bytes)`. Count, depth, and size violations are `413 limit_exceeded`; every other violation is `422 unsupported_input`; duplicate keys and malformed arguments are `400 malformed_input`; revalidation or incomplete inspection is `500 incomplete_inspection`.
+
+## SDK helper output and safe replay conversion (#85)
+
+Type-surface review of the pinned SDKs (wire behavior of each helper against the route is measured by #88, not claimed here). The Responses schema subset is the Chat one and the helpers share one schema generator, so the Chat [SDK helper table](chat-completions-request.md#sdk-helper-output-against-this-subset-57) applies unchanged: flat Pydantic models and `Literal` fields are accepted; nested models, `Enum` classes (`$defs`, `$ref`), defaults, `pattern` and `format` are rejected; Node zod helpers emit `$schema` and are rejected until the application deletes it. What differs for Responses:
+
+| Helper or SDK object | Responses behavior here | What the application must do |
+| --- | --- | --- |
+| Chat-shaped tool `{"type":"function","function":{...}}` (for example Python `openai.pydantic_function_tool` output used unchanged) | Rejected: the flat tool has no `function` wrapper | Send `{"type":"function","name","description","parameters","strict"}`; `parameters` and `strict` keys are required (may be `null`) |
+| Chat-shaped `response_format`, or `text.format.json_schema` nested object | Rejected, never converted | Send the flat `text.format` `{"type":"json_schema","name","schema","strict"}` |
+| `tool_choice` as `{"type":"function","function":{"name":N}}` | Rejected | Send `{"type":"function","name":N}` |
+| Tool omitting `parameters` or `strict` | Rejected (both keys are required in the pinned types) | Send `null` explicitly |
+| Helper-built tools of hosted types (`web_search`, `file_search`, `mcp`, `computer`, `code_interpreter`, ...), `custom`, `namespace` | Rejected | Use function tools only |
+| `text_format=Model` (Python `responses.parse`) and zod `zodTextFormat` | Flat `json_schema` accepted if its schema is in the subset (same keyword limits as above) | Same as the Chat table |
+| Replaying `response.output` unchanged | Rejected: output items carry `id`, `status`, `annotations`, `caller`, `namespace`, opaque `reasoning` | Rebuild each item (below) |
+
+Safe replay conversion of a provider response into the next request's `input`, keys listed only:
+
+- `message` output item with `output_text` parts becomes `{"role":"assistant","content":"<concatenated text>"}`.
+- `function_call` output item becomes `{"type":"function_call","call_id","name","arguments"}` (drop `id`, `status`, `namespace`, `caller`); `call_id` must be unique in the request.
+- The tool result becomes `{"type":"function_call_output","call_id","output"}` placed anywhere after its call; `output` is text, so a JSON result is serialized by the application and is not parsed by the gateway.
+- `reasoning` items cannot be replayed and are dropped; applications that need them across tool turns cannot use this subset.
+- Hosted tool call items (`web_search_call`, ...) cannot be replayed.
+
+Argument strings are re-encoded compactly (key order kept, insignificant whitespace removed, numbers canonicalized), so the forwarded `arguments` string is not byte-equal to the original even when nothing was found.
 
 ## Storage, retention, and replay limitations
 

@@ -60,7 +60,7 @@ impl Derived {
     ///
     /// # Errors
     /// [`ProtocolError::LimitExceeded`] when either budget is exhausted.
-    pub(super) fn charge(&mut self, nodes: usize, bytes: usize) -> Checked<()> {
+    pub(in crate::protocol) fn charge(&mut self, nodes: usize, bytes: usize) -> Checked<()> {
         let nodes = u32::try_from(nodes).map_err(|_| ProtocolError::LimitExceeded)?;
         self.nodes_left = self
             .nodes_left
@@ -75,7 +75,7 @@ impl Derived {
 }
 
 /// Decoded `function.arguments`: the approved structure with owned strings.
-pub(super) enum Arg {
+pub(in crate::protocol) enum Arg {
     Null,
     Bool(bool),
     Number(Number),
@@ -86,7 +86,7 @@ pub(super) enum Arg {
 }
 
 /// One assistant tool call.
-pub(super) struct ToolCall {
+pub(in crate::protocol) struct ToolCall {
     id: String,
     name: String,
     args: Arg,
@@ -106,7 +106,7 @@ impl fmt::Debug for ToolCall {
 }
 
 /// NAME: 1 to 64 bytes of `[A-Za-z0-9_-]`.
-fn is_name(text: &str) -> bool {
+pub(in crate::protocol) fn is_name(text: &str) -> bool {
     (1..=MAX_LABEL_BYTES).contains(&text.len())
         && text
             .bytes()
@@ -114,7 +114,7 @@ fn is_name(text: &str) -> bool {
 }
 
 /// LINK: 1 to 64 bytes of `[A-Za-z0-9_.:-]`.
-fn is_link(text: &str) -> bool {
+pub(in crate::protocol) fn is_link(text: &str) -> bool {
     (1..=MAX_LABEL_BYTES).contains(&text.len())
         && text
             .bytes()
@@ -144,14 +144,14 @@ fn call_labels(id: &str, name: &str, args: &Arg) -> u64 {
 }
 
 /// Digest of a tool result's `tool_call_id` (0 when the message has none).
-pub(super) fn link_digest(id: Option<&str>) -> u64 {
+pub(in crate::protocol) fn link_digest(id: Option<&str>) -> u64 {
     let mut h = DefaultHasher::new();
     id.hash(&mut h);
     h.finish()
 }
 
 /// `tool_call_id` of a `role: tool` message (a LINK label).
-pub(super) fn parse_link(value: Json) -> Checked<String> {
+pub(in crate::protocol) fn parse_link(value: Json) -> Checked<String> {
     let text = string(value)?;
     if is_link(&text) {
         Ok(text)
@@ -217,17 +217,101 @@ fn parse_call(value: Json, limits: &RequestLimits, derived: &mut Derived) -> Che
     let (Some(name), Some(arguments)) = (name, arguments) else {
         return Err(unsupported());
     };
-    let max_string = usize::try_from(limits.max_string_bytes).unwrap_or(usize::MAX);
-    let (args, nodes) = parse_arguments(&arguments, max_string, derived)?;
-    let labels = call_labels(&id, &name, &args);
-    Ok(ToolCall {
-        id,
-        name,
-        args,
-        nodes,
-        max_string,
-        labels,
-    })
+    ToolCall::new(id, name, &arguments, limits, derived)
+}
+
+impl ToolCall {
+    /// Build a call from an already parsed LINK `id`, a NAME `name` (both re-checked) and
+    /// the `arguments` string, parsed strictly under the request-wide derived budgets.
+    /// Shared by Chat `tool_calls` and Responses `function_call` items.
+    ///
+    /// # Errors
+    /// [`ProtocolError::Unsupported`] for a label outside its charset or a non-object
+    /// root, [`ProtocolError::Malformed`] for invalid or duplicate-key JSON,
+    /// [`ProtocolError::LimitExceeded`] for a budget.
+    pub(in crate::protocol) fn new(
+        id: String,
+        name: String,
+        arguments: &str,
+        limits: &RequestLimits,
+        derived: &mut Derived,
+    ) -> Checked<Self> {
+        if !is_link(&id) || !is_name(&name) {
+            return Err(unsupported());
+        }
+        let max_string = usize::try_from(limits.max_string_bytes).unwrap_or(usize::MAX);
+        let (args, nodes) = parse_arguments(arguments, max_string, derived)?;
+        let labels = call_labels(&id, &name, &args);
+        Ok(Self {
+            id,
+            name,
+            args,
+            nodes,
+            max_string,
+            labels,
+        })
+    }
+
+    #[must_use]
+    pub(in crate::protocol) fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Labels still conform and equal what was parsed, and the decoded tree still has the
+    /// node count, unique conforming keys and per-string bound it had.
+    pub(in crate::protocol) fn revalidate(&self) -> Result<(), SerializeError> {
+        if !is_link(&self.id) || !is_name(&self.name) {
+            return Err(SerializeError::Invalid);
+        }
+        if call_labels(&self.id, &self.name, &self.args) != self.labels {
+            return Err(SerializeError::Invalid);
+        }
+        let mut nodes = 0_usize;
+        check_arg(&self.args, self.max_string, &mut nodes)?;
+        if nodes != self.nodes {
+            return Err(SerializeError::Invalid);
+        }
+        Ok(())
+    }
+
+    /// Visit `id`, `name`, then argument keys and string values in document order.
+    pub(in crate::protocol) fn visit(&self, f: &mut impl FnMut(CallLeaf, &str)) {
+        f(CallLeaf::Id, &self.id);
+        f(CallLeaf::Name, &self.name);
+        let mut leaf = 0_usize;
+        walk(&self.args, &mut leaf, f);
+    }
+
+    /// Mutable twin of [`Self::visit`].
+    pub(in crate::protocol) fn visit_mut(&mut self, f: &mut impl FnMut(CallLeaf, &mut String)) {
+        f(CallLeaf::Id, &mut self.id);
+        f(CallLeaf::Name, &mut self.name);
+        let mut leaf = 0_usize;
+        walk_mut(&mut self.args, &mut leaf, f);
+    }
+
+    /// Write the arguments tree re-encoded compactly and escaped as a JSON string.
+    pub(in crate::protocol) fn write_arguments(&self, w: &mut Bounded) -> io::Result<()> {
+        let mut encoded = Vec::new();
+        encode(&self.args, &mut encoded)?;
+        let encoded = String::from_utf8(encoded).map_err(io::Error::other)?;
+        json_str(w, &encoded)
+    }
+
+    #[must_use]
+    pub(in crate::protocol) fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+/// Which slot of a call the traversal reached. `ArgKey` and `ArgText` carry the ordinal
+/// that counts keys and string values together, from 0.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::protocol) enum CallLeaf {
+    Id,
+    Name,
+    ArgKey(usize),
+    ArgText(usize),
 }
 
 /// False when an integer literal outside the `i64` range appears outside a string. The
@@ -377,17 +461,7 @@ pub(super) fn revalidate(messages: &[Message]) -> Result<(), SerializeError> {
             return Err(SerializeError::Invalid);
         }
         for call in &message.tool_calls {
-            if !is_link(&call.id) || !is_name(&call.name) {
-                return Err(SerializeError::Invalid);
-            }
-            if call_labels(&call.id, &call.name, &call.args) != call.labels {
-                return Err(SerializeError::Invalid);
-            }
-            let mut nodes = 0_usize;
-            check_arg(&call.args, call.max_string, &mut nodes)?;
-            if nodes != call.nodes {
-                return Err(SerializeError::Invalid);
-            }
+            call.revalidate()?;
         }
     }
     validate_history(messages).map_err(|_| SerializeError::Invalid)
@@ -424,43 +498,7 @@ pub(super) fn visit_call(
     tool_call: &ToolCall,
     f: &mut impl FnMut(TextSlot, &str),
 ) {
-    f(TextSlot::ToolCallId { message, call }, &tool_call.id);
-    f(TextSlot::ToolCallName { message, call }, &tool_call.name);
-    let mut leaf = 0_usize;
-    walk(&tool_call.args, (message, call), &mut leaf, f);
-}
-
-fn walk(arg: &Arg, at: (usize, usize), leaf: &mut usize, f: &mut impl FnMut(TextSlot, &str)) {
-    let (message, call) = at;
-    match arg {
-        Arg::Null | Arg::Bool(_) | Arg::Number(_) => {}
-        Arg::Text(text) => {
-            let slot = TextSlot::ToolCallArgumentText {
-                message,
-                call,
-                leaf: *leaf,
-            };
-            *leaf = leaf.saturating_add(1);
-            f(slot, text);
-        }
-        Arg::Array(items) => {
-            for item in items {
-                walk(item, at, leaf, f);
-            }
-        }
-        Arg::Object(entries) => {
-            for (key, value) in entries {
-                let slot = TextSlot::ToolCallArgumentKey {
-                    message,
-                    call,
-                    leaf: *leaf,
-                };
-                *leaf = leaf.saturating_add(1);
-                f(slot, key);
-                walk(value, at, leaf, f);
-            }
-        }
-    }
+    tool_call.visit(&mut |leaf, text| f(slot_of(message, call, leaf), text));
 }
 
 /// Mutable twin of [`visit_call`]; the order must be identical.
@@ -470,48 +508,69 @@ pub(super) fn visit_call_mut(
     tool_call: &mut ToolCall,
     f: &mut impl FnMut(TextSlot, &mut String),
 ) {
-    f(TextSlot::ToolCallId { message, call }, &mut tool_call.id);
-    f(
-        TextSlot::ToolCallName { message, call },
-        &mut tool_call.name,
-    );
-    let mut leaf = 0_usize;
-    walk_mut(&mut tool_call.args, (message, call), &mut leaf, f);
+    tool_call.visit_mut(&mut |leaf, text| f(slot_of(message, call, leaf), text));
 }
 
-fn walk_mut(
-    arg: &mut Arg,
-    at: (usize, usize),
-    leaf: &mut usize,
-    f: &mut impl FnMut(TextSlot, &mut String),
-) {
-    let (message, call) = at;
+const fn slot_of(message: usize, call: usize, leaf: CallLeaf) -> TextSlot {
+    match leaf {
+        CallLeaf::Id => TextSlot::ToolCallId { message, call },
+        CallLeaf::Name => TextSlot::ToolCallName { message, call },
+        CallLeaf::ArgKey(leaf) => TextSlot::ToolCallArgumentKey {
+            message,
+            call,
+            leaf,
+        },
+        CallLeaf::ArgText(leaf) => TextSlot::ToolCallArgumentText {
+            message,
+            call,
+            leaf,
+        },
+    }
+}
+
+fn walk(arg: &Arg, leaf: &mut usize, f: &mut impl FnMut(CallLeaf, &str)) {
     match arg {
         Arg::Null | Arg::Bool(_) | Arg::Number(_) => {}
         Arg::Text(text) => {
-            let slot = TextSlot::ToolCallArgumentText {
-                message,
-                call,
-                leaf: *leaf,
-            };
+            let slot = CallLeaf::ArgText(*leaf);
             *leaf = leaf.saturating_add(1);
             f(slot, text);
         }
         Arg::Array(items) => {
             for item in items {
-                walk_mut(item, at, leaf, f);
+                walk(item, leaf, f);
             }
         }
         Arg::Object(entries) => {
             for (key, value) in entries {
-                let slot = TextSlot::ToolCallArgumentKey {
-                    message,
-                    call,
-                    leaf: *leaf,
-                };
+                let slot = CallLeaf::ArgKey(*leaf);
                 *leaf = leaf.saturating_add(1);
                 f(slot, key);
-                walk_mut(value, at, leaf, f);
+                walk(value, leaf, f);
+            }
+        }
+    }
+}
+
+fn walk_mut(arg: &mut Arg, leaf: &mut usize, f: &mut impl FnMut(CallLeaf, &mut String)) {
+    match arg {
+        Arg::Null | Arg::Bool(_) | Arg::Number(_) => {}
+        Arg::Text(text) => {
+            let slot = CallLeaf::ArgText(*leaf);
+            *leaf = leaf.saturating_add(1);
+            f(slot, text);
+        }
+        Arg::Array(items) => {
+            for item in items {
+                walk_mut(item, leaf, f);
+            }
+        }
+        Arg::Object(entries) => {
+            for (key, value) in entries {
+                let slot = CallLeaf::ArgKey(*leaf);
+                *leaf = leaf.saturating_add(1);
+                f(slot, key);
+                walk_mut(value, leaf, f);
             }
         }
     }
@@ -530,10 +589,7 @@ pub(super) fn write_calls(calls: &[ToolCall], w: &mut Bounded) -> io::Result<()>
         w.write_all(b",\"type\":\"function\",\"function\":{\"name\":")?;
         json_str(w, &call.name)?;
         w.write_all(b",\"arguments\":")?;
-        let mut encoded = Vec::new();
-        encode(&call.args, &mut encoded)?;
-        let encoded = String::from_utf8(encoded).map_err(io::Error::other)?;
-        json_str(w, &encoded)?;
+        call.write_arguments(w)?;
         w.write_all(b"}}")?;
     }
     w.write_all(b"]")

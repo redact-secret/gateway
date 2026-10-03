@@ -34,13 +34,13 @@ use crate::admission::RequestLimits;
 
 mod controls;
 mod messages;
-mod metadata;
+pub(in crate::protocol) mod metadata;
 mod response_format;
-mod schema;
+pub(in crate::protocol) mod schema;
 pub(super) mod serialize;
 mod slots;
 mod stop_user;
-mod tool_calls;
+pub(in crate::protocol) mod tool_calls;
 mod tool_defs;
 
 pub(in crate::protocol) use controls::parse_model;

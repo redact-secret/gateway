@@ -60,7 +60,7 @@ Requiring `store:false` makes the first-call experience stricter than the provid
 
 ## Implementation status
 
-Contract frozen by #82. Implemented so far: the #83 dispatch and the #84 text subset (see the implementation notes). The route, tools, structured output, metadata and relay are planned (#85 to #87).
+Contract frozen by #82. Implemented so far: the #83 dispatch, the #84 text subset and the #85 function-call, tool, structured-output and metadata subset (see the implementation notes). The route and relay are planned (#86, #87).
 
 ## Implementation note (#83)
 
@@ -69,3 +69,7 @@ The typed dispatch is in place: `protocol::RequestBody::{Chat, Responses}`, `pro
 ## Implementation note (#84)
 
 `protocol::validate_with` now parses `Protocol::ResponsesText` bodies (one strict budgeted parse, then `protocol::responses::classify`). Implemented: `model`, required `store:false`, `instructions`, `input` as a string or text message items (`role` of `user`, `assistant`, `system`, `developer`; string content, or `input_text` parts for non-assistant roles; assistant `phase`), and the controls `stream`, `stream_options.include_obfuscation`, `temperature`, `top_p`, `max_output_tokens`. Every other field, item type and part type, including everything #85 owns (`function_call` and `function_call_output` items, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `metadata`), is `422 unsupported_input` until its parser lands. Slot order is `instructions`, then `input`; the outbound document is serialized fresh with `store:false` always written. `POST /v1/responses` is still unrouted (#86); the behavior is tested at the protocol and boundary layers (`tests/responses_text.rs`). Replaying conversation history is explicit re-submission of supported text items; there is no previous-response reference.
+
+### Implementation notes (#85)
+
+`protocol::responses` now accepts the `function_call` and `function_call_output` input items, function `tools` (flat shape, `parameters` and `strict` required keys that may be `null`), `tool_choice`, `parallel_tool_calls`, `text` (`format` of `text`, `json_object` or the flat `json_schema`, and `verbosity`) and `metadata`. Reuse, not duplication: `function_call.arguments` goes through the Chat `ToolCall` (strict duplicate-key-rejecting parse, decoded tree, label digest, compact re-encoding); tool and format schemas use the Chat schema subset (`protocol::chat::schema`); metadata is the Chat `Metadata`. A single `Derived` counter is created per `classify` call, so arguments, tool schemas, format schemas and metadata share one request-wide node and byte budget regardless of JSON key order. Correlation (unique `call_id` across calls, an output after its call, each call answered once) is checked at parse time and again at revalidation. New slot variants are `CallId`, `CallName`, `CallArgumentKey` (detect-only), `CallArgumentText`, `Output` (redact), `OutputCallId`, `ToolName`, `ToolSchemaLabel`, `ToolChoiceName`, `FormatName`, `FormatSchemaLabel`, `MetadataKey` (detect-only) and `ToolDescription`, `ToolSchemaText`, `FormatDescription`, `FormatSchemaText`, `MetadataValue` (redact). No new error outcome and no new operator key. Tests: `tests/responses_tools.rs`. SDK helper limitations and safe replay conversion are in the contract.

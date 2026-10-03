@@ -47,7 +47,7 @@ impl Protocol {
 /// serialization only through these methods, so both endpoints share one orchestration.
 pub enum RequestBody {
     Chat(Box<chat::ChatRequest>),
-    Responses(responses::ResponsesRequest),
+    Responses(Box<responses::ResponsesRequest>),
 }
 
 impl fmt::Debug for RequestBody {
@@ -253,7 +253,7 @@ impl ValidatedRequest {
     #[cfg(test)]
     pub(crate) fn for_test_responses(memory: MemoryReservation, receipt: ReceiptPermit) -> Self {
         let request = responses::ResponsesRequest::for_test("synthetic-model", None, "hello");
-        Self::new(RequestBody::Responses(request), memory, receipt)
+        Self::new(RequestBody::Responses(Box::new(request)), memory, receipt)
     }
 
     #[cfg(test)]
@@ -328,7 +328,7 @@ pub fn validate_with(
         Protocol::ResponsesText => {
             let request = responses::classify(document, limits)?;
             Ok(ValidatedRequest::new(
-                RequestBody::Responses(request),
+                RequestBody::Responses(Box::new(request)),
                 memory,
                 receipt,
             ))
@@ -408,8 +408,11 @@ mod tests {
     #[test]
     fn request_body_dispatch_covers_both_variants() {
         let mut chat = RequestBody::Chat(Box::new(chat::ChatRequest::for_test()));
-        let mut resp =
-            RequestBody::Responses(responses::ResponsesRequest::for_test("m", Some("i"), "x"));
+        let mut resp = RequestBody::Responses(Box::new(responses::ResponsesRequest::for_test(
+            "m",
+            Some("i"),
+            "x",
+        )));
         assert_eq!((chat.text_count(), chat.redactable_count()), (0, 0));
         assert_eq!((resp.text_count(), resp.redactable_count()), (2, 2));
         let mut seen = Vec::new();
