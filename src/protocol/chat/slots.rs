@@ -17,7 +17,7 @@
 //!    then `tool_choice` function name;
 //! 3. `stop`;
 //! 4. `user`;
-//! 5. (#55) `metadata` entries in canonical (byte-sorted key) order, key then value;
+//! 5. (#55) `metadata` entries in input order, key then value;
 //! 6. (#54) `response_format.json_schema` (name, then schema labels and text in document
 //!    order).
 //!

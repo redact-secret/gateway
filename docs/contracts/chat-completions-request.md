@@ -1,8 +1,8 @@
-# Contract: `POST /v1/chat/completions` request matrix (Alpha 1 text subset)
+# Contract: `POST /v1/chat/completions` request matrix (Alpha 1 text subset implemented; Alpha 2 recursive subset frozen)
 
-Status: implemented for admission, parsing, and classification (#18) and for core inspection and transformation (#19, [ADR 0015](../decisions/0015-core-inspection-and-request-transformation.md)). A request that passes everything below and is inspected and approved is forwarded once (#20, [ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md)) and the provider's JSON response is relayed. `stream: true` follows the same road (admission, parsing, inspection, approval) and the provider's event stream is then relayed incrementally (#21, [ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md)); every rejection sends no upstream byte, and a `stream: true` request from an HTTP/1.0 caller is rejected locally. Implementation: `src/chat_route.rs` (HTTP admission), `src/protocol/json.rs` (strict budgeted parse), `src/protocol/chat.rs` (this matrix). Rationale: [ADR 0014](../decisions/0014-chat-completions-admission.md), [ADR 0005](../decisions/0005-protocol-expansion-and-central-enforcement.md), [ADR 0007](../decisions/0007-parsing-copying-and-plaintext-lifetime.md). Parent rules: [field-classification](field-classification.md), [request-state](request-state.md). Limits: [resource-limits](resource-limits.md). Errors: [errors-and-telemetry](errors-and-telemetry.md).
+Status: implemented for admission, parsing, and classification (#18) and for core inspection and transformation (#19, [ADR 0015](../decisions/0015-core-inspection-and-request-transformation.md)). A request that passes everything below and is inspected and approved is forwarded once (#20, [ADR 0017](../decisions/0017-json-forwarding-deadlines-and-cancellation.md)) and the provider's JSON response is relayed. `stream: true` follows the same road (admission, parsing, inspection, approval) and the provider's event stream is then relayed incrementally (#21, [ADR 0018](../decisions/0018-sse-relay-termination-and-stream-bounds.md)); every rejection sends no upstream byte, and a `stream: true` request from an HTTP/1.0 caller is rejected locally. **Alpha 2 (#52): the matrix below is the frozen recursive field contract for tool history, tool definitions, structured-output schemas, and metadata, with the block-versus-redact rules ([ADR 0025](../decisions/0025-alpha2-field-contract.md)). Rows labeled Planned #NN are not implemented: they are rejected like any unknown field until the named issue lands.** Implementation: `src/chat_route.rs` (HTTP admission), `src/protocol/json.rs` (strict budgeted parse), `src/protocol/chat/` (this matrix, one file per owner; see the module map in ADR 0025). Rationale: [ADR 0014](../decisions/0014-chat-completions-admission.md), [ADR 0005](../decisions/0005-protocol-expansion-and-central-enforcement.md), [ADR 0007](../decisions/0007-parsing-copying-and-plaintext-lifetime.md). Parent rules: [field-classification](field-classification.md), [request-state](request-state.md). Limits: [resource-limits](resource-limits.md). Errors: [errors-and-telemetry](errors-and-telemetry.md).
 
-This file and `protocol/chat.rs` must agree. The unit tests in `chat.rs` and `tests/chat_admission.rs` carry one case per row marked "rejected".
+This file and `protocol/chat/` must agree. `tests/chat_field_matrix.rs` carries one synthetic example per row class (accepted, rejected, and planned), the unit tests in `src/protocol/chat/mod.rs` and `tests/chat_admission.rs` carry the parser, serializer, and zero-upstream cases.
 
 ## Request admission (before any body byte is read)
 
@@ -32,64 +32,194 @@ One pass, one working structure ([ADR 0007](../decisions/0007-parsing-copying-an
 
 ## Field matrix
 
-Each field is exactly one of: **text** (decoded string sent through core inspection by #19), **structural** (validated by an explicit contract and transmitted as is), or **rejected**. Anything not listed is rejected, at every depth.
+Each field is exactly one of: **text** (a decoded string the core may redact in place), **label** (a structural string, such as an identifier, key, or enum value, that is constrained by a charset and a length and that the core only scans: any finding rejects the request and the string is never rewritten), **structural** (validated by an explicit contract and transmitted as is), or **rejected**. Anything not listed is rejected, at every depth, and unsupported means rejected, never stripped.
+
+Status column. **Implemented** rows exist in code and tests today. **Planned #NN** rows are the frozen Alpha 2 contract: they are rejected as unknown (`unsupported_input`, zero upstream bytes) until the named issue lands and flips its rows in `tests/chat_field_matrix.rs`. A planned row is not a supported feature ([ADR 0025](../decisions/0025-alpha2-field-contract.md)).
+
+### Shared constraints
+
+| Name | Rule |
+| --- | --- |
+| NAME | 1 to 64 bytes of `[A-Za-z0-9_-]`. Tool and function names, response-schema names, schema property keys, `required` entries, and keys inside decoded tool arguments. |
+| LINK | 1 to 64 bytes of `[A-Za-z0-9_.:-]`. Tool-call ids (`tool_calls[].id`, `tool_call_id`) and metadata keys. |
+| ENUMTEXT | 1 to 64 bytes; Unicode alphanumerics plus ASCII space and `_ . : / + -`; no control characters, quotes, backslashes, or angle brackets. Schema `enum` and `const` strings. |
+| label scan | Every NAME, LINK, and ENUMTEXT string is passed to the core in detect-only mode. A finding of any action rejects the request with `422 unsupported_input` (the code ADR 0015 already uses for `Block`). The string is never rewritten, because rewriting would change an identifier, break call correlation, or collide two keys. |
+| derived budgets | Strings decoded out of a string (tool arguments) and schema trees are counted against request-wide derived budgets in addition to the parse budgets: nodes (`max_nodes`), decoded bytes (`max_body_bytes`), and depth (arguments: 8 containers including the root; schemas: 8 nested schema objects). They are shared by every call, tool, and schema in the request, so many small ones cannot add up past the bound. Exceeding one is `413 limit_exceeded`. |
+| numbers | Integers must fit `i64`; floats must be finite. A number is written back as the JSON writer's canonical form: identical value for every `i64` and for every float at `f64` precision, so `1e3` is written `1000.0`. Integers beyond `i64` and non-finite numbers are rejected, never coerced. Exact decimal-text preservation beyond `f64` is not promised (see Decisions). |
+| duplicate keys | Rejected at every depth, including inside decoded tool arguments (`malformed_input`). |
 
 ### Top level
 
-| Field | Class | Contract | Why |
+| Field | Class | Status | Contract |
 | --- | --- | --- | --- |
-| `model` | structural | Required string, 1 to 128 bytes, ASCII alphanumeric first, then alphanumerics or `. _ : / @ + -`. Transmitted verbatim. | Selects a provider model; the character set rules out whitespace, quotes, and non-ASCII text. A 128-byte identifier can still carry a short value, so it is not a trusted channel (see residual risks). |
-| `messages` | text | Required array, 1 to `max_messages` entries (default 256), each a message object (below). | The prompt. |
-| `stream` | structural | Optional boolean. | Selects JSON or SSE response; both are relayed (#20, #21). |
-| `stream_options` | structural | Optional object with only `include_usage` (boolean). | Bounded control. |
-| `temperature` | structural | Optional number, `0` to `2`. | Sampling control. |
-| `top_p` | structural | Optional number, `0` to `1`. | Sampling control. |
-| `presence_penalty`, `frequency_penalty` | structural | Optional number, `-2` to `2`. | Sampling control. |
-| `max_tokens`, `max_completion_tokens` | structural | Optional integer, `1` to `2147483647`. | Output bound; the provider applies model-specific limits. |
-| `n` | structural | Optional integer, exactly `1`. | Larger values multiply response size and are outside the Alpha 1 response bounds. |
-| `seed` | structural | Optional integer in the `i64` range. | Reproducibility control. |
-| `stop` | text | Optional string, or array of 1 to 4 strings. | Application-authored text sent to the model. |
-| `user` | text | Optional string, at most 256 bytes. | End-user identifier; commonly an email or ID, so it is inspected, not trusted. |
-| `response_format` | structural | Optional object with only `type`, one of `text` or `json_object`. | `json_schema` carries schema text and is rejected. |
+| `model` | structural (core detect-only scan, never rewritten) | Implemented | Required string, 1 to 128 bytes, ASCII alphanumeric first, then alphanumerics or `. _ : / @ + -`. Transmitted verbatim. |
+| `messages` | text | Implemented | Required array, 1 to `max_messages` entries (default 256), each a message object (below). |
+| `stream`, `stream_options.include_usage` | structural | Implemented | Optional booleans; `stream_options` has no other key. |
+| `temperature` | structural | Implemented | Number `0` to `2`. |
+| `top_p` | structural | Implemented | Number `0` to `1`. |
+| `presence_penalty`, `frequency_penalty` | structural | Implemented | Number `-2` to `2`. |
+| `max_tokens`, `max_completion_tokens` | structural | Implemented | Integer `1` to `2147483647`. |
+| `n` | structural | Implemented | Integer, exactly `1`. |
+| `seed` | structural | Implemented | Integer in the `i64` range. |
+| `stop` | text | Implemented | String, or array of 1 to 4 strings. |
+| `user` | text | Implemented | String, at most 256 bytes. |
+| `response_format` | structural | Implemented for `text` and `json_object`; `json_schema` Planned #54 | See below. |
+| `tools` | see below | Planned #54 | Array of 1 to 64 function tools. |
+| `tool_choice` | structural + label | Planned #54 | See below. |
+| `parallel_tool_calls` | structural | Planned #54 | Boolean. Rejected unless `tools` is present. |
+| `metadata` | label + text | Planned #55 | See below. |
+| `functions`, `function_call` | rejected | Rejected | Legacy shapes; the current `tools` shapes replace them. Never planned. |
+| `logit_bias`, `prediction`, `modalities`, `audio`, `web_search_options`, `store`, `service_tier`, `reasoning_effort`, `logprobs`, `top_logprobs`, `verbosity`, `prompt_cache_key`, `safety_identifier`, anything unknown | rejected | Rejected | Arbitrary key-value data, binary or provider-stored content, or response shapes outside the relay bounds. Each needs its own contract and ADR. |
 
 ### Messages
 
-| Field | Class | Contract |
-| --- | --- | --- |
-| `role` | structural | Required, one of `system`, `developer`, `user`, `assistant` (exact, lowercase). |
-| `content` | text | Required. Either a string (any decoded text, including empty), or an array of 1 to 64 text parts. `null`, numbers, booleans, and objects are rejected. |
+| Field | Class | Status | Contract |
+| --- | --- | --- | --- |
+| `role` | structural | Implemented for `system`, `developer`, `user`, `assistant`; `tool` Planned #53 | Required, exact lowercase. `function` is rejected (legacy). |
+| `content` | text | Implemented | String (any decoded text, including empty) or an array of 1 to 64 text parts. `null` is accepted only for an assistant message that carries `tool_calls` (Planned #53); every other `null`, number, boolean, or object is rejected. |
+| `tool_calls` | see below | Planned #53 | Assistant only. Array of 1 to 32 calls. |
+| `tool_call_id` | label (LINK) | Planned #53 | `role: tool` only, required there. |
+| `name` | rejected | Rejected | Participant names are ambiguous identity text (and the legacy function-name carrier). |
+| `refusal`, `audio`, `annotations`, `function_call`, anything unknown | rejected | Rejected | Provider-generated or non-text output fields. |
 
-A message has no other key. In particular `name`, `tool_calls`, `tool_call_id`, `function_call`, `refusal`, `audio`, and `annotations` are rejected.
+Role and content consistency (Planned #53; every violation is `unsupported_input`):
+
+| Role | `content` | `tool_calls` | `tool_call_id` |
+| --- | --- | --- | --- |
+| `system`, `developer`, `user` | string or parts, never `null` | not allowed | not allowed |
+| `assistant` | string, parts, or `null` | optional; non-empty when present; `content: null` requires it | not allowed |
+| `tool` | string or parts, never `null` | not allowed | required |
 
 ### Content parts
 
-A part is exactly `{"type":"text","text":"<string>"}`. `type` must equal `text` (exact), `text` is inspected text, and any other key is rejected. The array form is kept as an array so serialization preserves the type the caller chose.
+A part is exactly `{"type":"text","text":"<string>"}`. `type` must equal `text` (exact), `text` is inspected text, and any other key is rejected. The array form is kept as an array so serialization preserves the type the caller chose. Tool-result `content` uses the same two forms and is ordinary text: a result that looks like JSON is never parsed.
+
+### Assistant `tool_calls[]` (Planned #53)
+
+| Field | Class | Contract |
+| --- | --- | --- |
+| `id` | label (LINK) | Required. Unique across the whole request (all assistant messages). |
+| `type` | structural | Required, exactly `function`. `custom` and anything else is rejected. |
+| `function.name` | label (NAME) | Required. It is not required to match a declared tool (history may predate the current `tools`). |
+| `function.arguments` | derived: label keys + text leaves | Required string. Parsed with the strict duplicate-key-rejecting parser under the derived budgets; the top level must be a JSON object (`"{}"` is accepted, `""` is not). Object keys are NAME labels; string values are text leaves; numbers, booleans, `null`, nested objects, and arrays are preserved structure. Re-encoded compactly to a JSON string on output. This is the only string ever parsed as JSON. |
+| anything else (`index`, `extra_content`, ...) | rejected | |
+
+Correlation (Planned #53): a `role: tool` message must directly follow the assistant message that issued its `tool_call_id` (or another tool message answering the same assistant message), the id must be one of that message's calls, and each id is answered at most once. Unanswered calls are not enforced by the gateway (the provider rejects them). Tool results never name the tool: `name` stays rejected.
+
+Example (synthetic):
+
+```json
+{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"서울\",\"days\":3}"}}]}
+{"role":"tool","tool_call_id":"call_1","content":"sunny"}
+```
+
+### `tools[]` (Planned #54)
+
+| Field | Class | Contract |
+| --- | --- | --- |
+| `type` | structural | Required, exactly `function`. |
+| `function.name` | label (NAME) | Required. Unique across `tools`. |
+| `function.description` | text | Optional, at most 4096 bytes after redaction. |
+| `function.parameters` | schema subset (below) | Optional; when present the root is an object schema with `type: "object"`. |
+| `function.strict` | structural | Optional boolean, preserved. |
+| anything else | rejected | |
+
+`tool_choice` (Planned #54), exactly one of:
+
+| Form | Class | Contract |
+| --- | --- | --- |
+| `"none"`, `"auto"`, `"required"` | structural | Allowed only when `tools` is present. |
+| `{"type":"function","function":{"name":N}}` | structural + label | `N` is a NAME that must equal a declared tool's name. `allowed_tools`, `custom`, and every other shape is rejected. |
+
+`parallel_tool_calls` is a boolean and is allowed only when `tools` is present.
+
+### Schema subset (Planned #54)
+
+Used by `tools[].function.parameters` and `response_format.json_schema.schema`. A schema is a JSON object that uses only these keywords, written by the serializer in this canonical order (`properties` keeps the caller's entry order):
+
+| Keyword | Class | Contract |
+| --- | --- | --- |
+| `type` | structural | One of `object`, `array`, `string`, `number`, `integer`, `boolean`, `null`, or an array of 1 to 4 distinct ones. |
+| `description` | text | At most 4096 bytes after redaction. |
+| `properties` | object of schemas | At most 64 entries; keys are NAME labels. |
+| `items` | schema | One schema (no tuple form). |
+| `required` | array of NAME labels | At most 64 distinct entries. Membership in `properties` is not enforced; the provider validates it. |
+| `enum` | array of ENUMTEXT labels, numbers, booleans, or `null` | 1 to 64 entries. |
+| `const` | one ENUMTEXT label, number, boolean, or `null` | |
+| `additionalProperties` | structural | Boolean only. |
+| `anyOf` | array of schemas | 1 to 8 entries. |
+| `minimum`, `maximum` | structural | Number. |
+| `minLength`, `maxLength`, `minItems`, `maxItems` | structural | Non-negative integer. |
+
+Everything else is rejected, in particular: `$ref`, `$defs`, `definitions`, `$id`, `$schema`, `$anchor`, `$dynamicRef` (no reference of any kind is resolved or fetched, so there are no unresolved, external, or recursive constructs), `allOf`, `oneOf`, `not`, `if`/`then`/`else`, `patternProperties`, `propertyNames`, `prefixItems`, `unevaluated*`, `dependent*`, `pattern` and `format` (free-form strings that only a provider-specific engine interprets), `default`, `examples`, and `title` (arbitrary data or text that the smallest useful subset does not need), and any `x-` or unknown keyword. Schema nesting is also bounded by `max_depth` (default 16 containers including the request wrapper), so deep schemas need a raised limit. Schema depth is at most 8 nested schema objects, at most 256 schema objects per schema, and every node counts against the derived budgets.
+
+Example (synthetic):
+
+```json
+{"type":"object","properties":{"city":{"type":"string","description":"City name."},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["city"],"additionalProperties":false}
+```
+
+### `response_format`
+
+| Form | Class | Status | Contract |
+| --- | --- | --- | --- |
+| `{"type":"text"}`, `{"type":"json_object"}` | structural | Implemented | Only `type`. |
+| `{"type":"json_schema","json_schema":{...}}` | label + text + schema | Planned #54 | `name` required NAME label; `description` optional text (at most 4096 bytes after redaction); `strict` optional boolean; `schema` required, the schema subset above (root `type: "object"`). Any other key is rejected. |
+
+### `metadata` (Planned #55)
+
+A JSON object of at most 16 entries (the provider's limit). Keys are LINK labels (scanned, never rewritten); values are strings of at most 512 bytes after redaction and are inspected text. Numbers, booleans, `null`, arrays, and nested objects are rejected, as is an empty-string key. Example: `{"trace_id":"abc","team":"synthetic"}`. Entries keep the caller's order.
 
 ### Deliberately unsupported (all `unsupported_input`, HTTP 422)
 
 | Form | Reason |
 | --- | --- |
-| `tools`, `tool_choice`, `parallel_tool_calls`, `functions`, `function_call` | Tool descriptions and schemas are text the core boundary does not yet classify. Wider tool coverage is Alpha 2 (#9). |
-| Messages with role `tool` or `function`, assistant `tool_calls` | App-submitted tool arguments need their own contract ([field-classification](field-classification.md)); blind nested JSON parsing is not allowed. |
+| `functions`, `function_call`, role `function` | Legacy shapes; replaced by `tools` and `tool_calls`. |
 | Content parts of type `image_url`, `input_audio`, `file`, `refusal`, or any other type; `audio`, `modalities`, `prediction`, `web_search_options` | Binary, remote, or provider-stored content cannot be inspected through the text boundary. |
-| `content: null` and non-string, non-array `content` | Opaque or unclassifiable content. |
-| `name` on a message | Participant names are arbitrary identity text; they would need either inspection or a safe pattern, and Alpha 1 does neither. |
-| `metadata`, `logit_bias`, `store`, `service_tier`, `reasoning_effort`, `logprobs`, `top_logprobs`, `response_format.json_schema` | Arbitrary key-value or schema text, or features with response shapes outside Alpha 1 relay bounds. |
-| `n` other than `1` | See `n` above. |
-| Any unknown key at any depth | Unknown nested fields get the same classification discipline as top-level fields. |
+| `content: null` outside an assistant message with `tool_calls`, and non-string, non-array `content` | Opaque or unclassifiable content. |
+| `name` on a message | Ambiguous identity text. |
+| `logit_bias`, `store`, `service_tier`, `reasoning_effort`, `logprobs`, `top_logprobs` | Arbitrary key-value data, or features with response shapes outside the relay bounds. |
+| `n` other than `1` | Larger values multiply response size beyond the relay bounds. |
+| Any unknown key at any depth, any client claim that input is already scanned or redacted | Unknown nested fields get the same classification discipline as top-level fields; no claim is ever read. |
 
-Unsupported means rejected, never stripped: the gateway does not drop fields and forward the rest.
+Until a Planned row lands, `tools`, `tool_choice`, `parallel_tool_calls`, `metadata`, `response_format.type = json_schema`, role `tool`, `tool_calls`, `tool_call_id`, and assistant `content: null` are all in this table's rejected set, with zero upstream bytes.
+
+## Block versus redact
+
+| Position | Mode | On a core finding | Why |
+| --- | --- | --- | --- |
+| Message, tool-result, and part text; `stop`; `user`; tool and schema `description`; metadata values; string leaves of decoded tool arguments | redact | Replaced in place by the core's placeholder (`<SECRET_n>`) | Free text: a placeholder keeps the request meaningful. Nothing in the gateway interprets the text. |
+| `model`, tool and function names, response-schema name, `tool_choice` name, tool-call ids, `tool_call_id`, metadata keys, schema property keys, `required` entries, `enum`/`const` strings, object keys inside decoded tool arguments | label, detect-only | The request is rejected (`422 unsupported_input`); nothing is rewritten | A placeholder would change an identifier, break id linkage, make two keys collide (a duplicate-key document), or change a schema's meaning. The charset and length limits plus the label scan stop a secret from using a structural label as a channel; a short value that no detector recognizes can still ride (residual risk). |
+| `type`, `role`, `strict`, booleans, numbers, fixed keywords | structural, not scanned | Not applicable | Fixed vocabulary or numeric range; no free text. |
+| `default`, `examples`, `title`, `pattern`, `format`, `$ref`, legacy and unknown fields | rejected | Rejected before inspection | No safe rule that is small enough to justify. |
+
+A redaction that would break a post-replacement bound (a metadata value or description over its limit, an `arguments` tree whose re-encoding changed shape, the output over its bound) is never truncated or patched: the request is rejected (`limit_exceeded` for sizes, `incomplete_inspection` for a shape change). The only action on a finding is replace (text) or reject (label); there is no strip-and-forward and no raw fallback. Warn handling stays ADR 0015's `content.on_warn`; it never applies to label scans, where any finding rejects.
+
+## Traversal, mutation, and revalidation
+
+Text-slot order is fixed and identical for reading and mutation ([ADR 0025](../decisions/0025-alpha2-field-contract.md), `src/protocol/chat/slots.rs`):
+
+1. `messages` in order. Within a message: for `role: tool`, `tool_call_id`, then content (parts in order); otherwise content (parts in order), then each tool call in order: `id`, `function.name`, then the decoded argument leaves in document order (keys as labels, string values as text; the `leaf` ordinal counts keys and string values together, starting at 0 for each call).
+2. `tools` in order: `function.name`, `function.description`, then schema leaves in canonical keyword order (property keys, `required`, enum, const as labels; `description` as text; the `leaf` ordinal counts them together). Then `tool_choice` function name.
+3. `stop`.
+4. `user`.
+5. `metadata` entries in input order, key then value.
+6. `response_format.json_schema`: `name`, `description`, then schema leaves.
+
+Today only classes 1 (messages), 3, and 4 produce slots. After the core call on every slot returns `Ok`, and before serialization, the request is revalidated: the visited slot count equals the classified count; every replaced string is rechecked against its slot bound; every decoded argument tree is re-encoded and its shape (container kinds, key sequence, non-string leaves) must equal the pre-inspection shape; label slots must be byte-identical to what was classified; derived budgets are recomputed on the replaced content. Serialization is then bounded as before. Any failure rejects the request with no upstream bytes.
 
 ## Typed boundary representation
 
-A request that satisfies the matrix becomes `protocol::chat::ChatRequest`, held inside `protocol::ValidatedRequest` together with its `MemoryReservation` and `ReceiptPermit`. The original body buffer is already released. `ChatRequest` has private fields; text is reachable only through `for_each_text` / `for_each_text_mut`, in this deterministic order: `messages` in order (parts in order), then `stop`, then `user`. A later stage can replace text but cannot add keys, change roles, or alter structure. `chat_route::Admitted` pairs the `ValidatedRequest` with the operator-defined `RouteId` (`openai.chat_completions`), which is never derived from the request. `SanitizedRequest` is not constructed here; only `boundary` creates it, after inspection ([ADR 0015](../decisions/0015-core-inspection-and-request-transformation.md)).
+A request that satisfies the matrix becomes `protocol::chat::ChatRequest`, held inside `protocol::ValidatedRequest` together with its `MemoryReservation` and `ReceiptPermit`. The original body buffer is already released. `ChatRequest` has private fields; text is reachable only through `for_each_text` / `for_each_text_mut`, each slot carrying a `TextSlot` whose `mode()` (`Redact` or `DetectOnly`) is a property of its class. A later stage can replace text but cannot add keys, change roles, or alter structure. `chat_route::Admitted` pairs the `ValidatedRequest` with the operator-defined `RouteId` (`openai.chat_completions`), which is never derived from the request. `SanitizedRequest` is not constructed here; only `boundary` creates it, after inspection ([ADR 0015](../decisions/0015-core-inspection-and-request-transformation.md)).
 
 ## Inspection and the outbound body (#19)
 
-Every inspected text goes through the pinned core in the order above, with request-wide placeholder numbering. The outbound body is a fresh document serialized from the typed request (not the original bytes): the same keys, value types, and array order, with canonical key order inside objects (`model`, `messages`, `stream`, `stream_options`, the numeric controls, `stop`, `user`, `response_format`; within a message `role` then `content`). Strings are escaped by the JSON writer and Unicode (including Korean) is emitted as UTF-8. Output is bounded by `min(max_body_bytes, reservation bytes)`; over the bound is `413 limit_exceeded`. Object keys are fixed schema names and are not inspected; no free-text key is admitted (`metadata` and `logit_bias` are rejected above). `model` is checked detect-only and never rewritten.
+Every inspected text goes through the pinned core in the order above, with request-wide placeholder numbering (label slots are scanned detect-only and do not consume numbering). The outbound body is a fresh document serialized from the typed request (not the original bytes): the same keys, value types, and array order, with canonical key order inside objects (`model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `stream`, `stream_options`, the numeric controls, `stop`, `user`, `metadata`, `response_format`; within a message `role` then `content`, then `tool_calls` or `tool_call_id`). Strings are escaped by the JSON writer and Unicode (including Korean) is emitted as UTF-8. Output is bounded by `min(max_body_bytes, reservation bytes)`; over the bound is `413 limit_exceeded`. Alpha 1 requests produce byte-identical output across the Alpha 2 module split (pinned by a unit test).
 
 ## Residual risks
 
-- `model` and numeric fields are transmitted unchanged. Their constraints limit what can ride in them but do not make them secret-free channels.
+- `model`, labels, and numeric fields are transmitted unchanged. Their constraints limit what can ride in them but do not make them secret-free channels.
 - The matrix controls structure, not detection. Whether text contains a secret is core's decision (#19).
-- Unknown-field rejection can break SDK calls that send extra fields (for example replaying an assistant message with `refusal: null`). That is deliberate for Alpha 1.
+- Tool arguments are re-encoded, so an `arguments` string is not byte-equal to the caller's even when nothing was found.
+- Unknown-field rejection can break SDK calls that send extra fields (for example replaying an assistant message with `refusal: null`, or a `name` on a message). That is deliberate.
+- Pre-redacted input: a client-supplied `<SECRET_n>`-shaped string is ordinary text, not a finding, and no claim that input was scanned is ever read.
