@@ -114,6 +114,71 @@ fn operations_export_is_opt_in_loopback_and_has_no_request_labels() {
     assert!(observed.child.wait().expect("observed stop").success());
 }
 
+#[test]
+fn operations_export_refuses_non_loopback_even_with_valid_proxy_auth() {
+    let mut doc: serde_json::Value = serde_json::from_str(&config_with(
+        r#""address":"0.0.0.0:0","allow_non_loopback":true"#,
+        "",
+    ))
+    .expect("config");
+    doc["deployment"]["local_auth"] =
+        serde_json::json!({"mode":"token","token":{"env":"SYNTHETIC_OPERATIONS_TOKEN"}});
+    let path = temp_file("observed-nonloopback.json", &doc.to_string());
+    let out = bin()
+        .arg("serve-observed")
+        .arg(path)
+        .env(
+            "SYNTHETIC_OPERATIONS_TOKEN",
+            "SYNTHETIC-OPERATIONS-TOKEN-NOT-REAL-000000",
+        )
+        .output()
+        .expect("run");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr).trim(),
+        "error: transport_failure: bind"
+    );
+}
+
+#[test]
+fn exec_probe_has_one_total_deadline_against_a_trickling_response() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (started, received) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().expect("accept");
+        socket
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .expect("timeout");
+        let mut line = String::new();
+        BufReader::new(&mut socket)
+            .read_line(&mut line)
+            .expect("request line");
+        started.send(std::time::Instant::now()).expect("started");
+        for _ in 0..60 {
+            if socket.write_all(b"H").is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+    let child = bin()
+        .args(["probe", "ready", &addr.to_string()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("probe");
+    // Gate on the actual request: process loading is outside the probe IO deadline.
+    let start = received
+        .recv_timeout(Duration::from_secs(5))
+        .expect("request started");
+    let result = child.wait_with_output().expect("probe result");
+    assert_eq!(result.status.code(), Some(1));
+    assert!(start.elapsed() < Duration::from_secs(4));
+    worker.join().expect("worker");
+}
+
 fn sigterm(child: &Child) {
     let status = Command::new("kill")
         .args(["-TERM", &child.id().to_string()])

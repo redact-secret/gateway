@@ -23,6 +23,15 @@ OUT = ROOT / 'qualification/evidence/beta2'
 OUT.mkdir(parents=True, exist_ok=True)
 
 
+CURRENT_STAGE='setup'
+
+
+def stage(name):
+    global CURRENT_STAGE
+    CURRENT_STAGE=name
+    print('beta2 stage: '+name,flush=True)
+
+
 def command(*args, data=None, timeout=180):
     result = subprocess.run(args, input=data, capture_output=True, text=True, timeout=timeout, cwd=ROOT)
     if result.returncode:
@@ -67,6 +76,7 @@ def pod_spec(name, image, qualified=False, enforced=False, cpu='1', memory='256M
         config['schema_version'] = 99
     elif failure == 'token':
         config['deployment']['local_auth']['token']['file'] = '/nonexistent/synthetic-token'
+    evidence(name+'-config',config)
     config_name = name + '-config'
     apply({'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': {'name': config_name},
            'data': {'config.json': json.dumps(config)}})
@@ -127,14 +137,20 @@ cgroup = next(line.split(':',2)[2] for line in Path(f'/proc/{pid}/cgroup').read_
 base = Path('/sys/fs/cgroup') / cgroup.lstrip('/')
 values = {key: (base/key).read_text().strip() if (base/key).exists() else None for key in ['cpu.max','cpu.stat','memory.max','memory.current','memory.peak','memory.events']}
 print(json.dumps({'pid':pid,'rss_kib':int(status.get('VmRSS','0 kB').split()[0]),'threads':int(status['Threads']),
-'fd_count':len(list(Path(f'/proc/{pid}/fd').iterdir())), 'identity':{k:status[k].strip() for k in ['Uid','Gid','CapEff','NoNewPrivs','Seccomp']}, 'cgroup':values}))
+'fd_count':len(list(Path(f'/proc/{pid}/fd').iterdir())),
+'root_read_only': bool(os.statvfs(f'/proc/{pid}/root').f_flag & os.ST_RDONLY),
+'api_token_mounted':Path(f'/proc/{pid}/root/var/run/secrets/kubernetes.io/serviceaccount/token').exists(), 'identity':{k:status[k].strip() for k in ['Uid','Gid','CapEff','NoNewPrivs','Seccomp']}, 'cgroup':values}))
 '''
     # kind nodes have no Python assumption: read host-visible proc/cgroup through
     # a transient pinned helper sharing node PID/cgroup namespaces, read-only.
     raw = command('docker', 'run', '--rm', '--pid', 'container:' + node, '--cgroupns', 'host',
                   '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--cap-add', 'SYS_PTRACE', '--security-opt', 'no-new-privileges',
                   '-e', f'GATEWAY_PID={pid}', HELPER, 'python', '-c', script)
-    return json.loads(raw)
+    result=json.loads(raw)
+    assert result['identity']['Uid'].split()==['65532']*4
+    assert int(result['identity']['CapEff'],16)==0 and result['identity']['NoNewPrivs']=='1' and result['identity']['Seccomp']=='2'
+    assert result['root_read_only'] is True and result['api_token_mounted'] is False
+    return result
 
 
 def restart(pod, signal):
@@ -225,7 +241,8 @@ def tls_cases():
             assert result['code']==code and delta=={'accepted':accepted,'tls_failed':tls_failed,'requests':requests}
             assert result['relayed']==(requests==1)
             rows.append({'case':label,'host_answers':addresses,'trust':trust,'result':result,'provider_delta':delta,
-                         'candidate_sha256':hashlib.sha256((ROOT/'target/release/redact-secret-gateway').read_bytes()).hexdigest()})
+                         'candidate_sha256':hashlib.sha256((ROOT/'target/release/redact-secret-gateway').read_bytes()).hexdigest(),
+})
             evidence('resolver-tls',rows)
             kube('delete','pod',name,'--wait=true')
             kube('delete','secret',name+'-cert')
@@ -236,6 +253,7 @@ def main():
     arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(platform.machine())
     if platform.system() != 'Linux' or arch is None:
         raise RuntimeError('actual native Linux target required')
+    stage('create-native-cluster')
     command('kind', 'create', 'cluster', '--name', CLUSTER, '--image', NODE_IMAGE, '--wait', '120s', timeout=300)
     command('kubectl', '--context', 'kind-' + CLUSTER, 'create', 'namespace', NS)
     command('docker', 'pull', HELPER)
@@ -259,7 +277,13 @@ def main():
         'cni_pods':json.loads(command('kubectl','--context','kind-'+CLUSTER,'-n','kube-system','get','pods','-o','json')),
         'core_pin':'=0.1.0-beta.12','config_schema_version':1,
         'cargo_lock_sha256':hashlib.sha256((ROOT/'Cargo.lock').read_bytes()).hexdigest(),
-        'candidate_sha256':hashlib.sha256((ROOT/'target/release/redact-secret-gateway').read_bytes()).hexdigest()})
+        'candidate_sha256':hashlib.sha256((ROOT/'target/release/redact-secret-gateway').read_bytes()).hexdigest(),
+        'toolchain':command('rustc','-vV'),'qualification_client':'Python stdlib http.client (pinned helper image)',
+        'node_sdk_pin':json.loads((ROOT/'qualification/sdk/node/package.json').read_text())['dependencies']['openai'],
+        'python_sdk_pin':'3.24.0 (reused Beta 1 SDK workflow, not the sidecar load client)',
+        'candidate_image_id':command('docker','inspect','--format','{{.Id}}','rsg-beta2-candidate:local'),
+        'qualification_image_id':command('docker','inspect','--format','{{.Id}}','rsg-beta2-qualification:local')})
+    stage('candidate-startup-probes-security')
     apply(pod_spec('candidate','rsg-beta2-candidate:local'))
     candidate = wait_pod('candidate')
     evidence('candidate-probes-security', {'pod_status':candidate['status'],'app_identity':actor('candidate','identity'),
@@ -270,6 +294,7 @@ def main():
     assert refusal['status'] == 401
     evidence('candidate-local-refusal', refusal)
     kube('delete','pod','candidate','--wait=true')
+    stage('failed-config-and-token-startup')
     refused=[]
     for failure in ['config','token']:
         name='invalid-'+failure
@@ -289,25 +314,32 @@ def main():
             raise RuntimeError('failed-start evidence deadline exceeded')
         kube('delete','pod',name,'--wait=true')
     evidence('failed-start',refused)
+    stage('basic-residual-bypass-control')
     apply(pod_spec('basic','rsg-beta2-qualification:local',qualified=True))
     basic=wait_pod('basic')
     assert actor('basic','direct',basic['status']['podIP'])['direct_reachable'] is True
     evidence('basic-residual-bypass',{'direct_egress_reachable':True,'mandatory_claim':False})
     kube('delete','pod','basic','--wait=true')
     all_rows = []
+    egress_rows=[]
     for cpu in ['250m','500m','1']:
+        stage('quota-load-'+cpu)
         name = 'quota-' + cpu
         apply(pod_spec(name,'rsg-beta2-qualification:local',qualified=True,enforced=True,cpu=cpu))
         pod = wait_pod(name)
         assert actor(name,'direct',pod['status']['podIP'])['direct_reachable'] is False
+        ipv6_control=json.loads(kube('exec',name,'-c','synthetic-provider','--','python','-c','import socket,json;socket.create_connection(("fd00:be7a:2::1",9000),2).close();print(json.dumps({"ipv6_control_reachable":True}))'))
+        assert ipv6_control['ipv6_control_reachable'] is True
         assert actor(name,'direct','fd00:be7a:2::1')['direct_reachable'] is False
+        egress_rows.append({'cpu':cpu,'operator_completed':True,'direct_ipv4_denied':True,'direct_ipv6_denied':True,'ipv6_control_reachable':True})
+        evidence('mandatory-egress',egress_rows)
         assert actor(name,'reject')['upstream_delivery_delta'] == 0
         for size in [1024,16384,65536]:
             for clients in [1,8,32]:
                 before = {'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')}
                 load = actor(name,'load',10,clients,size,timeout=60)
                 after = {'runtime':runtime_sample(name),'metrics':actor(name,'snapshot')}
-                assert after['metrics']['provider']['body']['local_header_received'] == 0
+                assert all(after['metrics']['provider']['body'][key]==0 for key in ['local_header_received','provider_key_mismatch','local_token_value_received'])
                 row={'cpu_limit':cpu,'load':load,'before':before,'after':after,'provisional':True}
                 all_rows.append(row)
                 evidence('load',all_rows)
@@ -321,6 +353,7 @@ def main():
         if cpu != '1':
             kube('delete','pod',name,'--wait=true')
     name='quota-1'
+    stage('declared-soak')
     duration=int(os.environ.get('BETA2_SOAK_SECONDS','600'))
     stalls=actor(name,'stall',timeout=60)
     assert stalls['json']['status']==502 and stalls['sse']['terminal'] is False
@@ -344,6 +377,7 @@ def main():
     assert all(metrics['admission'][key]==0 for key in ['receipt_in_use','inspection_in_use','upstream_in_use','stream_in_use','waiting','memory_units_in_use'])
     evidence('soak-verdict',{'declared_seconds':duration,'actual_seconds':time.monotonic()-started,
                             'warm':warm,'recovered':recovered,'rss_allowance_kib':allowance,'passed':True})
+    stage('active-stream-term-and-kill-restart')
     restarts=[]
     for signal in ['TERM','KILL']:
         stream=subprocess.Popen(['kubectl','--context','kind-'+CLUSTER,'-n',NS,'exec',name,'-c','app','--','python','/tools/actor.py','stream'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
@@ -367,6 +401,7 @@ def main():
     assert actor('replacement','direct',replacement['status']['podIP'])['direct_reachable'] is False
     assert actor('replacement','load',3,1,1024)['statuses'].get('200',0)>0
     evidence('replacement',{'direct_egress_denied':True,'mediated_traffic_succeeded':True})
+    stage('memory-limit-termination-and-recovery')
     apply(pod_spec('oom','rsg-beta2-candidate:local',memory='4Mi'))
     deadline=time.monotonic()+120
     while time.monotonic()<deadline:
@@ -385,6 +420,7 @@ def main():
     assert actor('oom-recovery','direct',recovered['status']['podIP'])['direct_reachable'] is False
     assert actor('oom-recovery','load',3,1,1024)['statuses'].get('200',0)>0
     evidence('oom-recovery',{'ready':True,'direct_egress_denied':True,'mediated_traffic_succeeded':True})
+    stage('candidate-resolver-and-tls-attacks')
     tls_cases()
     evidence('verdict',{'passed':True,'architecture':arch,'publication':False,
         'scope':'native sidecar startup/security, UID egress, cgroup load, bounded soak and restart/replacement',
@@ -395,5 +431,13 @@ if __name__=='__main__':
     try:
         main()
     except Exception as error:
-        evidence('failure',{'stage':'qualification','error_type':type(error).__name__,'passed':False})
-        raise
+        import traceback
+        evidence('failure',{'stage':CURRENT_STAGE,'error_type':type(error).__name__,'passed':False,
+            'stack':[{'function':frame.name,'line':frame.lineno} for frame in traceback.extract_tb(error.__traceback__)]})
+        try:
+            pods=json.loads(kube('get','pods','-o','json',timeout=20))
+            evidence('failed-pod-status',[{'name':pod['metadata']['name'],'status':pod.get('status',{})} for pod in pods['items']])
+        except Exception:
+            pass
+        print('Beta 2 qualification failed; safe aggregate diagnostics are archived',file=sys.stderr)
+        sys.exit(1)

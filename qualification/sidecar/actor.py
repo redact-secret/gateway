@@ -13,7 +13,7 @@ import time
 
 TOKEN = Path('/run/secrets/gateway-local-token')
 KEY = 'sk-SYNTHETIC-REVOKED-BETA2-NOT-A-KEY'
-counts = {'requests': 0, 'local_header_received': 0, 'active': 0, 'peak_active': 0, 'synthetic_plaintext_received': 0}
+counts = {'requests': 0, 'local_header_received': 0, 'active': 0, 'peak_active': 0, 'synthetic_plaintext_received': 0, 'provider_key_mismatch':0, 'local_token_value_received':0}
 lock = threading.Lock()
 
 
@@ -37,6 +37,8 @@ class Provider(BaseHTTPRequestHandler):
             counts['requests'] += 1
             counts['synthetic_plaintext_received'] += int(b'ghp_SYNTHETICREVOKED' in body)
             counts['local_header_received'] += int(self.headers.get('X-Gateway-Local-Token') is not None)
+            counts['provider_key_mismatch'] += int(self.headers.get('Authorization') != 'Bearer '+KEY)
+            counts['local_token_value_received'] += int(any('SYNTHETIC-BETA2-LOCAL-TOKEN' in value for value in self.headers.values()))
             counts['active'] += 1
             counts['peak_active'] = max(counts['active'], counts['peak_active'])
         try:
@@ -93,7 +95,7 @@ def call(endpoint='chat', size=1024, stream=False, invalid=False, auth=True, slo
         request['unsupported_synthetic_field'] = 'SYNTHETIC-REJECTED-NOT-A-SECRET'
     headers = {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + KEY}
     if auth:
-        headers['X-Gateway-Local-Token'] = TOKEN.read_text().strip()
+        headers['X-Gateway-Local-Token'] = 'SYNTHETIC-WRONG-LOCAL-TOKEN-NOT-REAL-00000' if auth=='wrong' else TOKEN.read_text().strip()
     started = time.monotonic()
     connection = http.client.HTTPConnection('127.0.0.1', 8787, timeout=15)
     result = {'status': 0, 'truncated': False, 'terminal': False}
@@ -167,6 +169,7 @@ if __name__ == '__main__':
         before = get('/stats', 9000)['body']['requests']
         assert call(invalid=True)['status'] == 422
         assert call(auth=False)['status'] == 401
+        assert call(auth='wrong')['status'] == 401
         after = get('/stats', 9000)['body']['requests']
         assert before == after
         print(json.dumps({'unsupported_status': 422, 'missing_token_status': 401, 'upstream_delivery_delta': 0}))
