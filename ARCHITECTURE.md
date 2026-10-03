@@ -62,7 +62,7 @@ No original or partially inspected request-body bytes leave before `Forward`. Ne
 
 ## Protocol boundary
 
-Support endpoint-specific request subsets rather than a general JSON/text proxy. Alpha 1 targets `POST /v1/chat/completions`; Beta 1 adds the qualified text subset of `POST /v1/responses`. Route matching is exact. Health/readiness paths are local and never become upstream routes.
+Support endpoint-specific request subsets rather than a general JSON/text proxy. Alpha 1 targets `POST /v1/chat/completions`; Beta 1 adds the qualified text subset of `POST /v1/responses` (request contract frozen as a planned design in #82: [responses-request](docs/contracts/responses-request.md), [ADR 0031](docs/decisions/0031-responses-stateless-text-contract.md); not implemented). Route matching is exact. Health/readiness paths are local and never become upstream routes.
 
 Every allowed request field is classified as inspected application text, validated structural/control data, or rejected content. Recursively classify nested fields; unknown fields are rejected by default. Build contracts for prompt/instructions, messages, tool results, app-submitted tool arguments, metadata, and tool descriptions/schema text. Structural values must have an explicit semantic contract: a label such as model ID does not permit arbitrary sensitive text to escape through it. Restrict enums/identifiers/values as needed, reject unsafe/unclassifiable values, and document intentionally transmitted structural data.
 
