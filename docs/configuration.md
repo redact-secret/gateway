@@ -76,3 +76,15 @@ Served on the configured listener only. See [errors and telemetry](contracts/err
 | anything else | `404 {"error":{"code":"unsupported_input"}}`, rejected locally. No upstream call, no forwarding, no body read. |
 
 Health endpoints make no upstream calls and use no credentials. Core inspection workers are built in startup initialization (`Services::init`); a profile, PII selection, or worker the pinned core cannot initialize fails startup, so readiness depends on both the initialized flag and successful core initialization. Inspection workers and queue derive from `resources.capacity.inspection` (provisional). `inspection` is both the number of worker threads and the bound on queued plus running inspection jobs, so a request beyond it is refused at once with `503 overload`, not queued. In the synthetic qualification run (provisional, host not quiet; [report](qualification/alpha1-qualification-report.md#performance-adr-0008-synthetic-stage-timing-and-peak-memory)), eight simultaneous clients saw 30%, 16%, and 2% of tiny requests refused at `inspection` 1, 2, and 4: set it to at least your application's expected number of requests in flight.
+
+## Beta 2 probe and observed invocation
+
+`redact-secret-gateway probe live|ready 127.0.0.1:8787` is a bounded exec probe
+for distroless/native sidecars; it does not read config/token sources or use
+provider credentials. Numeric loopback only, two-second deadline, 1024-byte
+response cap; exit 0/1/2 means healthy/unavailable/invalid invocation.
+`redact-secret-gateway serve-observed <path>` opts into loopback `GET /metrics`
+([ADR 0036](decisions/0036-loopback-operations-export.md)); non-loopback is refused
+before bind. `serve` retains its original route set. Schema v1 is unchanged;
+older binaries reject the new command, so rollback changes the invocation to
+`serve`. [Kubernetes example](../examples/kubernetes/README.md) and [runbook](kubernetes-runbook.md).

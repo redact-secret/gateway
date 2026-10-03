@@ -5,13 +5,13 @@
 # must be mounted at run time (see the note on the listener below).
 #
 # The build context is a staging directory created by scripts/build-image.sh that holds
-# only the already-built Linux x86_64 candidate binary and config.container.json. No
+# only the already-built architecture-matching Linux candidate binary and config.container.json. No
 # compiler runs here, so the image carries the exact bytes that were smoke-tested.
 #
 # Base: distroless cc (glibc, no shell, no package manager), pinned by the digest of the
 # multi-arch index (resolved 2026-10-02 with `docker buildx imagetools inspect`). The
 # glibc runtime matches the x86_64-unknown-linux-gnu binary (ADR 0012). The build is
-# pinned to linux/amd64. Dependabot (docker ecosystem) proposes digest updates.
+# explicitly selects linux/amd64 or linux/arm64 and checks the ELF header first. Dependabot (docker ecosystem) proposes digest updates.
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2
 
 COPY --chown=0:0 --chmod=0755 redact-secret-gateway /usr/local/bin/redact-secret-gateway

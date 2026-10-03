@@ -1,0 +1,76 @@
+# Separate non-release workload build; never uploaded as a candidate or published.
+name: Beta 2 sidecar evidence (native, unpublished)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/beta2.yml"
+      - "qualification/sidecar/**"
+      - "scripts/kubernetes/**"
+      - "examples/kubernetes/**"
+      - "src/**"
+  workflow_dispatch:
+    inputs:
+      soak_seconds:
+        description: Declared soak duration, at least 600 seconds for qualification
+        default: "600"
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: beta2-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    name: Kubernetes and cgroup evidence (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04, arch: amd64, kind_sha: "517ab7fc89ddeed5fa65abf71530d90648d9638ef0c4cde22c2c11f8097b8889"}
+          - {runner: ubuntu-24.04-arm, arch: arm64, kind_sha: "7ea2de9d2d190022ed4a8a4e3ac0636c8a455e460b9a13ccf19f15d07f4f00eb"}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install
+      - name: Install verified kind tool
+        env:
+          ARCH: ${{ matrix.arch }}
+          KIND_SHA: ${{ matrix.kind_sha }}
+        run: |
+          set -eu
+          curl -fsSL "https://github.com/kubernetes-sigs/kind/releases/download/v0.30.0/kind-linux-$ARCH" -o kind
+          printf '%s  kind\n' "$KIND_SHA" | sha256sum -c -
+          chmod +x kind
+          sudo mv kind /usr/local/bin/kind
+      - name: Build and smoke the exact production candidate once
+        run: |
+          set -eu
+          cargo build --locked --release
+          sh scripts/smoke-binary.sh target/release/redact-secret-gateway examples/config.openai.json qualification/evidence/beta2/binary
+      - name: Build the separate qualification binary (never distributed)
+        run: sh qualification/build.sh --release
+      - name: Execute native sidecar, egress, load and recovery evidence
+        env:
+          BETA2_SOAK_SECONDS: ${{ inputs.soak_seconds || '600' }}
+        run: |
+          set -eu
+          python3 -c 'import os; n=int(os.environ["BETA2_SOAK_SECONDS"]); assert 600 <= n <= 1800'
+          python3 qualification/sidecar/run.py
+      - name: Upload only safe aggregate text evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: beta2-evidence-${{ matrix.arch }}-${{ github.sha }}
+          path: qualification/evidence/beta2/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove the dedicated qualification cluster
+        if: always()
+        run: kind delete cluster --name gateway-beta2

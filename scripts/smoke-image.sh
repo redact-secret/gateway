@@ -12,6 +12,12 @@ set -eu
 image="$1"
 want_sha="$2"
 out="$3"
+platform="${4:-linux/amd64}"
+case "$platform:$(uname -m)" in
+  linux/amd64:x86_64|linux/arm64:aarch64) ;;
+  *) echo 'native Linux target required for image qualification' >&2; exit 1;;
+esac
+test "$(docker inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = "$platform"
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=scripts/lib-sha256.sh
 . "$here/lib-sha256.sh"
@@ -76,7 +82,7 @@ done
 pid="$(docker inspect --format '{{.State.Pid}}' "$name")"
 uid="$(awk '/^Uid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo unknown)"
 echo "container process uid: $uid" | tee -a "$out/image-smoke.txt"
-test "$uid" != 0
+case "$uid" in unknown|0) echo 'cannot prove non-root process identity' >&2; exit 1;; esac
 
 GATEWAY_LOCAL_TOKEN="$GATEWAY_LOCAL_TOKEN" sh "$here/probe-endpoints.sh" "http://127.0.0.1:8787" "$out" | tee -a "$out/image-smoke.txt"
 

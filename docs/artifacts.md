@@ -82,3 +82,20 @@ Artifact distribution is gated and nothing is published. Before any publication:
 ## Integration examples
 
 `examples/node` and `examples/python` point the OpenAI SDKs at the gateway base URL; `examples/compose/compose.yaml` runs the candidate image. They require your own provider key at run time. How each was verified, and what was not, is in [examples/README.md](../examples/README.md) and the root [README](../README.md#try-it).
+
+## Beta 2 native ARM64/OCI extension (#91, qualification in progress)
+
+The candidate workflow adds `aarch64-unknown-linux-gnu` on a native
+`ubuntu-24.04-arm` runner, then executes that binary and its linux/arm64 image
+(non-root/read-only, seam absence, config, probes and SIGTERM). Image assembly
+checks ELF class/endian/machine against the explicitly selected platform and
+copies the already-built binary. Smoke refuses an emulated/nonmatching host.
+
+The expanded bundle has three binaries, two docker-save image variants and one
+OCI-layout tar (six artifacts). `image-info-arm64.json` records the ARM64 config
+ID/binary hash; `oci-index-info.json` records local OCI manifests/platforms/index
+digest. OCI assembly preserves exact config/uncompressed layer bytes and verifies
+rootfs diff_ids; OCI manifest digests are distinct from Docker config IDs. There
+is no registry push, signing, SBOM or provenance. Actual native run evidence must
+be archived before ARM64 support is claimed. Earlier two-binary/three-artifact
+descriptions above describe the completed pre-Beta-2 baseline only.

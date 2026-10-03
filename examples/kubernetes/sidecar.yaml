@@ -1,0 +1,83 @@
+# Render image digests before applying. No image publication is authorized.
+# Create gateway-config from config.json and gateway-local-token out of band.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-companion
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: gateway-companion}
+  template:
+    metadata:
+      labels: {app: gateway-companion}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      initContainers:
+        - name: gateway
+          image: GATEWAY_IMAGE_DIGEST
+          imagePullPolicy: IfNotPresent
+          restartPolicy: Always
+          args: [serve-observed, /etc/gateway/config.json]
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          # Provisional; #93 must replace guidance with measured cgroup budgets.
+          resources:
+            requests: {cpu: 250m, memory: 128Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          startupProbe:
+            exec:
+              command: [/usr/local/bin/redact-secret-gateway, probe, ready, "127.0.0.1:8787"]
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: [/usr/local/bin/redact-secret-gateway, probe, ready, "127.0.0.1:8787"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: [/usr/local/bin/redact-secret-gateway, probe, live, "127.0.0.1:8787"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          volumeMounts:
+            - {name: config, mountPath: /etc/gateway, readOnly: true}
+            - {name: local-token, mountPath: /run/secrets, readOnly: true}
+      containers:
+        - name: app
+          image: APPLICATION_IMAGE_DIGEST
+          securityContext:
+            runAsUser: 10001
+            runAsGroup: 10001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          env:
+            - {name: OPENAI_BASE_URL, value: "http://127.0.0.1:8787/v1"}
+            - {name: GATEWAY_LOCAL_TOKEN_FILE, value: /run/secrets/gateway-local-token}
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          volumeMounts:
+            - {name: local-token, mountPath: /run/secrets, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: gateway-config}
+        - name: local-token
+          secret:
+            secretName: gateway-local-token
+            defaultMode: 0440
+            items:
+              - {key: token, path: gateway-local-token}

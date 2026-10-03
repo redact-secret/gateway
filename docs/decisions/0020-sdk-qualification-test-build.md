@@ -57,3 +57,13 @@ A patch that no longer applies, a lock mismatch, a missing marker or loopback gu
 ## Verification
 
 `tests/destination_policy.rs` (the tests named above), `scripts/check-no-qualification-seam.sh` in the candidate workflow, and the `Qualification (SDK, non-release test build)` workflow. See [the qualification report](../qualification/alpha1-qualification-report.md) for the run links.
+
+## Beta 2 extension (#92–#94)
+
+Under epic #14 delegation, the exact seam allowlist additionally permits
+`.github/workflows/beta2.yml` and `qualification/sidecar/run.py` to build/run the
+separate non-release workload image on native Linux architectures. It is never
+uploaded as a candidate, placed in an OCI candidate bundle or published. Only
+safe aggregate JSON/text evidence is uploaded. Distributed source/config and
+candidate build paths gain no fake upstream/trust setting. The overlay also
+forwards the bounded production probe command and allows loopback observed mode.

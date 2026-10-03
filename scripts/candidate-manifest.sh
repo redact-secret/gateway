@@ -54,10 +54,14 @@ add() { # file platform kind format
      + (if $rustc == "" then {} else {built_with:$rustc} end)' >>"$entries"
 }
 add redact-secret-gateway-x86_64-unknown-linux-gnu linux-x86_64 binary elf-gnu linux-x86_64
+add redact-secret-gateway-aarch64-unknown-linux-gnu linux-arm64 binary elf-gnu linux-arm64
 add redact-secret-gateway-aarch64-apple-darwin macos-arm64 binary mach-o macos-arm64
 add redact-secret-gateway-candidate-image-linux-amd64.tar linux-amd64 oci-image docker-save-tar none
 
-for f in examples/config.openai.json examples/config.skeleton.json container/config.container.json examples/compose/compose.yaml; do
+add redact-secret-gateway-candidate-image-linux-arm64.tar linux-arm64 oci-image docker-save-tar none
+add redact-secret-gateway-candidate-image-linux-multiarch.oci.tar linux-multiarch oci-image oci-layout-tar none
+
+for f in examples/config.openai.json examples/config.skeleton.json container/config.container.json examples/compose/compose.yaml examples/kubernetes/config.json examples/kubernetes/sidecar.yaml; do
   jq -n --arg file "$f" --arg sha "$(sha256_of "$f")" '{file:$file, sha256:$sha}' >>"$configs"
 done
 
@@ -71,6 +75,8 @@ jq -n -S \
   --slurpfile artifacts "$entries" \
   --slurpfile configs "$configs" \
   --slurpfile image "$image_info" \
+  --slurpfile image_arm64 "$dir/image-info-arm64.json" \
+  --slurpfile oci "$dir/oci-index-info.json" \
   --arg commit "$commit" --argjson dirty "$dirty" \
   --arg gw "$gw_ver" --arg channel "$channel" --arg rustc "$rustc_v" \
   --arg core "$core_ver" --arg core_src "$core_src" --arg core_sum "$core_sum" \
@@ -90,7 +96,7 @@ jq -n -S \
     "registry and image name are not selected; nothing is pushed",
     "no signing, SBOM, or provenance is produced (planned for Beta 3)",
     "numeric limits and capacity are provisional: no quiet-host performance measurement is recorded (ADR 0008)",
-    "open Alpha 1 follow-ups gateway #40 through #44 and core issues redact-secret/redact-secret #1177 through #1180 are unresolved",
+    "Beta 2 deployment/resource qualification and Beta 3 final candidate gates must be reconciled; core completeness debts remain documented",
     "the maintainer has not authorized publication (the qualification report lists the remaining items)"
   ],
   capabilities: {
@@ -111,7 +117,7 @@ jq -n -S \
       upstream: "fixed https://api.openai.com (provider profile openai), set by deployment.upstream.provider"
     },
     health: ["GET /healthz", "GET /readyz"],
-    platforms: ["linux-x86_64", "macos-arm64", "linux-amd64 image"]
+    platforms: ["linux-x86_64", "macos-arm64", "linux-arm64", "linux-amd64 image", "linux-arm64 image"]
   },
   source: { commit: $commit, working_tree_dirty: $dirty, ci_run_url: (if $run_url == "" then null else $run_url end) },
   gateway_version: $gw,
@@ -130,6 +136,8 @@ jq -n -S \
   },
   build: { command: "cargo build --locked --release", features: "none", built_once_per_target: true, bit_reproducibility_verified: false },
   image: ($image[0] + { registry_name: "to be selected; not pushed", registry_digest: "none (not pushed)" }),
+  image_arm64: $image_arm64[0],
+  oci_index: $oci[0],
   artifacts: $artifacts,
   signing: "not produced",
   sbom: "not produced",
@@ -138,7 +146,7 @@ jq -n -S \
 
 (
   cd "$dir"
-  files="$(ls redact-secret-gateway-* manifest.json image-info.json)"
+  files="$(ls redact-secret-gateway-* manifest.json image-info*.json oci-index-info.json)"
   [ ! -d evidence ] || files="$files
 $(find evidence -type f | LC_ALL=C sort)"
   printf '%s\n' "$files" | while IFS= read -r f; do

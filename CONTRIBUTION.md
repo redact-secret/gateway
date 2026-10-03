@@ -83,3 +83,15 @@ Agents follow the same requirements as human contributors. Read the five baselin
 ## Licensing
 
 The repository is licensed under the MIT License (see `LICENSE`). By submitting a contribution you agree it is provided under the same license.
+
+## Beta 2 qualification
+
+`python3 scripts/test-oci-bundle.py` checks OCI platform/blob invariants. Native
+Linux ARM64 candidate build/smoke uses an actual ARM64 runner; image assembly
+checks the ELF machine field before copying exact tested bytes. A local OCI
+layout/archive combines the native-tested variants without registry publication.
+The manually dispatched `.github/workflows/beta2.yml` builds exact candidate
+startup evidence separately from a non-release workload image and runs
+`qualification/sidecar/run.py` on native Linux amd64/arm64. Only safe aggregate
+text evidence is uploaded. See the [Beta 2 register](docs/qualification/beta2-qualification-report.md)
+for outstanding execution gates; a passing build does not qualify deployment.
