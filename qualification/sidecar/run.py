@@ -249,6 +249,32 @@ def tls_cases():
     return rows
 
 
+def shipped_manifest():
+    """Execute the shipped Deployment; only substitute images/app test tooling."""
+    manifest=(ROOT/'examples/kubernetes/sidecar.yaml').read_text().replace('GATEWAY_IMAGE_DIGEST','rsg-beta2-candidate:local').replace('APPLICATION_IMAGE_DIGEST',HELPER)
+    deployment=json.loads(kube('create','--dry-run=client','--validate=false','-f','-','-o','json',data=manifest))
+    spec=deployment['spec']['template']['spec']
+    spec['initContainers'][0]['imagePullPolicy']='Never'
+    app=spec['containers'][0]
+    app['command']=['python','/tools/actor.py','idle']
+    app['volumeMounts'].append({'name':'tools','mountPath':'/tools','readOnly':True})
+    spec['volumes'].append({'name':'tools','configMap':{'name':'tools'}})
+    spec['volumes'][1]['secret']['secretName']='local-token'
+    apply({'apiVersion':'v1','kind':'ConfigMap','metadata':{'name':'gateway-config'},'data':{'config.json':(ROOT/'examples/kubernetes/config.json').read_text()}})
+    apply(deployment)
+    kube('rollout','status','deployment/gateway-companion','--timeout=180s',timeout=200)
+    pod=json.loads(kube('get','pods','-l','app=gateway-companion','-o','json'))['items'][0]
+    name=pod['metadata']['name']
+    identity=actor(name,'identity')
+    assert identity['Uid'].split()==['10001']*4 and int(identity['CapEff'],16)==0
+    assert identity['NoNewPrivs']=='1' and identity['Seccomp']=='2'
+    assert identity['root_read_only'] is True and identity['api_token_mounted'] is False
+    evidence('shipped-deployment',{'manifest_sha256':hashlib.sha256((ROOT/'examples/kubernetes/sidecar.yaml').read_bytes()).hexdigest(),
+        'qualification_adaptations':['local candidate image reference','pinned helper application and tool mount','same synthetic Secret under local-token name'],
+        'pod_status':pod['status'],'app_identity':identity,'gateway_runtime':runtime_sample(name)})
+    kube('delete','deployment','gateway-companion','--wait=true')
+
+
 def main():
     arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(platform.machine())
     if platform.system() != 'Linux' or arch is None:
@@ -294,6 +320,8 @@ def main():
     assert refusal['status'] == 401
     evidence('candidate-local-refusal', refusal)
     kube('delete','pod','candidate','--wait=true')
+    stage('shipped-deployment-security')
+    shipped_manifest()
     stage('failed-config-and-token-startup')
     refused=[]
     for failure in ['config','token']:
