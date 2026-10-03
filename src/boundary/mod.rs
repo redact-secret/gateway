@@ -492,7 +492,7 @@ mod tests {
         let memory = admission.try_reserve_memory(16).expect("reserve");
         let receipt = admission.try_receipt().expect("receipt");
         ValidatedRequest::for_test_with(
-            crate::protocol::RequestBody::Responses(request),
+            crate::protocol::RequestBody::Responses(Box::new(request)),
             memory,
             receipt,
         )

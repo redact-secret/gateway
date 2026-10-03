@@ -327,12 +327,6 @@ async fn unsupported_forms_are_rejected_before_inspection() {
         json!({"model":"m","store":false,"input":"hi","user":"u"}),
         json!({"model":"m","store":false,"input":"hi","service_tier":"auto"}),
         json!({"model":"m","store":false,"input":"hi","future_field":1}),
-        // owned by #85: rejected until its parser exists
-        json!({"model":"m","store":false,"input":"hi","tools":[]}),
-        json!({"model":"m","store":false,"input":"hi","tool_choice":"auto"}),
-        json!({"model":"m","store":false,"input":"hi","parallel_tool_calls":true}),
-        json!({"model":"m","store":false,"input":"hi","text":{}}),
-        json!({"model":"m","store":false,"input":"hi","metadata":{}}),
         // controls
         json!({"model":"m","store":false,"input":"hi","stream":null}),
         json!({"model":"m","store":false,"input":"hi","stream":"true"}),
@@ -351,7 +345,6 @@ async fn unsupported_forms_are_rejected_before_inspection() {
         json!({"model":"m","store":false,"input":["hi"]}),
         item(json!({"type":"item_reference","id":"msg_synthetic"})),
         item(json!({"type":"reasoning","id":"rs_synthetic","summary":[]})),
-        item(json!({"type":"function_call","call_id":"c","name":"n","arguments":"{}"})),
         item(json!({"type":"function_call_output","call_id":"c","output":"x"})),
         item(json!({"type":"unknown_synthetic","role":"user","content":"x"})),
         item(json!({"type":null,"role":"user","content":"x"})),

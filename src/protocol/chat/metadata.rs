@@ -64,7 +64,7 @@ fn is_link(key: &str) -> bool {
 /// charged (two nodes and the key plus value bytes per entry) against the request-wide
 /// derived counters shared with tool arguments, so metadata cannot add to them unaccounted.
 /// The charge is conservative: the parse budgets already counted the same strings once.
-pub(super) fn parse(value: Json, derived: &mut Derived) -> Checked<Metadata> {
+pub(in crate::protocol) fn parse(value: Json, derived: &mut Derived) -> Checked<Metadata> {
     let Json::Object(items) = value else {
         return Err(unsupported());
     };
@@ -93,24 +93,51 @@ pub(super) fn parse(value: Json, derived: &mut Derived) -> Checked<Metadata> {
     })
 }
 
-/// Visit metadata texts (traversal position 5 in `slots.rs`): key, then value, per entry.
-pub(super) fn visit(metadata: &Metadata, f: &mut impl FnMut(TextSlot, &str)) {
+/// Which part of an entry the traversal reached, with the entry ordinal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::protocol) enum MetaLeaf {
+    Key(usize),
+    Value(usize),
+}
+
+/// Visit metadata texts: key, then value, per entry, in input order. Shared by Chat
+/// (traversal position 5 in `slots.rs`) and Responses.
+pub(in crate::protocol) fn visit_leaves(metadata: &Metadata, f: &mut impl FnMut(MetaLeaf, &str)) {
     for (entry, (key, value)) in metadata.entries.iter().enumerate() {
-        f(TextSlot::MetadataKey { entry }, key);
-        f(TextSlot::MetadataValue { entry }, value);
+        f(MetaLeaf::Key(entry), key);
+        f(MetaLeaf::Value(entry), value);
     }
+}
+
+/// Mutable twin of [`visit_leaves`].
+pub(in crate::protocol) fn visit_leaves_mut(
+    metadata: &mut Metadata,
+    f: &mut impl FnMut(MetaLeaf, &mut String),
+) {
+    for (entry, (key, value)) in metadata.entries.iter_mut().enumerate() {
+        f(MetaLeaf::Key(entry), key);
+        f(MetaLeaf::Value(entry), value);
+    }
+}
+
+const fn slot_of(leaf: MetaLeaf) -> TextSlot {
+    match leaf {
+        MetaLeaf::Key(entry) => TextSlot::MetadataKey { entry },
+        MetaLeaf::Value(entry) => TextSlot::MetadataValue { entry },
+    }
+}
+
+pub(super) fn visit(metadata: &Metadata, f: &mut impl FnMut(TextSlot, &str)) {
+    visit_leaves(metadata, &mut |leaf, text| f(slot_of(leaf), text));
 }
 
 /// Mutable twin of [`visit`].
 pub(super) fn visit_mut(metadata: &mut Metadata, f: &mut impl FnMut(TextSlot, &mut String)) {
-    for (entry, (key, value)) in metadata.entries.iter_mut().enumerate() {
-        f(TextSlot::MetadataKey { entry }, key);
-        f(TextSlot::MetadataValue { entry }, value);
-    }
+    visit_leaves_mut(metadata, &mut |leaf, text| f(slot_of(leaf), text));
 }
 
 /// Write `,"metadata":{...}` when present.
-pub(super) fn write(metadata: &Metadata, w: &mut Bounded) -> io::Result<()> {
+pub(in crate::protocol) fn write(metadata: &Metadata, w: &mut Bounded) -> io::Result<()> {
     if !metadata.present {
         return Ok(());
     }
@@ -130,7 +157,7 @@ pub(super) fn write(metadata: &Metadata, w: &mut Bounded) -> io::Result<()> {
 /// ([`SerializeError::Limit`]); a key that changed or left the LINK charset (the traversal
 /// hands detect-only text out mutably, a caller must not write it) is
 /// [`SerializeError::Invalid`]. Entry count and key uniqueness are rechecked.
-pub(super) fn revalidate(metadata: &Metadata) -> Result<(), SerializeError> {
+pub(in crate::protocol) fn revalidate(metadata: &Metadata) -> Result<(), SerializeError> {
     if metadata.entries.len() > MAX_METADATA_ENTRIES {
         return Err(SerializeError::Invalid);
     }
