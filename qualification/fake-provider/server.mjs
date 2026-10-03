@@ -8,7 +8,7 @@
 //
 // The scenario is chosen by the request `model` (a transmitted-verbatim structural field), so
 // it survives the gateway's sanitizing rewrite and SDK retries hit the same script:
-//   qual-example (json-ok, or sse-ok when stream:true), qual-json-ok, qual-json-slow (replies after 150 ms; #58 load runs), qual-json-large, qual-json-oversize, qual-json-truncated, qual-hang,
+//   qual-example (json-ok, or sse-ok when stream:true), qual-json-ok, qual-json-slow (replies after 150 ms), qual-json-4mib (a 4 MB reply, just under the default response bound; #58 load runs), qual-json-large, qual-json-oversize, qual-json-truncated, qual-hang,
 //   qual-err-<status> (400 401 403 404 408 409 422 429 500 502 503 504),
 //   qual-err-429-retry-after (Retry-After: 0), qual-err-500-hint-no-retry (500 + x-should-retry: false), qual-retry-429-then-ok (two 429s, then 200),
 //   qual-sse-ok, qual-sse-fragmented, qual-sse-multi, qual-sse-interrupted(-close), qual-sse-gated,
@@ -162,6 +162,9 @@ async function runScenario(call, req, res, json) {
     await sleep(150);
     if (!alive()) return;
     return sendJson(res, 200, completion(call.seq, PIECES.join("")));
+  }
+  if (model === "qual-json-4mib") {
+    return sendJson(res, 200, completion(call.seq, "x".repeat(4_000_000)));
   }
   if (model === "qual-json-large") {
     return sendJson(res, 200, completion(call.seq, "synthetic large reply ".repeat(3000)));

@@ -805,6 +805,54 @@ async function aggHeld() {
   return out;
 }
 
+/** Buffered provider responses: K responses of about 4 MB held by consumers that do not read. */
+async function aggRelay() {
+  const out = {};
+  for (const k of QUICK ? [4] : [4, 16]) {
+    const g = await startAggGateway({ receipt: 64, memory_units: 262144, inspection: 16, upstream: 64, stream: 16 }, {});
+    await providerFresh();
+    await aggCall(g, shapeBody("small_4KiB", "qual-json-ok").body);
+    const base = await procCounts(g);
+    const { body } = shapeBody("small_4KiB", "qual-json-4mib");
+    const request = Buffer.from(
+      `POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nAuthorization: Bearer ${SYN.api_key}\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
+    );
+    const socks = [];
+    for (let i = 0; i < k; i++) {
+      const s = net.connect(Number(g.hostPort), "127.0.0.1");
+      s.on("error", () => {});
+      s.pause();
+      s.write(request);
+      socks.push(s);
+    }
+    let held = null;
+    const t0 = performance.now();
+    while (performance.now() - t0 < 10000) {
+      const s = await snapshot(g);
+      if (s.admission.upstream_in_use === k) {
+        held = s.admission;
+        break;
+      }
+      await sleep(5);
+    }
+    await sleep(400);
+    const rssHeld = (await procCounts(g)).rss_kb;
+    for (const s of socks) s.destroy();
+    const drained = await awaitDrained(g);
+    const peak = await stopAggGateway(g);
+    out[`responses_x${k}`] = {
+      held_responses: k,
+      upstream_permits_held: held?.upstream_in_use ?? null,
+      response_bytes_each: 4000000,
+      rss_growth_held_bytes: rssHeld && base.rss_kb ? (rssHeld - base.rss_kb) * 1024 : null,
+      true_peak_growth_bytes: peak.max_rss_kb && base.rss_kb ? (peak.max_rss_kb - base.rss_kb) * 1024 : null,
+      growth_per_held_response_bytes: rssHeld && base.rss_kb ? Math.round(((rssHeld - base.rss_kb) * 1024) / k) : null,
+      drained_ms: drained,
+    };
+  }
+  return out;
+}
+
 const MIX = [
   ["small_4KiB", 40],
   ["many_findings_16KiB", 10],
@@ -1144,6 +1192,7 @@ async function aggregateMain() {
     run.stages_by_shape = await aggStages(capStd);
     run.pre_forward_rejections = await aggRejections();
     run.held_request_memory = await aggHeld();
+    run.buffered_responses = await aggRelay();
     run.mixed_overload = await aggMixed("tight_capacity_finite_sockets", capTight, limTight, load);
     run.mixed_ample = await aggMixed("standard_capacity_default_sockets", capStd, {}, { ...load, flood: 40 });
     run.starvation = await aggStarvation();
@@ -1178,6 +1227,11 @@ async function aggregateMain() {
       h[`held.${k}.true_peak_growth_bytes`] = v.true_peak_growth_bytes;
       h[`held.${k}.held_growth_over_reservation`] = v.held_growth_over_reservation;
       h[`held.${k}.peak_growth_over_reservation`] = v.peak_growth_over_reservation;
+    }
+    for (const [k, v] of Object.entries(run.buffered_responses)) {
+      h[`relay.${k}.upstream_permits_held`] = v.upstream_permits_held;
+      h[`relay.${k}.growth_per_held_response_bytes`] = v.growth_per_held_response_bytes;
+      h[`relay.${k}.true_peak_growth_bytes`] = v.true_peak_growth_bytes;
     }
     for (const key of ["mixed_overload", "mixed_ample"]) {
       const m = run[key];
