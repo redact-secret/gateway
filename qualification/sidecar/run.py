@@ -442,18 +442,28 @@ def main():
     stage('candidate-resolver-and-tls-attacks')
     tls_cases()
     stage('memory-limit-termination-and-recovery')
-    apply(pod_spec('oom','rsg-beta2-candidate:local',memory='4Mi'))
+    apply(pod_spec('oom','rsg-beta2-candidate:local',enforced=True))
+    before_oom=wait_pod('oom')
+    oom_status=next(item for item in before_oom['status']['initContainerStatuses'] if item['name']=='gateway')
+    oom_cid=oom_status['containerID'].split('://',1)[1]
+    oom_inspect=json.loads(command('docker','exec',CLUSTER+'-control-plane','crictl','inspect',oom_cid))
+    oom_pid=oom_inspect['info']['pid']
+    oom_group=next(line.split(':',2)[2] for line in command('docker','exec',CLUSTER+'-control-plane','cat',f'/proc/{oom_pid}/cgroup').splitlines() if line.startswith('0::'))
+    assert oom_cid in oom_group and '..' not in oom_group
+    evidence('oom-before',runtime_sample('oom'))
+    command('docker','exec',CLUSTER+'-control-plane','/bin/sh','-ec','printf %s 262144 > "$1/memory.max"','--','/sys/fs/cgroup'+oom_group)
     deadline=time.monotonic()+120
     while time.monotonic()<deadline:
         data=json.loads(kube('get','pod','oom','-o','json'))
         statuses=data.get('status',{}).get('initContainerStatuses',[])
         last=next((s.get('lastState',{}).get('terminated',s.get('state',{}).get('terminated')) for s in statuses if s['name']=='gateway'),None)
         if last and last.get('reason')=='OOMKilled':
-            assert not any('running' in s.get('state',{}) for s in data.get('status',{}).get('containerStatuses',[]))
-            evidence('oom',{'gateway_exit':last['exitCode'],'reason':'OOMKilled','app_started':False,'cleanup_promised':False})
+            evidence('oom',{'gateway_exit':last['exitCode'],'reason':'OOMKilled','app_started_before_fault':True,'fault':'cgroup v2 hard limit lowered after readiness','injected_limit_bytes':262144,'configured_limit_bytes':268435456,'cleanup_promised':False})
             break
         time.sleep(1)
     else: raise RuntimeError('OOM evidence deadline exceeded')
+    wait_pod('oom')
+    evidence('oom-same-pod-recovery',runtime_sample('oom'))
     kube('delete','pod','oom','--wait=true')
     apply(pod_spec('oom-recovery','rsg-beta2-qualification:local',qualified=True,enforced=True))
     recovered=wait_pod('oom-recovery')
