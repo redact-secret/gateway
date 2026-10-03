@@ -44,6 +44,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0028](0028-aggregate-load-qualification.md) | Aggregate load qualification: measurement aids, findings, no change to defaults | Accepted; measured, decision recorded (figures provisional) | #58 |
 | [0029](0029-schema-title-keyword.md) | Admit the `title` schema keyword as inspected free text | Accepted | #57 |
 | [0030](0030-local-caller-auth-listener-health.md) | Local caller token, listener and health authority: header, syntax, comparison, secret references, ordering, listener combinations | Accepted (design); contract frozen, planned (not implemented) | #61 (then #63, #86, #62, #64, #65) |
+| [0031](0031-responses-stateless-text-contract.md) | Responses stateless text field and state contract: mandatory `store:false`, closed state and opaque forms, flat item and tool shapes | Accepted (design); planned, contract frozen, no code | #82 (then #83 to #88) |
 
 ## Contracts
 
@@ -54,6 +55,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [request-policy](../contracts/request-policy.md) | Request-level action and result table over the pinned core; precedence; startup rejection; core debts #1177 to #1180 |
 | [field-classification](../contracts/field-classification.md) | Initial classification rules and rejected forms |
 | [chat-completions-request](../contracts/chat-completions-request.md) | Endpoint field matrix for the Alpha 1 Chat Completions text subset (implemented) and the frozen Alpha 2 recursive subset (planned), admission rules |
+| [responses-request](../contracts/responses-request.md) | Frozen field, item, and state matrix for the stateless Responses text subset (planned, #82) |
 | [resource-limits](../contracts/resource-limits.md) | Resource-limit categories; provisional request limits and memory composition |
 | [errors-and-telemetry](../contracts/errors-and-telemetry.md) | Safe error code taxonomy and telemetry exclusions |
 | [upstream-destinations](../contracts/upstream-destinations.md) | Fixed HTTPS destinations, client hardening, address policy, test-seam isolation |
