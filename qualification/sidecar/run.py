@@ -103,6 +103,8 @@ def pod_spec(name, image, qualified=False, enforced=False, cpu='1', memory='256M
                                          'capabilities': {'drop': ['ALL'], 'add': ['NET_ADMIN']}},
                      'volumeMounts': [{'name': 'tools', 'mountPath': '/tools', 'readOnly': True},
                                       {'name': 'operator-run', 'mountPath': '/run'}]})
+    if enforced and failure=='egress':
+        init[0]['securityContext']['capabilities']={'drop':['ALL']}
     if qualified:
         init.append({'name': 'synthetic-provider', 'image': HELPER, 'imagePullPolicy':'Never', 'restartPolicy': 'Always',
                      'command': ['python', '/tools/actor.py', 'provider'], 'securityContext': {**context, 'runAsUser': 20001, 'runAsGroup': 20001},
@@ -407,18 +409,20 @@ def main():
     shipped_manifest()
     stage('failed-config-and-token-startup')
     refused=[]
-    for failure in ['config','token']:
+    for failure in ['config','token','egress']:
         name='invalid-'+failure
-        apply(pod_spec(name,'rsg-beta2-candidate:local',failure=failure))
+        apply(pod_spec(name,'rsg-beta2-candidate:local',failure=failure,enforced=failure=='egress'))
         deadline=time.monotonic()+120
         while time.monotonic()<deadline:
             data=json.loads(kube('get','pod',name,'-o','json'))
             statuses=data.get('status',{}).get('initContainerStatuses',[])
-            last=next((s.get('lastState',{}).get('terminated',s.get('state',{}).get('terminated')) for s in statuses if s['name']=='gateway'),None)
+            last=next((s.get('lastState',{}).get('terminated',s.get('state',{}).get('terminated')) for s in statuses if s['name']==('operator-egress' if failure=='egress' else 'gateway')),None)
             if last:
-                assert last['exitCode']==1
+                assert last['exitCode']!=0
+                if failure!='egress': assert last['exitCode']==1
+                if failure=='egress': assert not any(s['name']=='gateway' and s.get('started') for s in statuses)
                 assert not any('running' in s.get('state',{}) for s in data.get('status',{}).get('containerStatuses',[]))
-                refused.append({'failure':failure,'gateway_exit':1,'app_started':False})
+                refused.append({'failure':failure,'failing_container':'operator-egress' if failure=='egress' else 'gateway','exit_code':last['exitCode'],'app_started':False})
                 break
             time.sleep(1)
         else:
