@@ -52,10 +52,10 @@ mod attack_tests;
 mod forward_tests;
 mod framing_matrix_tests;
 mod header_cap_tests;
-mod lifecycle_tests;
 #[path = "../../tests/support/leak.rs"]
 #[allow(dead_code)]
 mod leak;
+mod lifecycle_tests;
 mod stream_tests;
 mod wire_tests;
 

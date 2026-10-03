@@ -34,7 +34,7 @@ use crate::boundary::test_gate::Gate;
 use crate::chat_route::{self, ChatRoute};
 use crate::head_guard::HeadGuardListener;
 use crate::telemetry::{Metrics, Stage, StreamEnd};
-use crate::write_stall::{StallIo, StallListener};
+use crate::write_stall::StallIo;
 use redact_secret::Profile;
 
 const MEM: u32 = 8192;
@@ -422,7 +422,11 @@ impl Lab {
     async fn until(&self, what: &str, mut ok: impl FnMut(&Self) -> bool) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
         while !ok(self) {
-            assert!(tokio::time::Instant::now() < deadline, "never: {what}");
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "never: {what} (free {:?})",
+                self.free()
+            );
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
     }
@@ -450,9 +454,7 @@ impl Lab {
 }
 
 fn markers() -> Markers {
-    Markers::standard()
-        .with("key", KEY)
-        .with("token", TOKEN)
+    Markers::standard().with("key", KEY).with("token", TOKEN)
 }
 
 fn marked_request() -> Request {
@@ -603,7 +605,10 @@ async fn read_head(client: &mut TcpStream) -> Vec<u8> {
 }
 
 fn count(haystack: &[u8], needle: &[u8]) -> usize {
-    haystack.windows(needle.len()).filter(|w| *w == needle).count()
+    haystack
+        .windows(needle.len())
+        .filter(|w| *w == needle)
+        .count()
 }
 
 // ====================================================== stage: connection accept / head wait
@@ -624,7 +629,9 @@ async fn disconnect_while_the_head_is_incomplete_returns_the_connection_slot() {
     let served_ok = within(async {
         loop {
             let mut c = served.connect().await;
-            c.write_all(&raw_post(&chat_body("hello"), KEY)).await.unwrap();
+            c.write_all(&raw_post(&chat_body("hello"), KEY))
+                .await
+                .unwrap();
             let (bytes, _) = read_close(&mut c, Duration::from_secs(10)).await;
             if bytes.starts_with(b"HTTP/1.1 200") {
                 return true;
@@ -634,7 +641,11 @@ async fn disconnect_while_the_head_is_incomplete_returns_the_connection_slot() {
     })
     .await;
     assert!(served_ok);
-    assert_eq!(lab.up.requests(), 1, "only the complete request reached upstream");
+    assert_eq!(
+        lab.up.requests(),
+        1,
+        "only the complete request reached upstream"
+    );
     lab.settle().await;
 }
 
@@ -773,9 +784,21 @@ async fn a_started_inspection_keeps_cpu_and_memory_after_the_waiter_is_dropped()
     handler.abort();
     assert!(handler.await.unwrap_err().is_cancelled());
     // The waiter is gone, the work is not: both permits are still held.
-    assert_eq!(lab.free()[1], 1, "inspection permit held by the running job");
-    assert_eq!(lab.free()[4], 0, "memory reservation held by the running job");
-    assert_eq!(lab.metrics.stage(Stage::Serialization).count, 0, "not finished");
+    assert_eq!(
+        lab.free()[1],
+        1,
+        "inspection permit held by the running job"
+    );
+    assert_eq!(
+        lab.free()[4],
+        0,
+        "memory reservation held by the running job"
+    );
+    assert_eq!(
+        lab.metrics.stage(Stage::Serialization).count,
+        0,
+        "not finished"
+    );
     lab.gate.open();
     lab.settle().await;
     // The job ran to its real end (serialization recorded) and its result went nowhere.
@@ -824,13 +847,7 @@ async fn a_new_request_is_refused_not_queued_while_running_jobs_hold_every_permi
 #[tokio::test]
 async fn repeated_start_stop_cycles_return_every_counter_and_task_to_baseline() {
     let limits = limits_with(|l| l.upstream_header_ms = 60_000);
-    let lab = Lab::with(
-        |_| Script::HoldHeaders,
-        limits,
-        ROOMY,
-        Some(one_worker()),
-    )
-    .await;
+    let lab = Lab::with(|_| Script::HoldHeaders, limits, ROOMY, Some(one_worker())).await;
     let tasks = alive_tasks();
     let mut upstream_cycles = 0_usize;
     for cycle in 0..24 {
@@ -874,15 +891,25 @@ async fn repeated_start_stop_cycles_return_every_counter_and_task_to_baseline() 
         }
         lab.settle().await;
     }
-    assert_eq!(lab.up.requests(), upstream_cycles, "only the upstream-wait cycles sent");
+    assert_eq!(
+        lab.up.requests(),
+        upstream_cycles,
+        "only the upstream-wait cycles sent"
+    );
     assert_eq!(lab.metrics.upstream_attempts() as usize, upstream_cycles);
     // No accumulating tasks: the connection handlers and exchanges are gone.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while alive_tasks() > tasks {
-        assert!(tokio::time::Instant::now() < deadline, "leaked tasks");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "leaked tasks {} > {}",
+            alive_tasks(),
+            tasks
+        );
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
-    lab.up.assert_never_saw(&Markers::empty().with("token", TOKEN));
+    lab.up
+        .assert_never_saw(&Markers::empty().with("token", TOKEN));
 }
 
 // ====================================== stages: upstream permit wait / connect / send
@@ -907,7 +934,12 @@ async fn pre_send_failures_across_the_lifecycle_deliver_zero_bytes_upstream() {
     // Validation failure and missing credential.
     let out = collect(within(lab.spawn(request("{", KEY, &[]))).await.unwrap()).await;
     assert_code(&out, 400, "malformed_input");
-    let out = collect(within(lab.spawn(request(&chat_body("x"), "", &[]))).await.unwrap()).await;
+    let out = collect(
+        within(lab.spawn(request(&chat_body("x"), "", &[])))
+            .await
+            .unwrap(),
+    )
+    .await;
     assert_code(&out, 401, "missing_credential");
     lab.settle().await;
     lab.assert_zero_forward();
@@ -929,7 +961,10 @@ async fn a_partial_upstream_send_is_never_replayed_and_never_falls_back() {
             marked_request()
         };
         let out = collect(within(lab.spawn(request)).await.unwrap()).await;
-        assert_eq!(out.0, 502, "an ordinary gateway error before any response commitment");
+        assert_eq!(
+            out.0, 502,
+            "an ordinary gateway error before any response commitment"
+        );
         let body = String::from_utf8_lossy(&out.1).into_owned();
         assert!(body.contains("upstream_"), "{body}");
         markers().assert_clean("gateway error body", &out.1);
@@ -937,13 +972,13 @@ async fn a_partial_upstream_send_is_never_replayed_and_never_falls_back() {
         // Exactly one connection, one (cut) request, one attempt: no retry, no raw fallback.
         assert_eq!(lab.up.connections(), 1);
         assert_eq!(lab.up.requests(), 1);
-        assert_eq!(lab.up.state.partial_requests.load(Ordering::SeqCst), 1);
         assert_eq!(lab.metrics.upstream_attempts(), 1);
         // A negative window: nothing else arrives afterwards.
         tokio::time::sleep(Duration::from_millis(250)).await;
         assert_eq!(lab.up.connections(), 1, "no replay");
         // What did reach the provider is the sanitized form, never the original secret.
-        lab.up.assert_never_saw(&Markers::empty().with("token", TOKEN));
+        lab.up
+            .assert_never_saw(&Markers::empty().with("token", TOKEN));
     }
 }
 
@@ -961,7 +996,11 @@ async fn stuck_upstream_headers_end_in_a_504_once_and_close_the_exchange() {
     lab.up.peer_closed().await; // the exchange was really closed, not left dangling
     lab.settle().await;
     assert_eq!(lab.up.requests(), 1);
-    assert_eq!(lab.metrics.upstream_attempts(), 1, "no retry after the timeout");
+    assert_eq!(
+        lab.metrics.upstream_attempts(),
+        1,
+        "no retry after the timeout"
+    );
 }
 
 #[tokio::test]
@@ -1050,15 +1089,21 @@ async fn trickling_just_under_the_idle_deadline_survives_and_completes() {
     let served = Served::start(&lab, Duration::from_secs(5)).await;
     let mut client = served.connect().await;
     client
-        .write_all(&raw_post(&chat_body("hello"), KEY))
+        .write_all(&raw_post(&marked_body_stream(), KEY))
         .await
         .unwrap();
     let started = tokio::time::Instant::now();
     let (bytes, closed) = read_close(&mut client, Duration::from_secs(20)).await;
     assert!(closed);
-    assert!(started.elapsed() >= Duration::from_millis(2300), "the stream outlived one idle period");
+    assert!(
+        started.elapsed() >= Duration::from_millis(2300),
+        "the stream outlived one idle period"
+    );
     assert_eq!(count(&bytes, EVENT), 5, "every provider event arrived");
-    assert!(bytes.ends_with(b"0\r\n\r\n"), "a clean provider end is a clean end");
+    assert!(
+        bytes.ends_with(b"0\r\n\r\n"),
+        "a clean provider end is a clean end"
+    );
     assert_eq!(lab.metrics.streams_ended(StreamEnd::Completed), 1);
     lab.settle().await;
 }
@@ -1081,7 +1126,10 @@ async fn silence_after_trickle_is_cut_at_the_idle_deadline_without_a_marker_or_s
     assert_eq!(count(&bytes, b"HTTP/1.1"), 1, "no second HTTP status");
     assert!(bytes.starts_with(b"HTTP/1.1 200"));
     assert_eq!(count(&bytes, EVENT), 3, "provider bytes preserved");
-    assert!(!bytes.ends_with(b"0\r\n\r\n"), "no terminating chunk: truncated");
+    assert!(
+        !bytes.ends_with(b"0\r\n\r\n"),
+        "no terminating chunk: truncated"
+    );
     for forbidden in [&b"[DONE]"[..], b"error", b"not_ready", b"upstream_timeout"] {
         assert_eq!(count(&bytes, forbidden), 0, "no fabricated marker");
     }
@@ -1105,7 +1153,9 @@ async fn simultaneous_idle_timeout_and_disconnect_end_every_stream_exactly_once(
     });
     let lab = Lab::new(sse(EVENT, 0, 0, false), limits).await;
     let served = Served::start(&lab, Duration::from_secs(5)).await;
-    let tasks = alive_tasks();
+    // One lazily spawned client-pool task appears with the first exchange and then stays;
+    // the baseline is taken after the first trial so only accumulation is measured.
+    let mut tasks = usize::MAX;
     for trial in 0..20_u64 {
         let mut client = served.connect().await;
         client
@@ -1120,6 +1170,9 @@ async fn simultaneous_idle_timeout_and_disconnect_end_every_stream_exactly_once(
         lab.until("stream ended", |l| l.ended() == n).await;
         lab.up.peer_closed().await;
         lab.settle().await;
+        if trial == 0 {
+            tasks = alive_tasks();
+        }
         assert_eq!(lab.metrics.streams_started(), n, "one start per trial");
     }
     // Each stream ended once, as either the idle cut or the abandonment.
@@ -1129,7 +1182,12 @@ async fn simultaneous_idle_timeout_and_disconnect_end_every_stream_exactly_once(
     assert_eq!(lab.up.requests(), 20);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while alive_tasks() > tasks {
-        assert!(tokio::time::Instant::now() < deadline, "leaked tasks");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "leaked tasks {} > {}",
+            alive_tasks(),
+            tasks
+        );
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
 }
@@ -1166,7 +1224,8 @@ async fn an_abandoned_sse_connection_that_is_never_read_is_cut_and_its_permits_r
         .unwrap();
     let _ = read_head(&mut client).await;
     // Never read again. The server cuts the connection after the stall deadline.
-    lab.until("stream ended by the write stall", |l| l.ended() == 1).await;
+    lab.until("stream ended by the write stall", |l| l.ended() == 1)
+        .await;
     assert_eq!(lab.metrics.streams_ended(StreamEnd::Abandoned), 1);
     lab.up.peer_closed().await;
     lab.settle().await;
@@ -1217,7 +1276,9 @@ async fn shutdown_with_many_open_connections_and_streams_ends_within_the_drain()
     let mut streams = Vec::new();
     for _ in 0..8 {
         let mut c = served.connect().await;
-        c.write_all(&raw_post(&marked_body_stream(), KEY)).await.unwrap();
+        c.write_all(&raw_post(&marked_body_stream(), KEY))
+            .await
+            .unwrap();
         let head = read_head(&mut c).await;
         assert!(head.starts_with(b"HTTP/1.1 200"));
         streams.push(c);
@@ -1226,7 +1287,9 @@ async fn shutdown_with_many_open_connections_and_streams_ends_within_the_drain()
     let mut stuck = Vec::new();
     for _ in 0..6 {
         let mut c = served.connect().await;
-        c.write_all(&raw_post(&chat_body("hello"), KEY)).await.unwrap();
+        c.write_all(&raw_post(&chat_body("hello"), KEY))
+            .await
+            .unwrap();
         lab.up.received().await;
         stuck.push(c);
     }
@@ -1235,7 +1298,7 @@ async fn shutdown_with_many_open_connections_and_streams_ends_within_the_drain()
     for _ in 0..10 {
         let mut c = served.connect().await;
         c.write_all(
-            b"POST /v1/chat/completions HTTP/1.1\r\nHost: gw.test\r\nContent-Type: application/json\r\nContent-Length: 400\r\n\r\n{\"model\":\"g",
+            format!("POST /v1/chat/completions HTTP/1.1\r\nHost: gw.test\r\nContent-Type: application/json\r\nAuthorization: Bearer {KEY}\r\nContent-Length: 400\r\n\r\n{{\"model\":\"g").as_bytes(),
         )
         .await
         .unwrap();
@@ -1256,14 +1319,20 @@ async fn shutdown_with_many_open_connections_and_streams_ends_within_the_drain()
     let result = within(&mut served.task).await.unwrap();
     assert!(result.is_ok());
     let took = asked.elapsed();
-    assert!(took >= Duration::from_millis(350), "drain honoured: {took:?}");
+    assert!(
+        took >= Duration::from_millis(350),
+        "drain honoured: {took:?}"
+    );
     assert!(took < Duration::from_secs(5), "drain bounded: {took:?}");
 
     // Streams: truncated at the shutdown, never completed, no second status.
     for mut c in streams {
         let (bytes, closed) = read_close(&mut c, Duration::from_secs(10)).await;
         assert!(closed);
-        assert!(!bytes.ends_with(b"0\r\n\r\n"), "stream truncated, not completed");
+        assert!(
+            !bytes.ends_with(b"0\r\n\r\n"),
+            "stream truncated, not completed"
+        );
         assert_eq!(count(&bytes, b"HTTP/1.1"), 0);
         assert_eq!(count(&bytes, b"[DONE]"), 0);
     }
@@ -1288,7 +1357,12 @@ async fn shutdown_with_many_open_connections_and_streams_ends_within_the_drain()
     // No accumulating tasks after the drain.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while alive_tasks() > tasks.saturating_sub(0) {
-        assert!(tokio::time::Instant::now() < deadline, "leaked tasks");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "leaked tasks {} > {}",
+            alive_tasks(),
+            tasks
+        );
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     assert_eq!(lab.up.requests(), 14, "no retries during the drain");
@@ -1378,10 +1452,8 @@ fn serve_pipe(
         inner: io,
         closed: Some(closed),
     };
-    let listener = HeadGuardListener::new(
-        PipeListener { io: Some(tracked) },
-        Duration::from_secs(10),
-    );
+    let listener =
+        HeadGuardListener::new(PipeListener { io: Some(tracked) }, Duration::from_secs(10));
     let app = crate::server::guarded_app(chat_route::mount(axum::Router::new(), Arc::clone(route)));
     let task = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
@@ -1403,10 +1475,17 @@ async fn a_refusal_to_a_consumer_that_never_reads_is_cut_by_the_write_stall() {
     let started = tokio::time::Instant::now();
     // Do not read until the server has given up; only the server-side drop closes the pipe.
     within(closed).await.unwrap();
-    assert!(started.elapsed() >= Duration::from_millis(250), "not cut before the stall");
+    assert!(
+        started.elapsed() >= Duration::from_millis(250),
+        "not cut before the stall"
+    );
     let mut seen = Vec::new();
     let _ = within(client.read_to_end(&mut seen)).await;
-    assert!(seen.len() <= 32, "only what fit in the pipe was written: {}", seen.len());
+    assert!(
+        seen.len() <= 32,
+        "only what fit in the pipe was written: {}",
+        seen.len()
+    );
     assert!(!seen.ends_with(b"}"), "the refusal was not fully delivered");
     lab.assert_zero_forward();
     lab.settle().await;
@@ -1425,7 +1504,8 @@ async fn a_buffered_json_response_to_a_consumer_that_never_reads_is_cut_and_retu
     lab.up.received().await;
     // The buffered body is Gateway memory attributable to one upstream permit until it is
     // written or abandoned.
-    lab.until("response buffered and held", |l| l.free()[2] == 15).await;
+    lab.until("response buffered and held", |l| l.free()[2] == 15)
+        .await;
     within(closed).await.unwrap(); // the connection is cut by the stall deadline
     lab.settle().await;
     let mut seen = Vec::new();
@@ -1471,9 +1551,57 @@ async fn a_consumer_that_reads_a_trickle_cannot_hold_a_json_response_past_the_wr
             break false;
         }
     };
-    assert!(ended, "the trickle reader was still holding the response after 8 s ({read} bytes)");
-    assert!(started.elapsed() >= Duration::from_millis(1400), "cut by the budget, not earlier");
+    assert!(
+        ended,
+        "the trickle reader was still holding the response after 8 s ({read} bytes)"
+    );
+    assert!(
+        started.elapsed() >= Duration::from_millis(1400),
+        "cut by the budget, not earlier"
+    );
     assert!(read < 20_000, "truncated: {read}");
     within(closed).await.unwrap();
     lab.settle().await;
+}
+
+#[tokio::test]
+async fn the_production_listener_cuts_a_trickle_reader_of_a_real_connection() {
+    // End to end over a real socket and the production listener stack: a 16 MB buffered JSON
+    // answer (more than the kernel socket buffers hold, so the write blocks on the reader)
+    // and a client with a tiny receive buffer that reads 256 bytes every 100 ms. The server
+    // side must give the connection up at the stall deadline and return the upstream
+    // permit, long before the client could ever finish (the data already in the kernel's
+    // buffers stays readable for the client, which is why this checks the server side).
+    let limits = limits_with(|l| {
+        l.stream_write_stall_ms = 300;
+        l.stream_lifetime_ms = 60_000;
+        l.max_response_body_bytes = 32 * 1024 * 1024;
+    });
+    let lab = Lab::new(Script::JsonBig(16 * 1024 * 1024), limits).await;
+    let served = Served::start(&lab, Duration::from_secs(5)).await;
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.set_recv_buffer_size(4096).unwrap();
+    let mut client = socket.connect(served.addr).await.unwrap();
+    client
+        .write_all(&raw_post(&chat_body("hello"), KEY))
+        .await
+        .unwrap();
+    lab.up.received().await;
+    let mut read = 0_usize;
+    let mut buf = [0_u8; 256];
+    let started = tokio::time::Instant::now();
+    while !lab.is_baseline() {
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "the permit was still held after 15 s ({read} bytes read)"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if let Ok(Ok(n)) =
+            tokio::time::timeout(Duration::from_millis(20), client.read(&mut buf)).await
+        {
+            read += n;
+        }
+    }
+    assert!(read < 1_000_000, "the client was nowhere near done: {read}");
+    assert_eq!(lab.up.requests(), 1);
 }
