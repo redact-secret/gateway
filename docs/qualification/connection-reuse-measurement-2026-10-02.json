@@ -5,7 +5,8 @@
  "date": "2026-10-02",
  "tools": [
   "examples/keepalive_cost.rs",
-  "examples/tls_handshake_cost.rs"
+  "examples/tls_handshake_cost.rs",
+  "examples/conn_cost.rs"
  ],
  "provisional": true,
  "provisional_reason": "host not quiet: one-minute load average above 25% of the 10 cores (2.5) for most or all of every run; see per-run loadavg. Figures are provisional.",
@@ -1668,5 +1669,692 @@
    ],
    "uptime_after": "21:12  up 21 days,  4:11, 86 users, load averages: 4.38 6.23 7.72"
   }
+ ],
+ "conn_cost_runs": [
+  [
+   {
+    "arch": "aarch64",
+    "build": "release",
+    "loadavg_before": "{ 6.31 6.72 7.25 }",
+    "note": "point-in-time samples from one run; not a bound, not tuned",
+    "os": "macos",
+    "record": "header",
+    "source_commit": "d85e07d",
+    "tool": "conn_cost",
+    "ulimit_n": "1048576"
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8112,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 64,
+    "fd_delta": 64,
+    "gateway_fds": 77,
+    "gateway_rss_kb": 8512,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 6400,
+    "rss_delta_kb": 400
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8112,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 64,
+    "fd_delta": 64,
+    "gateway_fds": 77,
+    "gateway_rss_kb": 12656,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 72704,
+    "rss_delta_kb": 4544
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8128,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 256,
+    "fd_delta": 256,
+    "gateway_fds": 269,
+    "gateway_rss_kb": 9520,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 5568,
+    "rss_delta_kb": 1392
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8112,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 256,
+    "fd_delta": 256,
+    "gateway_fds": 269,
+    "gateway_rss_kb": 25968,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 71424,
+    "rss_delta_kb": 17856
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8080,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 1024,
+    "fd_delta": 1024,
+    "gateway_fds": 1037,
+    "gateway_rss_kb": 13184,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 5104,
+    "rss_delta_kb": 5104
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8144,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 1024,
+    "fd_delta": 1024,
+    "gateway_fds": 1037,
+    "gateway_rss_kb": 78992,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 70848,
+    "rss_delta_kb": 70848
+   },
+   {
+    "loadavg_after": "{ 6.45 6.74 7.25 }",
+    "record": "footer"
+   }
+  ],
+  [
+   {
+    "arch": "aarch64",
+    "build": "release",
+    "loadavg_before": "{ 6.45 6.74 7.25 }",
+    "note": "point-in-time samples from one run; not a bound, not tuned",
+    "os": "macos",
+    "record": "header",
+    "source_commit": "d85e07d",
+    "tool": "conn_cost",
+    "ulimit_n": "1048576"
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8112,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 64,
+    "fd_delta": 64,
+    "gateway_fds": 77,
+    "gateway_rss_kb": 8528,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 6656,
+    "rss_delta_kb": 416
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8128,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 64,
+    "fd_delta": 64,
+    "gateway_fds": 77,
+    "gateway_rss_kb": 12688,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 72960,
+    "rss_delta_kb": 4560
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8112,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 256,
+    "fd_delta": 256,
+    "gateway_fds": 269,
+    "gateway_rss_kb": 9504,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 5568,
+    "rss_delta_kb": 1392
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8064,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 256,
+    "fd_delta": 256,
+    "gateway_fds": 269,
+    "gateway_rss_kb": 25984,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 71680,
+    "rss_delta_kb": 17920
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8112,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 1024,
+    "fd_delta": 1024,
+    "gateway_fds": 1037,
+    "gateway_rss_kb": 13168,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 5056,
+    "rss_delta_kb": 5056
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8128,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 1024,
+    "fd_delta": 1024,
+    "gateway_fds": 1037,
+    "gateway_rss_kb": 79040,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 70912,
+    "rss_delta_kb": 70912
+   },
+   {
+    "loadavg_after": "{ 6.45 6.74 7.25 }",
+    "record": "footer"
+   }
+  ],
+  [
+   {
+    "arch": "aarch64",
+    "build": "release",
+    "loadavg_before": "{ 6.45 6.74 7.25 }",
+    "note": "point-in-time samples from one run; not a bound, not tuned",
+    "os": "macos",
+    "record": "header",
+    "source_commit": "d85e07d",
+    "tool": "conn_cost",
+    "ulimit_n": "1048576"
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8128,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 64,
+    "fd_delta": 64,
+    "gateway_fds": 77,
+    "gateway_rss_kb": 8528,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 6400,
+    "rss_delta_kb": 400
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8128,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 64,
+    "fd_delta": 64,
+    "gateway_fds": 77,
+    "gateway_rss_kb": 12688,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 72960,
+    "rss_delta_kb": 4560
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8112,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 256,
+    "fd_delta": 256,
+    "gateway_fds": 269,
+    "gateway_rss_kb": 9488,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 5504,
+    "rss_delta_kb": 1376
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8128,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 256,
+    "fd_delta": 256,
+    "gateway_fds": 269,
+    "gateway_rss_kb": 26016,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 71552,
+    "rss_delta_kb": 17888
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8128,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 1024,
+    "fd_delta": 1024,
+    "gateway_fds": 1037,
+    "gateway_rss_kb": 13200,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 5072,
+    "rss_delta_kb": 5072
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8128,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 1024,
+    "fd_delta": 1024,
+    "gateway_fds": 1037,
+    "gateway_rss_kb": 79056,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 70928,
+    "rss_delta_kb": 70928
+   },
+   {
+    "loadavg_after": "{ 6.45 6.74 7.25 }",
+    "record": "footer"
+   }
+  ],
+  [
+   {
+    "arch": "aarch64",
+    "build": "release",
+    "loadavg_before": "{ 6.45 6.74 7.25 }",
+    "note": "point-in-time samples from one run; not a bound, not tuned",
+    "os": "macos",
+    "record": "header",
+    "source_commit": "d85e07d",
+    "tool": "conn_cost",
+    "ulimit_n": "1048576"
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8128,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 64,
+    "fd_delta": 64,
+    "gateway_fds": 77,
+    "gateway_rss_kb": 8528,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 6400,
+    "rss_delta_kb": 400
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8064,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 64,
+    "fd_delta": 64,
+    "gateway_fds": 77,
+    "gateway_rss_kb": 12688,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 73984,
+    "rss_delta_kb": 4624
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8096,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 256,
+    "fd_delta": 256,
+    "gateway_fds": 269,
+    "gateway_rss_kb": 9472,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 5504,
+    "rss_delta_kb": 1376
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8128,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 256,
+    "fd_delta": 256,
+    "gateway_fds": 269,
+    "gateway_rss_kb": 25984,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 71424,
+    "rss_delta_kb": 17856
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8064,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 1024,
+    "fd_delta": 1024,
+    "gateway_fds": 1037,
+    "gateway_rss_kb": 13184,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 5120,
+    "rss_delta_kb": 5120
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8128,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 1024,
+    "fd_delta": 1024,
+    "gateway_fds": 1037,
+    "gateway_rss_kb": 79024,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 70896,
+    "rss_delta_kb": 70896
+   },
+   {
+    "loadavg_after": "{ 6.45 6.74 7.25 }",
+    "record": "footer"
+   }
+  ],
+  [
+   {
+    "arch": "aarch64",
+    "build": "release",
+    "loadavg_before": "{ 6.45 6.74 7.25 }",
+    "note": "point-in-time samples from one run; not a bound, not tuned",
+    "os": "macos",
+    "record": "header",
+    "source_commit": "d85e07d",
+    "tool": "conn_cost",
+    "ulimit_n": "1048576"
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8096,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 64,
+    "fd_delta": 64,
+    "gateway_fds": 77,
+    "gateway_rss_kb": 8528,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 6912,
+    "rss_delta_kb": 432
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8096,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 64,
+    "fd_delta": 64,
+    "gateway_fds": 77,
+    "gateway_rss_kb": 12640,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 72704,
+    "rss_delta_kb": 4544
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8096,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 256,
+    "fd_delta": 256,
+    "gateway_fds": 269,
+    "gateway_rss_kb": 9488,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 5568,
+    "rss_delta_kb": 1392
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8064,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 256,
+    "fd_delta": 256,
+    "gateway_fds": 269,
+    "gateway_rss_kb": 25984,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 71680,
+    "rss_delta_kb": 17920
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8112,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 1024,
+    "fd_delta": 1024,
+    "gateway_fds": 1037,
+    "gateway_rss_kb": 13184,
+    "gateway_threads": 3,
+    "phase": "idle",
+    "rss_bytes_per_connection": 5072,
+    "rss_delta_kb": 5072
+   },
+   {
+    "connections": 0,
+    "fd_delta": 0,
+    "gateway_fds": 13,
+    "gateway_rss_kb": 8096,
+    "gateway_threads": 3,
+    "phase": "baseline",
+    "rss_bytes_per_connection": 0,
+    "rss_delta_kb": 0
+   },
+   {
+    "connections": 1024,
+    "fd_delta": 1024,
+    "gateway_fds": 1037,
+    "gateway_rss_kb": 78992,
+    "gateway_threads": 3,
+    "phase": "fat_head",
+    "rss_bytes_per_connection": 70896,
+    "rss_delta_kb": 70896
+   },
+   {
+    "loadavg_after": "{ 6.45 6.74 7.25 }",
+    "record": "footer"
+   }
+  ]
  ]
 }
