@@ -60,8 +60,12 @@ Requiring `store:false` makes the first-call experience stricter than the provid
 
 ## Implementation status
 
-Planned. Contract frozen by #82. Nothing in this ADR is implemented in code.
+Contract frozen by #82. Implemented so far: the #83 dispatch and the #84 text subset (see the implementation notes). The route, tools, structured output, metadata and relay are planned (#85 to #87).
 
 ## Implementation note (#83)
 
 The typed dispatch is in place: `protocol::RequestBody::{Chat, Responses}`, `protocol::Protocol::ResponsesText` (canonical route id `openai.responses`), and `boundary::ProtocolRoute` binding a protocol to its route at approval. `protocol::responses::ResponsesRequest` is a skeleton that carries only `model`, `instructions` and string `input` so the shared inspection path is exercised; the classifier (#84), remaining slots (#85), route and destination (#86) and relay (#87) are not implemented, and `POST /v1/responses` is still unrouted.
+
+## Implementation note (#84)
+
+`protocol::validate_with` now parses `Protocol::ResponsesText` bodies (one strict budgeted parse, then `protocol::responses::classify`). Implemented: `model`, required `store:false`, `instructions`, `input` as a string or text message items (`role` of `user`, `assistant`, `system`, `developer`; string content, or `input_text` parts for non-assistant roles; assistant `phase`), and the controls `stream`, `stream_options.include_obfuscation`, `temperature`, `top_p`, `max_output_tokens`. Every other field, item type and part type, including everything #85 owns (`function_call` and `function_call_output` items, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `metadata`), is `422 unsupported_input` until its parser lands. Slot order is `instructions`, then `input`; the outbound document is serialized fresh with `store:false` always written. `POST /v1/responses` is still unrouted (#86); the behavior is tested at the protocol and boundary layers (`tests/responses_text.rs`). Replaying conversation history is explicit re-submission of supported text items; there is no previous-response reference.

@@ -43,6 +43,7 @@ mod stop_user;
 mod tool_calls;
 mod tool_defs;
 
+pub(in crate::protocol) use controls::parse_model;
 pub use controls::{Params, StreamOptions};
 pub use messages::{Content, Message, Role};
 pub use metadata::{
@@ -68,7 +69,7 @@ pub const MAX_TOKEN_COUNT: i64 = 2_147_483_647;
 
 type Checked<T> = Result<T, ProtocolError>;
 
-const fn unsupported() -> ProtocolError {
+pub(in crate::protocol) const fn unsupported() -> ProtocolError {
     ProtocolError::Unsupported
 }
 
@@ -218,14 +219,14 @@ pub(super) fn classify(document: Json, limits: &RequestLimits) -> Checked<ChatRe
     })
 }
 
-fn boolean(value: Json) -> Checked<bool> {
+pub(in crate::protocol) fn boolean(value: Json) -> Checked<bool> {
     match value {
         Json::Bool(b) => Ok(b),
         _ => Err(unsupported()),
     }
 }
 
-fn string(value: Json) -> Checked<String> {
+pub(in crate::protocol) fn string(value: Json) -> Checked<String> {
     match value {
         Json::String(s) => Ok(s),
         _ => Err(unsupported()),
@@ -233,7 +234,7 @@ fn string(value: Json) -> Checked<String> {
 }
 
 /// A JSON number that is finite and within `lo..=hi` (integers are accepted).
-fn float_in(value: Json, lo: f64, hi: f64) -> Checked<Number> {
+pub(in crate::protocol) fn float_in(value: Json, lo: f64, hi: f64) -> Checked<Number> {
     let Json::Number(number) = value else {
         return Err(unsupported());
     };
@@ -245,7 +246,7 @@ fn float_in(value: Json, lo: f64, hi: f64) -> Checked<Number> {
 
 /// A JSON integer literal within `lo..=hi`. Floating literals (even `1.0`) and integers
 /// beyond `i64` are rejected.
-fn int_in(value: Json, lo: i64, hi: i64) -> Checked<Number> {
+pub(in crate::protocol) fn int_in(value: Json, lo: i64, hi: i64) -> Checked<Number> {
     let Json::Number(number) = value else {
         return Err(unsupported());
     };
