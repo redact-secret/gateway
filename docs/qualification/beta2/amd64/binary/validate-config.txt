@@ -1,0 +1,1 @@
+config valid (schema_version 1)

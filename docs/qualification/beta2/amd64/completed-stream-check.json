@@ -1,0 +1,14 @@
+{
+  "chat": {
+    "milliseconds": 1018.1608969999161,
+    "status": 200,
+    "terminal": true,
+    "truncated": false
+  },
+  "responses": {
+    "milliseconds": 1002.059460000055,
+    "status": 200,
+    "terminal": true,
+    "truncated": false
+  }
+}

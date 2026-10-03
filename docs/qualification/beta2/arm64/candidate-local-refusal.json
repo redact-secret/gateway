@@ -1,0 +1,8 @@
+{
+  "body": {
+    "error": {
+      "code": "local_auth_required"
+    }
+  },
+  "status": 401
+}

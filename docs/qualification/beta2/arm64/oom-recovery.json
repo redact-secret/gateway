@@ -1,0 +1,5 @@
+{
+  "direct_egress_denied": true,
+  "mediated_traffic_succeeded": true,
+  "ready": true
+}

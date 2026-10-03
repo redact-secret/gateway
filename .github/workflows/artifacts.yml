@@ -94,6 +94,67 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  linux-arm64:
+    name: Build and smoke (Linux ARM64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: Require native ARM64 Linux
+        run: |
+          test "$(uname -m)" = aarch64
+          rustc -vV | grep -q '^host: aarch64-unknown-linux-gnu$'
+      - name: Build once (aarch64-unknown-linux-gnu, --locked --release)
+        id: build
+        run: |
+          set -eu
+          cargo build --locked --release
+          mkdir -p stage
+          cp target/release/redact-secret-gateway stage/redact-secret-gateway-aarch64-unknown-linux-gnu
+          sha="$(sha256sum stage/redact-secret-gateway-aarch64-unknown-linux-gnu | cut -d ' ' -f 1)"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "candidate sha256: $sha"
+      - name: Smoke-test the candidate bytes on this platform
+        run: |
+          set -eu
+          mkdir -p stage/evidence/linux-arm64
+          rustc -vV > stage/evidence/linux-arm64/rustc.txt
+          sh scripts/smoke-binary.sh stage/redact-secret-gateway-aarch64-unknown-linux-gnu \
+            examples/config.openai.json stage/evidence/linux-arm64
+      - name: Confirm the tested file is unchanged
+        env:
+          WANT: ${{ steps.build.outputs.sha256 }}
+        run: |
+          set -eu
+          got="$(sha256sum stage/redact-secret-gateway-aarch64-unknown-linux-gnu | cut -d ' ' -f 1)"
+          test "$got" = "$WANT"
+      - name: Build and execute the ARM64 image from the tested bytes
+        env:
+          WANT: ${{ steps.build.outputs.sha256 }}
+        run: |
+          set -eu
+          sh scripts/build-image.sh stage/redact-secret-gateway-aarch64-unknown-linux-gnu redact-secret-gateway:candidate-arm64 linux/arm64
+          sh scripts/smoke-image.sh redact-secret-gateway:candidate-arm64 "$WANT" stage/evidence/image-linux-arm64 linux/arm64
+          docker save redact-secret-gateway:candidate-arm64 -o stage/redact-secret-gateway-candidate-image-linux-arm64.tar
+          jq -n --arg id "$(docker inspect --format '{{.Id}}' redact-secret-gateway:candidate-arm64)" --arg bin "$WANT" \
+            '{image_id:$id,platform:"linux/arm64",contains_binary_sha256:$bin,native_execution:true}' > stage/image-info-arm64.json
+      - name: Upload candidate binary and smoke evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stage-linux-arm64
+          path: stage/
+          if-no-files-found: error
+          retention-days: 7
+
   macos-arm64:
     name: Build and smoke (macOS ARM64)
     runs-on: macos-15
@@ -202,7 +263,7 @@ jobs:
 
   manifest:
     name: Candidate manifest and checksums
-    needs: [linux-x86_64, macos-arm64, image-linux-amd64]
+    needs: [linux-x86_64, linux-arm64, macos-arm64, image-linux-amd64]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -224,11 +285,23 @@ jobs:
         env:
           LINUX: ${{ needs.linux-x86_64.outputs.sha256 }}
           MACOS: ${{ needs.macos-arm64.outputs.sha256 }}
+          ARM64: ${{ needs.linux-arm64.outputs.sha256 }}
         run: |
           set -eu
           test "$(sha256sum bundle/redact-secret-gateway-x86_64-unknown-linux-gnu | cut -d ' ' -f 1)" = "$LINUX"
           test "$(sha256sum bundle/redact-secret-gateway-aarch64-apple-darwin | cut -d ' ' -f 1)" = "$MACOS"
           test "$(jq -r .contains_binary_sha256 bundle/image-info.json)" = "$LINUX"
+          test "$(sha256sum bundle/redact-secret-gateway-aarch64-unknown-linux-gnu | cut -d ' ' -f 1)" = "$ARM64"
+          test "$(jq -r .contains_binary_sha256 bundle/image-info-arm64.json)" = "$ARM64"
+      - name: Assemble the unpublished multi-platform OCI bundle (no registry)
+        run: |
+          set -eu
+          python3 scripts/test-oci-bundle.py
+          python3 scripts/oci-bundle.py oci-layout bundle/redact-secret-gateway-candidate-image-linux-amd64.tar bundle/redact-secret-gateway-candidate-image-linux-arm64.tar > bundle/oci-index-info.json
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y skopeo=1.13.3+ds1-2ubuntu0.24.04.3
+          python3 scripts/verify-oci-consumer.py oci-layout bundle/oci-index-info.json
+          tar -cf bundle/redact-secret-gateway-candidate-image-linux-multiarch.oci.tar -C oci-layout .
       - name: Generate manifest.json and SHA256SUMS
         run: sh scripts/candidate-manifest.sh bundle
       - name: Verify SHA256SUMS
@@ -247,7 +320,7 @@ jobs:
             and (.core.pin == "=0.1.0-beta.12")
             and (.sdk_pins.node.version | length) > 0
             and (.sdk_pins.python.version | length) > 0
-            and (.artifacts | length) == 3
+            and (.artifacts | length) == 6
             and (.signing == "not produced" and .sbom == "not produced" and .provenance == "not produced")' \
             bundle/manifest.json
       - name: Show the manifest and checksums

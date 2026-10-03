@@ -1,0 +1,189 @@
+{
+  "app_identity": {
+    "CapEff": "0000000000000000",
+    "Gid": "10001\t10001\t10001\t10001",
+    "NoNewPrivs": "1",
+    "Seccomp": "2",
+    "Uid": "10001\t10001\t10001\t10001",
+    "api_token_mounted": false,
+    "root_read_only": true
+  },
+  "gateway_runtime": {
+    "api_token_mounted": false,
+    "cgroup": {
+      "cpu.max": "100000 100000",
+      "cpu.stat": "usage_usec 92738\nuser_usec 66241\nsystem_usec 26496\nnice_usec 0\ncore_sched.force_idle_usec 0\nnr_periods 11\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "memory.current": "1085440",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.max": "268435456",
+      "memory.peak": "4186112"
+    },
+    "fd_count": 10,
+    "identity": {
+      "CapEff": "0000000000000000",
+      "Gid": "65532\t65532\t65532\t65532",
+      "NoNewPrivs": "1",
+      "Seccomp": "2",
+      "Uid": "65532\t65532\t65532\t65532"
+    },
+    "pid": 4717,
+    "root_read_only": true,
+    "rss_kib": 5780,
+    "threads": 2
+  },
+  "pod_status": {
+    "conditions": [
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-03T19:30:41Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "PodReadyToStartContainers"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-03T19:30:43Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "Initialized"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-03T19:30:44Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "Ready"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-03T19:30:44Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "ContainersReady"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-03T19:30:40Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "PodScheduled"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "containerID": "containerd://4e569531d3b86809651690584e230cf75ff176ceb5fc961992b3be8869c078ac",
+        "image": "docker.io/library/rsg-beta2-helper:local",
+        "imageID": "sha256:e3d1bf57b579e73da5380ece73f53f39c0cc955e9063684f1f5015c0e0be80fa",
+        "lastState": {},
+        "name": "app",
+        "ready": true,
+        "resources": {},
+        "restartCount": 0,
+        "started": true,
+        "state": {
+          "running": {
+            "startedAt": "2026-10-03T19:30:43Z"
+          }
+        },
+        "user": {
+          "linux": {
+            "gid": 10001,
+            "supplementalGroups": [
+              10001,
+              65532
+            ],
+            "uid": 10001
+          }
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/tools",
+            "name": "tools",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          },
+          {
+            "mountPath": "/run/secrets",
+            "name": "token",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          }
+        ]
+      }
+    ],
+    "hostIP": "172.18.0.2",
+    "hostIPs": [
+      {
+        "ip": "172.18.0.2"
+      }
+    ],
+    "initContainerStatuses": [
+      {
+        "allocatedResources": {
+          "cpu": "250m",
+          "memory": "128Mi"
+        },
+        "containerID": "containerd://c7489f4a088ac755f5fedad8477011e453a9bf1eefa97918de761e6db49020cd",
+        "image": "docker.io/library/rsg-beta2-candidate:local",
+        "imageID": "sha256:a60e830d82d8bb68a8e63d531c384edfa6e2ce00443bd2415bdb745e91cceabf",
+        "lastState": {},
+        "name": "gateway",
+        "ready": true,
+        "resources": {
+          "limits": {
+            "cpu": "1",
+            "memory": "256Mi"
+          },
+          "requests": {
+            "cpu": "250m",
+            "memory": "128Mi"
+          }
+        },
+        "restartCount": 0,
+        "started": true,
+        "state": {
+          "running": {
+            "startedAt": "2026-10-03T19:30:41Z"
+          }
+        },
+        "user": {
+          "linux": {
+            "gid": 65532,
+            "supplementalGroups": [
+              65532
+            ],
+            "uid": 65532
+          }
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/etc/gateway",
+            "name": "config",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          },
+          {
+            "mountPath": "/run/secrets",
+            "name": "token",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          }
+        ]
+      }
+    ],
+    "observedGeneration": 1,
+    "phase": "Running",
+    "podIP": "10.244.0.5",
+    "podIPs": [
+      {
+        "ip": "10.244.0.5"
+      }
+    ],
+    "qosClass": "Burstable",
+    "startTime": "2026-10-03T19:30:40Z"
+  },
+  "shipped_exec_probe_exits": {
+    "live": 0,
+    "ready": 0
+  }
+}

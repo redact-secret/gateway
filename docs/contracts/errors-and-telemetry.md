@@ -351,3 +351,16 @@ A provider that closes in the same instant as it sends the headers can be observ
 ## Status
 
 Implemented: health, local rejection, config diagnostics, the Chat Completions admission/parse/limit mappings, inspection rejections (#19), and ordinary JSON forwarding, relay, transport-error mappings, and stage timings (#20). SSE relay, the stream termination contract, and stream timings and counters (#21). SDK qualification of both with the pinned Node.js and Python SDKs, and the observed retry and truncation behavior below (#22).
+
+## Opt-in operations snapshot (#95)
+
+[ADR 0036](../decisions/0036-loopback-operations-export.md) implements
+`serve-observed` on numeric loopback only. `GET /metrics` has fixed JSON keys,
+ten stages (at most 252 noncumulative upper-bound/count pairs each), seven stream
+ends, two auth outcomes and shared admission occupancy. No request strings enter
+the snapshot. Query-bearing scrapes and HEAD reject; response size is at most
+128 KiB and scrapes share head/connection/write bounds. Scope is both endpoints
+aggregate, counters restart with the process and relaxed reads are not atomic
+across fields. Stream completion counts EOF/relay completion, not a provider
+semantic success. Proxy tokens do not grant operations access; only trusted
+loopback readers are in scope. Ordinary `serve` adds no metrics route.

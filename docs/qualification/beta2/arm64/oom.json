@@ -1,0 +1,10 @@
+{
+  "app_started_before_fault": true,
+  "cleanup_promised": false,
+  "configured_limit_bytes": 268435456,
+  "fault": "cgroup v2 hard limit lowered after readiness",
+  "gateway_exit": 137,
+  "injected_limit_bytes": 262144,
+  "kernel_oom_kill_delta": 2,
+  "reason": "OOMKilled"
+}

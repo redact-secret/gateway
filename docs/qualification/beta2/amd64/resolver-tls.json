@@ -1,0 +1,237 @@
+[
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "loopback-v4",
+    "host_answers": [
+      "127.0.0.1"
+    ],
+    "provider_delta": {
+      "accepted": 0,
+      "requests": 0,
+      "tls_failed": 0
+    },
+    "result": {
+      "code": "upstream_unavailable",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "system"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "loopback-v6",
+    "host_answers": [
+      "::1"
+    ],
+    "provider_delta": {
+      "accepted": 0,
+      "requests": 0,
+      "tls_failed": 0
+    },
+    "result": {
+      "code": "upstream_unavailable",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "system"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "private-10",
+    "host_answers": [
+      "10.77.0.1"
+    ],
+    "provider_delta": {
+      "accepted": 0,
+      "requests": 0,
+      "tls_failed": 0
+    },
+    "result": {
+      "code": "upstream_unavailable",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "system"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "private-172",
+    "host_answers": [
+      "172.31.0.1"
+    ],
+    "provider_delta": {
+      "accepted": 0,
+      "requests": 0,
+      "tls_failed": 0
+    },
+    "result": {
+      "code": "upstream_unavailable",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "system"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "private-192",
+    "host_answers": [
+      "192.168.77.1"
+    ],
+    "provider_delta": {
+      "accepted": 0,
+      "requests": 0,
+      "tls_failed": 0
+    },
+    "result": {
+      "code": "upstream_unavailable",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "system"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "metadata-v4",
+    "host_answers": [
+      "169.254.169.254"
+    ],
+    "provider_delta": {
+      "accepted": 0,
+      "requests": 0,
+      "tls_failed": 0
+    },
+    "result": {
+      "code": "upstream_unavailable",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "system"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "metadata-v6",
+    "host_answers": [
+      "fd00:ec2::254"
+    ],
+    "provider_delta": {
+      "accepted": 0,
+      "requests": 0,
+      "tls_failed": 0
+    },
+    "result": {
+      "code": "upstream_unavailable",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "system"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "cgnat",
+    "host_answers": [
+      "100.64.0.1"
+    ],
+    "provider_delta": {
+      "accepted": 0,
+      "requests": 0,
+      "tls_failed": 0
+    },
+    "result": {
+      "code": "upstream_unavailable",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "system"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "benchmark",
+    "host_answers": [
+      "198.18.0.1"
+    ],
+    "provider_delta": {
+      "accepted": 0,
+      "requests": 0,
+      "tls_failed": 0
+    },
+    "result": {
+      "code": "upstream_unavailable",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "system"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "mixed",
+    "host_answers": [
+      "93.184.216.34",
+      "10.77.0.1"
+    ],
+    "provider_delta": {
+      "accepted": 0,
+      "requests": 0,
+      "tls_failed": 0
+    },
+    "result": {
+      "code": "upstream_unavailable",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "system"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "public-untrusted",
+    "host_answers": [
+      "93.184.216.34"
+    ],
+    "provider_delta": {
+      "accepted": 1,
+      "requests": 0,
+      "tls_failed": 1
+    },
+    "result": {
+      "code": "upstream_tls_failure",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "system"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "public-operator-ca",
+    "host_answers": [
+      "93.184.216.34"
+    ],
+    "provider_delta": {
+      "accepted": 1,
+      "requests": 1,
+      "tls_failed": 0
+    },
+    "result": {
+      "code": null,
+      "relayed": true,
+      "status": 200
+    },
+    "trust": "operator"
+  },
+  {
+    "candidate_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "case": "hostname-mismatch",
+    "host_answers": [
+      "93.184.216.34"
+    ],
+    "provider_delta": {
+      "accepted": 1,
+      "requests": 0,
+      "tls_failed": 1
+    },
+    "result": {
+      "code": "upstream_tls_failure",
+      "relayed": false,
+      "status": 502
+    },
+    "trust": "wrong"
+  }
+]

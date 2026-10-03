@@ -1,0 +1,7 @@
+{
+  "architecture": "arm64",
+  "passed": true,
+  "publication": false,
+  "remaining": "reconcile archived datasets, measured versus provisional support and final candidate handoff to #15",
+  "scope": "native sidecar startup/security, UID egress, cgroup load, bounded soak and restart/replacement"
+}

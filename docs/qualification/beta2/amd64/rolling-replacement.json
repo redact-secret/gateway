@@ -1,0 +1,24 @@
+{
+  "active_json_and_sse": [
+    {
+      "aggregate_result": null,
+      "automatic_retry": false,
+      "client_exit": 137
+    },
+    {
+      "aggregate_result": {
+        "milliseconds": 3016.8788420000965,
+        "status": 504,
+        "terminal": false,
+        "truncated": false
+      },
+      "automatic_retry": false,
+      "client_exit": 0
+    }
+  ],
+  "direct_egress_denied": true,
+  "elapsed_seconds": 10.747537016000024,
+  "mediated_traffic_succeeded": true,
+  "new_uid": "cc01b4ec-de95-4081-99cd-b88df744d3fc",
+  "old_uid": "ec30c244-fccc-4002-98da-38572cc92264"
+}

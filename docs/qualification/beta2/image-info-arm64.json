@@ -1,0 +1,6 @@
+{
+  "image_id": "sha256:c8db03cf0f38dae7757f28721b3257981b7b18644d932580ecbfccae0e5b0a51",
+  "platform": "linux/arm64",
+  "contains_binary_sha256": "a7bc8903b2cd030522e9272fec1c00323d27cb2a084031f1aacaf5537e59c72e",
+  "native_execution": true
+}

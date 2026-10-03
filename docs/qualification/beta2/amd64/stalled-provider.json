@@ -1,0 +1,14 @@
+{
+  "json": {
+    "milliseconds": 3016.1407329999292,
+    "status": 504,
+    "terminal": false,
+    "truncated": false
+  },
+  "sse": {
+    "milliseconds": 3001.9420559999617,
+    "status": 200,
+    "terminal": false,
+    "truncated": true
+  }
+}

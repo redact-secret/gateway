@@ -35,12 +35,16 @@ fn temp_file(name: &str, content: &str) -> PathBuf {
 }
 
 fn http_get(addr: &str, path: &str) -> (u16, String) {
+    http_request(addr, path, "GET")
+}
+
+fn http_request(addr: &str, path: &str, method: &str) -> (u16, String) {
     let mut s = TcpStream::connect(addr).expect("connect");
     s.set_read_timeout(Some(Duration::from_secs(5)))
         .expect("timeout");
     write!(
         s,
-        "GET {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
     )
     .expect("write");
     let mut text = String::new();
@@ -60,8 +64,12 @@ struct Serving {
 }
 
 fn serve(path: &Path) -> Serving {
+    serve_mode(path, "serve")
+}
+
+fn serve_mode(path: &Path, mode: &str) -> Serving {
     let mut child = bin()
-        .arg("serve")
+        .arg(mode)
         .arg(path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -76,6 +84,123 @@ fn serve(path: &Path) -> Serving {
         .expect("handshake")
         .to_owned();
     Serving { child, addr, out }
+}
+
+#[test]
+fn operations_export_is_opt_in_loopback_and_has_no_request_labels() {
+    let path = temp_file(
+        "observed.json",
+        &config_with(r#""address": "127.0.0.1:0""#, ""),
+    );
+    let mut ordinary = serve(&path);
+    assert_eq!(http_get(&ordinary.addr, "/metrics").0, 404);
+    sigterm(&ordinary.child);
+    assert!(ordinary.child.wait().expect("ordinary stop").success());
+    let mut observed = serve_mode(&path, "serve-observed");
+    let rejected = http_get(&observed.addr, &format!("/metrics?{MARKER}"));
+    assert_eq!(rejected.0, 404);
+    assert!(!rejected.1.contains(MARKER));
+    assert!(
+        rejected
+            .1
+            .to_ascii_lowercase()
+            .contains("content-type: application/json")
+    );
+    assert!(
+        rejected
+            .1
+            .to_ascii_lowercase()
+            .contains("cache-control: no-store")
+    );
+    let (status, response) = http_get(&observed.addr, "/metrics");
+    assert_eq!(status, 200);
+    assert!(!response.contains(MARKER));
+    let (_, body) = response.split_once("\r\n\r\n").expect("HTTP body");
+    let snapshot: serde_json::Value = serde_json::from_str(body).expect("snapshot");
+    assert_eq!(snapshot["snapshot_version"], 1);
+    assert_eq!(snapshot["stages"].as_object().expect("stages").len(), 10);
+    assert_eq!(snapshot["upstream_attempts"], 0);
+    assert_eq!(snapshot["admission"]["waiting"], 0);
+    for method in ["HEAD", "POST"] {
+        let (status, response) = http_request(&observed.addr, "/metrics", method);
+        assert_eq!(status, 405);
+        let headers = response.to_ascii_lowercase();
+        assert!(headers.contains("allow: get"));
+        assert!(headers.contains("content-type: application/json"));
+        assert!(headers.contains("cache-control: no-store"));
+    }
+    assert!(
+        response
+            .to_ascii_lowercase()
+            .contains("cache-control: no-store")
+    );
+    sigterm(&observed.child);
+    assert!(observed.child.wait().expect("observed stop").success());
+}
+
+#[test]
+fn operations_export_refuses_non_loopback_even_with_valid_proxy_auth() {
+    let mut doc: serde_json::Value = serde_json::from_str(&config_with(
+        r#""address":"0.0.0.0:0","allow_non_loopback":true"#,
+        "",
+    ))
+    .expect("config");
+    doc["deployment"]["local_auth"] =
+        serde_json::json!({"mode":"token","token":{"env":"SYNTHETIC_OPERATIONS_TOKEN"}});
+    let path = temp_file("observed-nonloopback.json", &doc.to_string());
+    let out = bin()
+        .arg("serve-observed")
+        .arg(path)
+        .env(
+            "SYNTHETIC_OPERATIONS_TOKEN",
+            "SYNTHETIC-OPERATIONS-TOKEN-NOT-REAL-000000",
+        )
+        .output()
+        .expect("run");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr).trim(),
+        "error: transport_failure: bind"
+    );
+}
+
+#[test]
+fn exec_probe_has_one_total_deadline_against_a_trickling_response() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (started, received) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().expect("accept");
+        socket
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .expect("timeout");
+        let mut line = String::new();
+        BufReader::new(&mut socket)
+            .read_line(&mut line)
+            .expect("request line");
+        started.send(std::time::Instant::now()).expect("started");
+        for _ in 0..60 {
+            if socket.write_all(b"H").is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+    let child = bin()
+        .args(["probe", "ready", &addr.to_string()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("probe");
+    // Gate on the actual request: process loading is outside the probe IO deadline.
+    let start = received
+        .recv_timeout(Duration::from_secs(5))
+        .expect("request started");
+    let result = child.wait_with_output().expect("probe result");
+    assert_eq!(result.status.code(), Some(1));
+    assert!(start.elapsed() < Duration::from_secs(4));
+    worker.join().expect("worker");
 }
 
 fn sigterm(child: &Child) {
@@ -97,6 +222,78 @@ fn sample_config_validates() {
         String::from_utf8_lossy(&out.stdout).trim(),
         "config valid (schema_version 1)"
     );
+}
+
+#[test]
+fn exec_probe_uses_health_only_and_bounds_invalid_arguments() {
+    let path = temp_file(
+        "exec-probe.json",
+        &config_with(r#""address": "127.0.0.1:0""#, ""),
+    );
+    let mut serving = serve(&path);
+    for kind in ["live", "ready"] {
+        let result = bin()
+            .args(["probe", kind, &serving.addr])
+            .output()
+            .expect("probe");
+        assert!(result.status.success());
+        assert!(result.stdout.is_empty());
+        assert!(result.stderr.is_empty());
+    }
+    for args in [
+        ["probe", "ready", "192.0.2.1:8787"],
+        ["probe", "ready", "localhost:8787"],
+        ["probe", "ready", "127.0.0.1:0"],
+        ["probe", MARKER, "127.0.0.1:8787"],
+    ] {
+        let result = bin().args(args).output().expect("invalid probe");
+        assert_eq!(result.status.code(), Some(2));
+        assert!(!String::from_utf8_lossy(&result.stderr).contains(MARKER));
+    }
+    sigterm(&serving.child);
+    assert!(serving.child.wait().expect("wait").success());
+    assert_eq!(
+        bin()
+            .args(["probe", "ready", &serving.addr])
+            .status()
+            .expect("closed probe")
+            .code(),
+        Some(1)
+    );
+}
+
+#[test]
+fn exec_probe_refuses_false_health_responses_and_oversize() {
+    for response in [
+        "HTTP/1.1 200 OK\r\nContent-Length: 18\r\n\r\n{\"status\":\"wrong\"}".to_owned(),
+        "HTTP/1.1 503 Service Unavailable\r\n\r\n{\"status\":\"ready\"}".to_owned(),
+        format!("HTTP/1.1 200 OK\r\n\r\n{}", "x".repeat(1100)),
+    ] {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let worker = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept");
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .expect("timeout");
+            let mut request = String::new();
+            BufReader::new(&mut socket)
+                .read_line(&mut request)
+                .expect("request line");
+            assert_eq!(request, "GET /readyz HTTP/1.1\r\n");
+            let _ = socket.write_all(response.as_bytes());
+        });
+        let result = bin()
+            .args(["probe", "ready", &addr.to_string()])
+            .output()
+            .expect("probe");
+        assert_eq!(result.status.code(), Some(1));
+        assert_eq!(
+            String::from_utf8_lossy(&result.stderr).trim(),
+            "probe failed"
+        );
+        worker.join().expect("worker");
+    }
 }
 
 #[test]

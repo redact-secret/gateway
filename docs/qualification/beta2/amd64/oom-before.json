@@ -1,0 +1,23 @@
+{
+  "api_token_mounted": false,
+  "cgroup": {
+    "cpu.max": "100000 100000",
+    "cpu.stat": "usage_usec 122838\nuser_usec 89611\nsystem_usec 33226\nnice_usec 0\ncore_sched.force_idle_usec 0\nnr_periods 7\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+    "memory.current": "2600960",
+    "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+    "memory.max": "268435456",
+    "memory.peak": "5632000"
+  },
+  "fd_count": 10,
+  "identity": {
+    "CapEff": "0000000000000000",
+    "Gid": "65532\t65532\t65532\t65532",
+    "NoNewPrivs": "1",
+    "Seccomp": "2",
+    "Uid": "65532\t65532\t65532\t65532"
+  },
+  "pid": 13582,
+  "root_read_only": true,
+  "rss_kib": 6660,
+  "threads": 2
+}

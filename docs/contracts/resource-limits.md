@@ -188,3 +188,12 @@ Test limitations: one machine; load generator and fake provider on the same host
 ## Status
 
 Request body, parse, memory-composition, admission wait/queue, and body-deadline limits are implemented in #18 with the provisional values above and boundary tests (`tests/chat_admission.rs`, unit tests in `admission.rs`, `protocol/json.rs`, `chat_route.rs`). Upstream in-flight capacity, response bounds, upstream deadlines, and the shutdown deadline are implemented in #20 with the provisional values above and tests in `src/transport/tests/forward_tests.rs`. Stream capacity wiring and the stream limits are implemented in #21 with the provisional values above and tests in `src/transport/tests/stream_tests.rs` and `src/write_stall.rs`.
+
+## Opt-in telemetry/probe resource accounting (Beta 2)
+
+The observed loopback snapshot is capped at 128 KiB per connection, with no
+unbounded labels or background scrape jobs. At the provisional 256 connection
+cap, retained snapshot responses can add up to 32 MiB outside proxy body
+reservations; include this plus synchronous serialization scratch and exec probe
+process memory/CPU in cgroup tests. Do not equate admission memory units with
+RSS or the cgroup memory limit. All default capacities remain provisional.

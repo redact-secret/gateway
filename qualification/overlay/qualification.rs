@@ -54,12 +54,15 @@ pub fn run(args: &[OsString]) -> ExitCode {
             ExitCode::SUCCESS
         }
         [cmd, _] if cmd == "validate-config" => crate::cli::run(args),
-        [cmd, path, flag, addr] if cmd == "serve" && flag == "--fake-provider" => {
+        [cmd, _, _] if cmd == "probe" => crate::cli::run(args),
+        [cmd, path, flag, addr]
+            if (cmd == "serve" || cmd == "serve-observed") && flag == "--fake-provider" =>
+        {
             let Some(addr) = addr.to_str().and_then(|a| a.parse::<SocketAddr>().ok()) else {
                 eprintln!("{USAGE}");
                 return ExitCode::from(2);
             };
-            serve(Path::new(path), addr)
+            serve(Path::new(path), addr, cmd == "serve-observed")
         }
         _ => {
             // Never echo arguments: they could carry sensitive text.
@@ -74,7 +77,7 @@ fn fail(e: StartupError) -> ExitCode {
     ExitCode::FAILURE
 }
 
-fn serve(path: &Path, fake: SocketAddr) -> ExitCode {
+fn serve(path: &Path, fake: SocketAddr, observed: bool) -> ExitCode {
     if !fake.ip().is_loopback() {
         eprintln!("error: the fake provider must be a loopback address");
         return ExitCode::from(2);
@@ -90,13 +93,17 @@ fn serve(path: &Path, fake: SocketAddr) -> ExitCode {
         Ok(rt) => rt,
         Err(_) => return fail(StartupError::Init),
     };
-    match runtime.block_on(run_server(plan, fake)) {
+    match runtime.block_on(run_server(plan, fake, observed)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => fail(e),
     }
 }
 
-async fn run_server(plan: Arc<RuntimePlan>, fake: SocketAddr) -> Result<(), StartupError> {
+async fn run_server(
+    plan: Arc<RuntimePlan>,
+    fake: SocketAddr,
+    operations_enabled: bool,
+) -> Result<(), StartupError> {
     let signals = ShutdownSignal::install()?;
     let metrics = Arc::new(Metrics::new());
     let for_init = Arc::clone(&metrics);
@@ -104,8 +111,8 @@ async fn run_server(plan: Arc<RuntimePlan>, fake: SocketAddr) -> Result<(), Star
     let observed: Arc<Mutex<Option<Arc<Admission>>>> = Arc::new(Mutex::new(None));
     let observed_init = Arc::clone(&observed);
     let bound = server::bind(plan, move |plan| {
-        let upstream = Upstream::from_plan_with_fake_provider(plan, fake)
-            .map_err(|_| StartupError::Init)?;
+        let upstream =
+            Upstream::from_plan_with_fake_provider(plan, fake).map_err(|_| StartupError::Init)?;
         let services = Services::init_with(plan, upstream, for_init)?;
         if let Ok(mut slot) = observed_init.lock() {
             *slot = Some(services.admission());
@@ -134,7 +141,11 @@ async fn run_server(plan: Arc<RuntimePlan>, fake: SocketAddr) -> Result<(), Star
         }
     }
     let metrics_task = tokio::spawn(serve_metrics(metrics_listener, metrics, observed));
-    let result = bound.serve(signals.recv()).await;
+    let result = if operations_enabled {
+        bound.serve_observed(signals.recv()).await
+    } else {
+        bound.serve(signals.recv()).await
+    };
     metrics_task.abort();
     result?;
     println!("shutdown complete");

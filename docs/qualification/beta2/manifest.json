@@ -1,0 +1,233 @@
+{
+  "artifacts": [
+    {
+      "built_with": "rustc 1.98.1 (48a229cea 2026-09-01)",
+      "file": "redact-secret-gateway-x86_64-unknown-linux-gnu",
+      "format": "elf-gnu",
+      "kind": "binary",
+      "platform": "linux-x86_64",
+      "sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+      "size_bytes": 9759280
+    },
+    {
+      "built_with": "rustc 1.98.1 (48a229cea 2026-09-01)",
+      "file": "redact-secret-gateway-aarch64-unknown-linux-gnu",
+      "format": "elf-gnu",
+      "kind": "binary",
+      "platform": "linux-arm64",
+      "sha256": "a7bc8903b2cd030522e9272fec1c00323d27cb2a084031f1aacaf5537e59c72e",
+      "size_bytes": 8853424
+    },
+    {
+      "built_with": "rustc 1.98.1 (48a229cea 2026-09-01)",
+      "file": "redact-secret-gateway-aarch64-apple-darwin",
+      "format": "mach-o",
+      "kind": "binary",
+      "platform": "macos-arm64",
+      "sha256": "57ff0676bbcc57c8505fcfcb1a68886c4d5582c164bdf9bf0bdd7d88f85b8f0d",
+      "size_bytes": 7979712
+    },
+    {
+      "file": "redact-secret-gateway-candidate-image-linux-amd64.tar",
+      "format": "docker-save-tar",
+      "kind": "oci-image",
+      "platform": "linux-amd64",
+      "sha256": "f68a10ae45cd515588218c9325ef4ce127a0896eb03ffabb75352261e7daced3",
+      "size_bytes": 38955008
+    },
+    {
+      "file": "redact-secret-gateway-candidate-image-linux-arm64.tar",
+      "format": "docker-save-tar",
+      "kind": "oci-image",
+      "platform": "linux-arm64",
+      "sha256": "7f618127c447920f666288dca6886b0e49d7dd6157e70d366d6d1256aea95e42",
+      "size_bytes": 48616448
+    },
+    {
+      "file": "redact-secret-gateway-candidate-image-linux-multiarch.oci.tar",
+      "format": "oci-layout-tar",
+      "kind": "oci-image",
+      "platform": "linux-multiarch",
+      "sha256": "7588ce61afe33ab980e830ca90a09b46c496482ae75228522064d971224ba970",
+      "size_bytes": 84572160
+    }
+  ],
+  "build": {
+    "bit_reproducibility_verified": false,
+    "built_once_per_target": true,
+    "command": "cargo build --locked --release",
+    "features": "none"
+  },
+  "capabilities": {
+    "health": [
+      "GET /healthz",
+      "GET /readyz"
+    ],
+    "platforms": [
+      "linux-x86_64",
+      "macos-arm64",
+      "linux-arm64",
+      "linux-amd64 image",
+      "linux-arm64 image"
+    ],
+    "proxy": {
+      "endpoints": [
+        {
+          "endpoint": "POST /v1/chat/completions",
+          "subset": "OpenAI Chat Completions text only; unsupported fields and content forms are rejected"
+        },
+        {
+          "endpoint": "POST /v1/responses",
+          "subset": "OpenAI Responses stateless text subset only (store:false required; instructions, text input, function calls and outputs, function tools, text formats, metadata); stored or referenced state, hosted tools, images, files, audio, background processing, reasoning and unknown fields are rejected"
+        }
+      ],
+      "json_relay": true,
+      "response_redaction": false,
+      "sse_relay": true,
+      "upstream": "fixed https://api.openai.com (provider profile openai), set by deployment.upstream.provider"
+    }
+  },
+  "cargo_lock_sha256": "de330cc3f76646a724d5fe5da8de26739ac236c7a9402efffe6737859f7b7c34",
+  "config_files": [
+    {
+      "file": "examples/config.openai.json",
+      "sha256": "fea42297771dbe876770cd934cefc3941567f66e6dd14491d979da81ecc51312"
+    },
+    {
+      "file": "examples/config.skeleton.json",
+      "sha256": "4a6a131aa11bf5e90c92f3bba8cdb08e52b5fdd3947c43658428f5940a94d711"
+    },
+    {
+      "file": "container/config.container.json",
+      "sha256": "a6ac6698d776dc7aa4f2fd3879720f50542d4c61bf09c66fd43348b9ca8a3920"
+    },
+    {
+      "file": "examples/compose/compose.yaml",
+      "sha256": "903dd8d34be52bb5f4091abd3cc0ef79704fbb8fc4cdd1b9b167fd81b1993d37"
+    },
+    {
+      "file": "examples/kubernetes/config.json",
+      "sha256": "c0039b330b9f3c7823b56236a402b1da934296b41aa4638c64515ee989aeb328"
+    },
+    {
+      "file": "examples/kubernetes/sidecar.yaml",
+      "sha256": "3c21d1668a0b8ba2e9fe9d10b2edb6d1e5a74dc2799c806b3da858a27798b600"
+    }
+  ],
+  "config_schema_version": 1,
+  "core": {
+    "cargo_lock_checksum": "2cc951e8b991e9ec27343a872627f53a25b252cc8148cb4ec7160192ed9d856d",
+    "crate": "redact-secret",
+    "pin": "=0.1.0-beta.12",
+    "source": "registry+https://github.com/rust-lang/crates.io-index",
+    "version": "0.1.0-beta.12"
+  },
+  "description": "Unpublished candidate (gateway 0.1.0-alpha.0): health endpoints and the text-subset proxies for POST /v1/chat/completions and the stateless text subset of POST /v1/responses (JSON and SSE relay, provider responses not redacted) to the fixed OpenAI routes. Both endpoints are qualified only against a separate fake-upstream test build with the pinned SDKs; no real provider is involved and these exact artifacts accept no request in any test. Not published, not distributable.",
+  "distributable": false,
+  "distribution_blockers": [
+    "registry and image name are not selected; nothing is pushed",
+    "no signing, SBOM, or provenance is produced (planned for Beta 3)",
+    "numeric limits and capacity are provisional: no quiet-host performance measurement is recorded (ADR 0008)",
+    "Beta 2 deployment/resource qualification and Beta 3 final candidate gates must be reconciled; core completeness debts remain documented",
+    "the maintainer has not authorized publication (the qualification report lists the remaining items)"
+  ],
+  "gateway_version": "0.1.0-alpha.0",
+  "image": {
+    "base_image_pinned": "gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2",
+    "base_image_platform": "linux/amd64",
+    "contains_binary_sha256": "dd890ac5ab323bbf72e24124fc6cbeb8dcce3e4c6ea3be0ec5811da2aacb2a93",
+    "image_id": "sha256:40872fbb8917164d5aa09cf3b24c67c57ebd1d42042c8d3e5199d72de18d457e",
+    "local_ref": "redact-secret-gateway:candidate",
+    "registry_digest": "none (not pushed)",
+    "registry_name": "to be selected; not pushed",
+    "runtime_user": "65532:65532"
+  },
+  "image_arm64": {
+    "contains_binary_sha256": "a7bc8903b2cd030522e9272fec1c00323d27cb2a084031f1aacaf5537e59c72e",
+    "image_id": "sha256:c8db03cf0f38dae7757f28721b3257981b7b18644d932580ecbfccae0e5b0a51",
+    "native_execution": true,
+    "platform": "linux/arm64"
+  },
+  "manifest_version": 2,
+  "oci_index": {
+    "consumer_verification": {
+      "execution_scope": "independent OCI selection; native binary/image execution is recorded by the platform jobs",
+      "layout_reference": "candidate",
+      "package_version": "1.13.3+ds1-2ubuntu0.24.04.3",
+      "registry_access": false,
+      "selected": [
+        {
+          "architecture": "amd64",
+          "config_digest": "sha256:40872fbb8917164d5aa09cf3b24c67c57ebd1d42042c8d3e5199d72de18d457e",
+          "matched": true
+        },
+        {
+          "architecture": "arm64",
+          "config_digest": "sha256:c8db03cf0f38dae7757f28721b3257981b7b18644d932580ecbfccae0e5b0a51",
+          "matched": true
+        }
+      ],
+      "tool": "skopeo version 1.13.3"
+    },
+    "index": {
+      "digest": "sha256:6208b525be9c1acddafd966b9ef166fbff06cb56560297af6c1d6df3c1a0108f",
+      "mediaType": "application/vnd.oci.image.index.v1+json",
+      "size": 493
+    },
+    "layout_reference": "candidate",
+    "published": false,
+    "variants": [
+      {
+        "digest": "sha256:3d5d59acf23ff6ef34b1e66bb5bc28650a723256cf807b56f34b2cce90ed55a8",
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "platform": {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        "size": 3734
+      },
+      {
+        "digest": "sha256:e95a283c7150f6496a60bc2e86bd7fb14c7f61110c63cea3945d5cdf831f3e90",
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "platform": {
+          "architecture": "arm64",
+          "os": "linux"
+        },
+        "size": 3734
+      }
+    ]
+  },
+  "provenance": "not produced",
+  "qualification": {
+    "candidate_artifacts_run_documented_smoke_checks": true,
+    "sdk_suites": "run against a separate non-release test build, never against these artifacts; see docs/qualification/alpha1-qualification-report.md"
+  },
+  "sbom": "not produced",
+  "sdk_pins": {
+    "node": {
+      "examples_lockfile_sha256": "f6fe20b4a52ffc387acf6f4df217ee98f8427b80846d7965a6fba85c407a806f",
+      "lockfile_integrity": "npm package-lock.json integrity hashes; installed with npm ci --ignore-scripts",
+      "package": "openai (npm)",
+      "qualification_lockfile_sha256": "45e506a899f4afb46c84705e17ee5051a8e64e351d5606684182c68564cfea20",
+      "version": "7.27.0"
+    },
+    "python": {
+      "examples_requirements_sha256": "4626c25851944cc2d1bde8720927f958f2051f1a875b77b8647d900a68f2ffcf",
+      "lockfile_integrity": "requirements.txt with sha256 hashes; installed with pip --require-hashes --no-deps",
+      "package": "openai (PyPI)",
+      "qualification_requirements_sha256": "4626c25851944cc2d1bde8720927f958f2051f1a875b77b8647d900a68f2ffcf",
+      "version": "3.24.0"
+    }
+  },
+  "signing": "not produced",
+  "source": {
+    "ci_run_url": "https://github.com/redact-secret/gateway/actions/runs/37147921313",
+    "commit": "4ba7052214cb7a5139f4cda36d80e53f07ef451f",
+    "working_tree_dirty": false
+  },
+  "status": "alpha1-release-candidate-unpublished",
+  "toolchain": {
+    "rust_toolchain_toml_channel": "1.98.1",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)"
+  }
+}

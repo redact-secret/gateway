@@ -69,3 +69,15 @@ Before Alpha 1 distribution: private reporting flow verified (enabled, checked t
 Before stable 0.1.0: protocol coverage and unknown-field gates, core completion/failure evidence, header/SSRF tests, stream failure/cancellation/backpressure tests, measured aggregate resource bounds, pinned SDK compatibility, dependency/artifact review, and documented upgrade/rollback are complete. Beta 3 owns final reconciliation; unresolved blockers prevent stable promotion.
 
 No claimed third-party audit or penetration test exists unless its scope, reviewer, date, and evidence are explicitly recorded.
+
+## Beta 2 operations exposure
+
+Bounded `probe live|ready <loopback-address>` reads fixed health responses only,
+no config or credentials. Opt-in `serve-observed` refuses non-loopback before
+bind and exports fixed aggregate counters/histograms at `GET /metrics`; the
+proxy token grants no operations authority. Same-Pod/host loopback readers are
+trusted ([ADR 0036](docs/decisions/0036-loopback-operations-export.md)). The basic
+Kubernetes manifest needs no root/capabilities/API token and cannot enforce
+app egress; the optional operator UID enforcement profile has separate admin
+prerequisites and evidence gates ([ADR 0035](docs/decisions/0035-kubernetes-sidecar-trust-and-probes.md)).
+The [Beta 2 report](docs/qualification/beta2-qualification-report.md) records native amd64/arm64 Kubernetes 1.34/kindnet qualification, including denied app IPv4/IPv6 and loopback-provider connections through restarts. The optional owner profile permits app UID 10001 only TCP to loopback port 8787. Other UIDs/proxies, passed sockets, app privilege escalation and node/runtime compromise are outside its assumptions. No broader CNI/cluster or production capacity claim follows.
