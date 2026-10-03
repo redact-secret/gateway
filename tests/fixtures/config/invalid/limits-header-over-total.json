@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "deployment": {
+    "listener": {
+      "address": "127.0.0.1:8787"
+    },
+    "upstream": {
+      "provider": "openai"
+    }
+  },
+  "content": {
+    "profile": "full"
+  },
+  "resources": {
+    "capacity": {
+      "receipt": 8,
+      "memory_units": 65536,
+      "inspection": 2,
+      "upstream": 8,
+      "stream": 8
+    },
+    "limits": {
+      "upstream_header_ms": 2000,
+      "upstream_total_ms": 1999
+    }
+  }
+}

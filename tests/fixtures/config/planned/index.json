@@ -1,0 +1,57 @@
+{
+  "note": "Frozen design (#61, ADR 0030), not implemented (#63). Every file here is currently rejected as an unknown field at `deployment`; when #63 lands, move each into valid/ or invalid/ with its documented kind and location.",
+  "cases": [
+    {
+      "file": "local-auth-bad-env-name.json",
+      "intended": "invalid"
+    },
+    {
+      "file": "local-auth-disabled-explicit.json",
+      "intended": "valid"
+    },
+    {
+      "file": "local-auth-disabled-with-token.json",
+      "intended": "invalid"
+    },
+    {
+      "file": "local-auth-inline-value.json",
+      "intended": "invalid"
+    },
+    {
+      "file": "local-auth-non-loopback-with-token.json",
+      "intended": "valid"
+    },
+    {
+      "file": "local-auth-non-loopback-without-token.json",
+      "intended": "invalid"
+    },
+    {
+      "file": "local-auth-relative-file.json",
+      "intended": "invalid"
+    },
+    {
+      "file": "local-auth-token-both-sources.json",
+      "intended": "invalid"
+    },
+    {
+      "file": "local-auth-token-env.json",
+      "intended": "valid"
+    },
+    {
+      "file": "local-auth-token-file.json",
+      "intended": "valid"
+    },
+    {
+      "file": "local-auth-token-missing.json",
+      "intended": "invalid"
+    },
+    {
+      "file": "local-auth-token-neither-source.json",
+      "intended": "invalid"
+    },
+    {
+      "file": "local-auth-unknown-mode.json",
+      "intended": "invalid"
+    }
+  ]
+}

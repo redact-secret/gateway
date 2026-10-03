@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "deployment": {
+    "listener": {
+      "address": "127.0.0.1:8787"
+    },
+    "upstream": {
+      "provider": "openai"
+    }
+  },
+  "content": {
+    "profile": "full"
+  },
+  "resources": {
+    "capacity": {
+      "receipt": 8,
+      "memory_units": 65536,
+      "inspection": 2,
+      "upstream": 8,
+      "stream": 8
+    },
+    "limits": {
+      "max_body_bytes": 1048576,
+      "max_depth": 16,
+      "max_nodes": 16384,
+      "max_string_bytes": 524288,
+      "max_messages": 256,
+      "admission_wait_ms": 250,
+      "admission_queue": 16,
+      "body_deadline_ms": 10000,
+      "upstream_connect_ms": 5000,
+      "upstream_header_ms": 120000,
+      "upstream_total_ms": 300000,
+      "max_response_header_bytes": 32768,
+      "max_response_body_bytes": 4194304,
+      "shutdown_drain_ms": 10000,
+      "stream_idle_ms": 120000,
+      "stream_lifetime_ms": 900000,
+      "stream_write_stall_ms": 30000,
+      "stream_buffer_bytes": 1048576,
+      "max_connections": 256
+    }
+  }
+}

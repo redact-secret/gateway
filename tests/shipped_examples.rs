@@ -24,6 +24,7 @@ fn every_shipped_config_validates_with_the_real_binary() {
     for file in [
         "examples/config.skeleton.json",
         "examples/config.openai.json",
+        "examples/config.reference.json",
         "container/config.container.json",
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_redact-secret-gateway"))
