@@ -31,6 +31,9 @@ GATEWAYS = {
     "no_upstream": _env("GATEWAY_NOUPSTREAM"),
     "dead_provider": _env("GATEWAY_DEADPROVIDER"),
     "overload": _env("GATEWAY_OVERLOAD"),
+    "policy_forward": _env("GATEWAY_POLICYFORWARD"),
+    "policy_common": _env("GATEWAY_POLICYCOMMON"),
+    "concurrent": _env("GATEWAY_CONCURRENT"),
 }
 _ADMIN = _env("QUAL_ADMIN")
 DIRECT_PROVIDER = _env("QUAL_PROVIDER")  # control path that bypasses the gateway
@@ -91,7 +94,7 @@ def auth_sha() -> str:
 
 
 def leaks(text: str) -> list[str]:
-    return [m for m in (SYN["secret_prefix"], "ghp_SYNTH", SYN["prompt_marker_prefix"], SYN["api_key"]) if m in text]
+    return [m for m in (SYN["secret_prefix"], "ghp_SYNTH", SYN["prompt_marker_prefix"], SYN["api_key"], "hunter2xyz", "U1lOVEhFVElDUkVWT0tFRFNZTlRIRVRJQ0tFWQ") if m in text]
 
 
 def assert_nothing_upstream(test: Any, why: str) -> None:

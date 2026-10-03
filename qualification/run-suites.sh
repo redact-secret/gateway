@@ -4,8 +4,8 @@
 #   sh qualification/run-suites.sh [--binary PATH] [--evidence DIR] [--suites node,python,examples|none]
 #   QUAL_COMMAND='shell line' runs one extra command against the same stack.
 #
-# Starts the scripted fake provider and five gateway instances of the qualification binary
-# (standard, tight limits, no upstream, dead provider, overload), runs the pinned-SDK suites against
+# Starts the scripted fake provider and eight gateway instances of the qualification binary
+# (standard, tight limits, no upstream, dead provider, overload, and the Alpha 2 policy and concurrency instances), runs the pinned-SDK suites against
 # them, stops everything gracefully, and scans the captured gateway stdout/stderr for any
 # synthetic marker. Everything is synthetic and loopback only; no secret, key, or network
 # access beyond 127.0.0.1 is used. Exit 0 only if every suite and every check passed.
@@ -30,6 +30,7 @@ evidence="$(cd "$evidence" && pwd)"
 rm -f "$evidence"/gateway-*.out "$evidence"/gateway-*.err "$evidence"/fake-provider.out
 
 pids=""
+gateway_names="standard tight noupstream deadprovider overload policyforward policycommon concurrent"
 cleanup() {
   for p in $pids; do kill "$p" 2>/dev/null || true; done
 }
@@ -65,6 +66,10 @@ start_gateway tight tight "$provider_port"
 start_gateway noupstream noupstream "$provider_port"
 start_gateway deadprovider standard 1 # nothing listens on port 1: provider unreachable
 start_gateway overload overload "$provider_port" # one upstream and one stream permit
+# Alpha 2 policy instances (#57): same pinned core, different static content policy.
+start_gateway policyforward policy-forward "$provider_port" # full profile, on_warn = forward
+start_gateway policycommon policy-common "$provider_port" # common profile (narrower detector set)
+start_gateway concurrent concurrent "$provider_port" # wider capacity for the isolation runs
 
 addr_of() { sed -n 's/^listening //p' "$evidence/gateway-$1.out" | head -n 1; }
 metrics_of() { sed -n 's/^qualification-metrics //p' "$evidence/gateway-$1.out" | head -n 1; }
@@ -76,12 +81,16 @@ GATEWAY_TIGHT="http://$(addr_of tight)"
 GATEWAY_NOUPSTREAM="http://$(addr_of noupstream)"
 GATEWAY_DEADPROVIDER="http://$(addr_of deadprovider)"
 GATEWAY_OVERLOAD="http://$(addr_of overload)"
+GATEWAY_POLICYFORWARD="http://$(addr_of policyforward)"
+GATEWAY_POLICYCOMMON="http://$(addr_of policycommon)"
+GATEWAY_CONCURRENT="http://$(addr_of concurrent)"
 QUAL_METRICS_STANDARD="http://$(metrics_of standard)"
 QUAL_SYNTHETIC="$here/synthetic.json"
 QUAL_BINARY="$bin"
 case "$bin" in */release/*) QUAL_PROFILE=release ;; *) QUAL_PROFILE=debug ;; esac
 QUAL_EVIDENCE="$evidence"
 export QUAL_BINARY QUAL_PROFILE QUAL_ADMIN QUAL_PROVIDER GATEWAY_STANDARD GATEWAY_TIGHT GATEWAY_NOUPSTREAM GATEWAY_DEADPROVIDER GATEWAY_OVERLOAD \
+  GATEWAY_POLICYFORWARD GATEWAY_POLICYCOMMON GATEWAY_CONCURRENT \
   QUAL_METRICS_STANDARD QUAL_SYNTHETIC QUAL_EVIDENCE
 
 # 3. Suites.
@@ -113,7 +122,7 @@ if [ -n "$command_line" ]; then
 fi
 
 # 4. Graceful stop: each gateway must exit 0 and report a clean shutdown.
-for name in standard tight noupstream deadprovider overload; do
+for name in $gateway_names; do
   eval "pid=\$gw_${name}_pid"
   kill -TERM "$pid" 2>/dev/null || true
   code=0
@@ -141,11 +150,12 @@ for f in "$evidence"/gateway-*.out "$evidence"/gateway-*.err; do
 done
 rm -f "$patterns"
 [ "$leaks" -eq 0 ] || status=1
-for name in standard tight noupstream deadprovider overload; do
+for name in $gateway_names; do
   grep -q 'QUALIFICATION BUILD' "$evidence/gateway-$name.err" || { echo "missing banner for $name" >&2; status=1; }
 done
 bytes="$(cat "$evidence"/gateway-*.out "$evidence"/gateway-*.err | wc -c | tr -d ' ')"
-echo "gateway output scanned: $bytes bytes in 10 files, markers found: $leaks"
+files="$(ls "$evidence"/gateway-*.out "$evidence"/gateway-*.err | wc -l | tr -d ' ')"
+echo "gateway output scanned: $bytes bytes in $files files, markers found: $leaks"
 
 if [ "$status" -eq 0 ]; then echo "qualification suites passed"; else echo "qualification suites FAILED" >&2; fi
 exit "$status"

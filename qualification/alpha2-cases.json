@@ -1,0 +1,4063 @@
+{
+ "_comment": "Synthetic Alpha 2 qualification cases (#57). {{Sn}} is the n-th synthetic secret, {{ESn}} its \\u-escaped form, {{PEM}} a synthetic revoked-looking private key, {{WARN}} a synthetic Warn-class text. Shared by the Node and Python harnesses.",
+ "tokens": {
+  "PEM": "-----BEGIN PRIVATE KEY-----\nU1lOVEhFVElDUkVWT0tFRFNZTlRIRVRJQ0tFWQ==\n-----END PRIVATE KEY-----",
+  "WARN": "password=hunter2xyz"
+ },
+ "cases": [
+  {
+   "id": "roles-string-content",
+   "group": "redact-text",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "system",
+      "content": "policy {{S1}} 끝"
+     },
+     {
+      "role": "developer",
+      "content": "dev {{S2}}"
+     },
+     {
+      "role": "user",
+      "content": "내 토큰 {{S3}} thanks"
+     },
+     {
+      "role": "assistant",
+      "content": "earlier {{S4}}"
+     },
+     {
+      "role": "user",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1,
+     "S2": 2,
+     "S3": 3,
+     "S4": 4
+    }
+   }
+  },
+  {
+   "id": "parts-content",
+   "group": "redact-text",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "a {{S1}}"
+       },
+       {
+        "type": "text",
+        "text": "b 한국어 {{S2}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "c {{S3}}"
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": "d"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1,
+     "S2": 2,
+     "S3": 3
+    }
+   }
+  },
+  {
+   "id": "stop-string",
+   "group": "redact-text",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "stop": "end-{{S1}}"
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1
+    }
+   }
+  },
+  {
+   "id": "stop-array",
+   "group": "redact-text",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "stop": [
+     "x-{{S1}}",
+     "plain",
+     "y-{{S2}}"
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1,
+     "S2": 2
+    }
+   }
+  },
+  {
+   "id": "user-field",
+   "group": "redact-text",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "user": "u-{{S1}}"
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1
+    }
+   }
+  },
+  {
+   "id": "controls-preserved",
+   "group": "redact-text",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "temperature": 0.2,
+    "top_p": 0.9,
+    "max_completion_tokens": 64,
+    "presence_penalty": 0.1,
+    "frequency_penalty": -0.1,
+    "seed": 7,
+    "n": 1,
+    "stop": [
+     "END"
+    ],
+    "user": "u",
+    "response_format": {
+     "type": "json_object"
+    }
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {}
+   }
+  },
+  {
+   "id": "tool-args-leaves-and-result",
+   "group": "redact-tools-history",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "weather?"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "get_weather",
+         "arguments": "{\"city\":\"{{S1}}\",\"opts\":{\"tags\":[\"a\",\"{{S2}}\"],\"n\":3,\"ok\":true,\"none\":null},\"note\":\"서울 {{S3}}\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "sunny {{S4}}"
+     },
+     {
+      "role": "user",
+      "content": "thanks"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1,
+     "S2": 2,
+     "S3": 3,
+     "S4": 4
+    }
+   },
+   "exact_arguments": [
+    "{\"city\":\"<SECRET_1>\",\"opts\":{\"tags\":[\"a\",\"<SECRET_2>\"],\"n\":3,\"ok\":true,\"none\":null},\"note\":\"서울 <SECRET_3>\"}"
+   ]
+  },
+  {
+   "id": "tool-result-parts",
+   "group": "redact-tools-history",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "lookup",
+         "arguments": "{\"q\":\"x\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": [
+       {
+        "type": "text",
+        "text": "p1 {{S1}}"
+       },
+       {
+        "type": "text",
+        "text": "p2 {{S2}}"
+       }
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1,
+     "S2": 2
+    }
+   }
+  },
+  {
+   "id": "parallel-calls-numbering",
+   "group": "redact-tools-history",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "two cities"
+     },
+     {
+      "role": "assistant",
+      "content": "calling both {{S5}}",
+      "tool_calls": [
+       {
+        "id": "call_a",
+        "type": "function",
+        "function": {
+         "name": "get_weather",
+         "arguments": "{\"city\":\"Seoul\",\"key\":\"{{S1}}\"}"
+        }
+       },
+       {
+        "id": "call_b",
+        "type": "function",
+        "function": {
+         "name": "get_weather",
+         "arguments": "{\"city\":\"부산\",\"key\":\"{{S2}}\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_a",
+      "content": "a {{S3}}"
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_b",
+      "content": "b {{S4}}"
+     },
+     {
+      "role": "user",
+      "content": "summarize"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S5": 1,
+     "S1": 2,
+     "S2": 3,
+     "S3": 4,
+     "S4": 5
+    }
+   },
+   "note": "content before tool_calls: its secret is numbered first"
+  },
+  {
+   "id": "two-rounds-multi-turn",
+   "group": "redact-tools-history",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "start"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "step_one",
+         "arguments": "{\"v\":\"{{S1}}\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "r1 {{S2}}"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_2",
+        "type": "function",
+        "function": {
+         "name": "step_two",
+         "arguments": "{\"v\":\"{{S3}}\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_2",
+      "content": "r2"
+     },
+     {
+      "role": "user",
+      "content": "done {{S4}}"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1,
+     "S2": 2,
+     "S3": 3,
+     "S4": 4
+    }
+   }
+  },
+  {
+   "id": "tool-args-empty-object-and-escapes",
+   "group": "redact-tools-history",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "noargs",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "call_2",
+        "type": "function",
+        "function": {
+         "name": "esc",
+         "arguments": "{\"q\":\"line1\\nline2 \\u0041 \\ud83d\\ude42 \\\"quoted\\\" {{S1}}\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_2",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1
+    }
+   }
+  },
+  {
+   "id": "numbers-canonicalized",
+   "group": "redact-tools-history",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "nums",
+         "arguments": "{\"n\":1e3,\"i\":42,\"f\":0.5,\"neg\":-7,\"big\":9007199254740993}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {}
+   },
+   "note": "1e3 is written 1000.0 (contract: numbers canonicalized)",
+   "exact_arguments": [
+    "{\"n\":1000.0,\"i\":42,\"f\":0.5,\"neg\":-7,\"big\":9007199254740993}"
+   ]
+  },
+  {
+   "id": "tool-defs-descriptions-and-titles",
+   "group": "redact-tool-defs",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f1",
+       "description": "d {{S1}}",
+       "parameters": {
+        "type": "object",
+        "title": "T {{S2}}",
+        "description": "p {{S3}}",
+        "properties": {
+         "city": {
+          "type": "string",
+          "title": "City {{S4}}",
+          "description": "c {{S5}}"
+         },
+         "unit": {
+          "type": "string",
+          "enum": [
+           "c",
+           "f"
+          ]
+         }
+        },
+        "required": [
+         "city"
+        ],
+        "additionalProperties": false
+       },
+       "strict": true
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "f2",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "x": {
+          "anyOf": [
+           {
+            "type": "string",
+            "title": "S {{S6}}"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         }
+        },
+        "required": [
+         "x"
+        ]
+       }
+      }
+     }
+    ],
+    "tool_choice": {
+     "type": "function",
+     "function": {
+      "name": "f1"
+     }
+    },
+    "parallel_tool_calls": false
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1,
+     "S2": 2,
+     "S3": 3,
+     "S4": 4,
+     "S5": 5,
+     "S6": 6
+    }
+   }
+  },
+  {
+   "id": "tool-choice-and-parallel-forms",
+   "group": "redact-tool-defs",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "city": {
+          "type": "string",
+          "description": "City name."
+         },
+         "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7
+         },
+         "unit": {
+          "type": "string",
+          "enum": [
+           "celsius",
+           "fahrenheit"
+          ]
+         }
+        },
+        "required": [
+         "city",
+         "days",
+         "unit"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    ],
+    "tool_choice": "required",
+    "parallel_tool_calls": true
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {}
+   }
+  },
+  {
+   "id": "tool-def-no-parameters",
+   "group": "redact-tool-defs",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "ping",
+       "description": "ping {{S1}}"
+      }
+     }
+    ],
+    "tool_choice": "none"
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1
+    }
+   }
+  },
+  {
+   "id": "schema-all-keywords-no-secret",
+   "group": "redact-tool-defs",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "kw",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "s": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 9
+         },
+         "n": {
+          "type": [
+           "number",
+           "null"
+          ],
+          "minimum": -1.5,
+          "maximum": 10
+         },
+         "a": {
+          "type": "array",
+          "items": {
+           "type": "integer"
+          },
+          "minItems": 0,
+          "maxItems": 3
+         },
+         "e": {
+          "enum": [
+           "a",
+           "서울",
+           1,
+           true,
+           null
+          ]
+         },
+         "c": {
+          "const": "fixed"
+         },
+         "o": {
+          "anyOf": [
+           {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+           },
+           {
+            "type": "boolean"
+           }
+          ]
+         }
+        },
+        "required": [
+         "s"
+        ],
+        "additionalProperties": false
+       },
+       "strict": false
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {}
+   }
+  },
+  {
+   "id": "response-format-json-schema",
+   "group": "redact-tool-defs",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "response_format": {
+     "type": "json_schema",
+     "json_schema": {
+      "name": "ans",
+      "description": "r {{S1}}",
+      "strict": true,
+      "schema": {
+       "type": "object",
+       "title": "A {{S2}}",
+       "properties": {
+        "a": {
+         "type": "string",
+         "description": "x {{S3}}"
+        },
+        "e": {
+         "anyOf": [
+          {
+           "type": "string",
+           "title": "t {{S4}}"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        }
+       },
+       "required": [
+        "a",
+        "e"
+       ],
+       "additionalProperties": false
+      }
+     }
+    }
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1,
+     "S2": 2,
+     "S3": 3,
+     "S4": 4
+    }
+   }
+  },
+  {
+   "id": "metadata-values",
+   "group": "redact-tool-defs",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "metadata": {
+     "trace_id": "abc",
+     "note": "n {{S1}}",
+     "kr": "한국어 {{S2}}"
+    }
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1,
+     "S2": 2
+    }
+   }
+  },
+  {
+   "id": "metadata-empty-and-plain",
+   "group": "redact-tool-defs",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "metadata": {}
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {}
+   }
+  },
+  {
+   "id": "metadata-sixteen-entries",
+   "group": "redact-tool-defs",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "metadata": {
+     "k00": "v0",
+     "k01": "v1",
+     "k02": "v2",
+     "k03": "v3",
+     "k04": "v4",
+     "k05": "v5",
+     "k06": "v6",
+     "k07": "v7",
+     "k08": "v8",
+     "k09": "v9",
+     "k10": "v10",
+     "k11": "v11",
+     "k12": "v12",
+     "k13": "v13",
+     "k14": "v14",
+     "k15": "v15"
+    }
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {}
+   }
+  },
+  {
+   "id": "every-text-class-in-traversal-order",
+   "group": "redact-everything",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "system",
+      "content": "sys {{S1}}"
+     },
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "lookup",
+         "arguments": "{\"q\":\"{{S2}}\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "res {{S3}}"
+     },
+     {
+      "role": "user",
+      "content": "ask {{S4}}"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "lookup",
+       "description": "tool {{S5}}",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "q": {
+          "type": "string",
+          "description": "q {{S6}}"
+         }
+        },
+        "required": [
+         "q"
+        ]
+       }
+      }
+     }
+    ],
+    "tool_choice": "auto",
+    "parallel_tool_calls": true,
+    "stop": [
+     "s-{{S7}}"
+    ],
+    "user": "u-{{S8}}",
+    "metadata": {
+     "team": "t {{S9}}"
+    },
+    "response_format": {
+     "type": "json_schema",
+     "json_schema": {
+      "name": "ans",
+      "description": "r {{S10}}",
+      "strict": true,
+      "schema": {
+       "type": "object",
+       "properties": {
+        "a": {
+         "type": "string",
+         "description": "a {{S11}}"
+        }
+       },
+       "required": [
+        "a"
+       ],
+       "additionalProperties": false
+      }
+     }
+    }
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1,
+     "S2": 2,
+     "S3": 3,
+     "S4": 4,
+     "S5": 5,
+     "S6": 6,
+     "S7": 7,
+     "S8": 8,
+     "S9": 9,
+     "S10": 10,
+     "S11": 11
+    }
+   },
+   "note": "messages, tools, stop, user, metadata, response_format: the documented traversal order"
+  },
+  {
+   "id": "no-secret-passthrough-all-shapes",
+   "group": "redact-everything",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "system",
+      "content": "s"
+     },
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "lookup",
+         "arguments": "{\"q\":\"x\",\"n\":[1,2,{\"k\":\"v\"}]}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "r"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "lookup",
+       "description": "t",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "city": {
+          "type": "string",
+          "description": "City name."
+         },
+         "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7
+         },
+         "unit": {
+          "type": "string",
+          "enum": [
+           "celsius",
+           "fahrenheit"
+          ]
+         }
+        },
+        "required": [
+         "city",
+         "days",
+         "unit"
+        ],
+        "additionalProperties": false,
+        "description": "d"
+       },
+       "strict": true
+      }
+     }
+    ],
+    "tool_choice": "auto",
+    "parallel_tool_calls": false,
+    "metadata": {
+     "a": "b"
+    },
+    "response_format": {
+     "type": "json_object"
+    }
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {}
+   }
+  },
+  {
+   "id": "unicode-adjacent-secret",
+   "group": "unicode-escaping",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "비밀🙂 {{S1}} 끝 ‍é🇰🇷"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1
+    }
+   }
+  },
+  {
+   "id": "quotes-backslash-newline",
+   "group": "unicode-escaping",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "say \"hi\" \\ path\\to\nline2\ttab {{S1}}"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1
+    }
+   }
+  },
+  {
+   "id": "raw-escaped-secret-in-content",
+   "group": "unicode-escaping",
+   "raw": "{\"model\":\"qual-json-ok\",\"messages\":[{\"role\":\"user\",\"content\":\"tok {{ES1}} end\"}]}",
+   "expect": {
+    "kind": "forward",
+    "body": {
+     "model": "qual-json-ok",
+     "messages": [
+      {
+       "role": "user",
+       "content": "tok <SECRET_1> end"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "raw-escaped-secret-in-arguments",
+   "group": "unicode-escaping",
+   "raw": "{\"model\":\"qual-json-ok\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"},{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{\\\"k\\\":\\\"{{ES1}}\\\"}\"}}]},{\"role\":\"tool\",\"tool_call_id\":\"call_1\",\"content\":\"ok\"}]}",
+   "expect": {
+    "kind": "forward",
+    "body": {
+     "model": "qual-json-ok",
+     "messages": [
+      {
+       "role": "user",
+       "content": "q"
+      },
+      {
+       "role": "assistant",
+       "content": null,
+       "tool_calls": [
+        {
+         "id": "call_1",
+         "type": "function",
+         "function": {
+          "name": "f",
+          "arguments": "{\"k\":\"<SECRET_1>\"}"
+         }
+        }
+       ]
+      },
+      {
+       "role": "tool",
+       "tool_call_id": "call_1",
+       "content": "ok"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "raw-escaped-keys-decode-first",
+   "group": "unicode-escaping",
+   "raw": "{\"\\u006dodel\":\"qual-json-ok\",\"\\u006dessages\":[{\"\\u0072ole\":\"user\",\"content\":\"hi 안녕\"}]}",
+   "expect": {
+    "kind": "forward",
+    "body": {
+     "model": "qual-json-ok",
+     "messages": [
+      {
+       "role": "user",
+       "content": "hi 안녕"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "block-private-key",
+   "group": "policy",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "key {{PEM}}"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "block-private-key-in-tool-result",
+   "group": "policy",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "{{PEM}}"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "block-private-key-in-metadata-value",
+   "group": "policy",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "metadata": {
+     "k": "{{PEM}}"
+    }
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "block-private-key-beside-redactable",
+   "group": "policy",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "a {{S1}} b {{PEM}}"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "warn-rejects-by-default",
+   "group": "policy",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "{{WARN}}"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "warn-in-tool-argument-rejects-by-default",
+   "group": "policy",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{\"cfg\":\"{{WARN}}\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "warn-forwards-unchanged-when-configured",
+   "group": "policy",
+   "gateways": [
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "{{WARN}} and {{S1}}"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1
+    }
+   },
+   "note": "on_warn=forward: the Warn text is kept, the Redact secret is still replaced"
+  },
+  {
+   "id": "warn-forwards-in-tool-argument-and-metadata",
+   "group": "policy",
+   "gateways": [
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{\"cfg\":\"{{WARN}}\",\"t\":\"{{S1}}\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ],
+    "metadata": {
+     "w": "{{WARN}}"
+    }
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {
+     "S1": 1
+    }
+   }
+  },
+  {
+   "id": "common-profile-leaves-github-token",
+   "group": "policy",
+   "gateways": [
+    "common"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "tok {{S1}}"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {}
+   },
+   "note": "documented gap: the common profile has no GitHub token detector, so the synthetic token is forwarded unchanged",
+   "plaintext_forwarded": true
+  },
+  {
+   "id": "finding-bound-exceeded",
+   "group": "policy",
+   "gateways": [
+    "tight"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "{{S1}} {{S2}} {{S3}}"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 413,
+    "code": "limit_exceeded"
+   },
+   "note": "the tight instance sets max_findings = 2"
+  },
+  {
+   "id": "korean-national-id-and-phone-not-detected",
+   "group": "policy",
+   "gateways": [
+    "standard"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "주민번호 900101-1234567 전화 010-1234-5678"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "forward",
+    "map": {}
+   },
+   "note": "documented gap: the pinned core has no Korean national-ID or phone detector (invented numbers); forwarded unchanged"
+  },
+  {
+   "id": "label-tool-name",
+   "group": "block-labels",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "{{S1}}"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "label-function-name-in-history",
+   "group": "block-labels",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "{{S1}}",
+         "arguments": "{}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "label-schema-property-key",
+   "group": "block-labels",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "{{S1}}": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "label-schema-enum-value",
+   "group": "block-labels",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "a": {
+          "type": "string",
+          "enum": [
+           "ok",
+           "{{S1}}"
+          ]
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "label-schema-const",
+   "group": "block-labels",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "a": {
+          "const": "{{S1}}"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "label-schema-required",
+   "group": "block-labels",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [
+         "{{S1}}"
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "label-metadata-key",
+   "group": "block-labels",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "metadata": {
+     "{{S1}}": "v"
+    }
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "label-tool-call-id",
+   "group": "block-labels",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "{{S1}}",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "{{S1}}",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "label-argument-key",
+   "group": "block-labels",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{\"{{S1}}\":\"v\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "label-response-schema-name",
+   "group": "block-labels",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "response_format": {
+     "type": "json_schema",
+     "json_schema": {
+      "name": "{{S1}}",
+      "schema": {
+       "type": "object"
+      }
+     }
+    }
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "label-model",
+   "group": "block-labels",
+   "gateways": [
+    "standard",
+    "forward"
+   ],
+   "params": {
+    "model": "{{S1}}",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "label-secret-split-by-escape-in-key",
+   "group": "block-labels",
+   "raw": "{\"model\":\"qual-json-ok\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"}],\"metadata\":{\"{{ES1}}\":\"v\"}}",
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "unknown-field-in-tool-function",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "extra": 1
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "unknown-field-in-tool-call",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "index": 0,
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "tool-choice-without-tools",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tool_choice": "auto"
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "parallel-tool-calls-without-tools",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "parallel_tool_calls": true
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "tool-choice-undeclared-name",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f"
+      }
+     }
+    ],
+    "tool_choice": {
+     "type": "function",
+     "function": {
+      "name": "g"
+     }
+    }
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "tool-choice-allowed-tools",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f"
+      }
+     }
+    ],
+    "tool_choice": {
+     "type": "allowed_tools",
+     "allowed_tools": {
+      "mode": "auto",
+      "tools": []
+     }
+    }
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "custom-tool-type",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "custom",
+      "custom": {
+       "name": "f"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "empty-tools-array",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": []
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "legacy-functions",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "functions": [
+     {
+      "name": "f"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "schema-default",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "a": {
+          "type": "string",
+          "default": "x"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "schema-examples",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "a": {
+          "type": "string",
+          "examples": [
+           "x"
+          ]
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "schema-ref-and-defs",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "$defs": {
+         "A": {
+          "type": "string"
+         }
+        },
+        "properties": {
+         "a": {
+          "$ref": "#/$defs/A"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "schema-pattern",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "a": {
+          "type": "string",
+          "pattern": "^a+$"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "schema-format",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "a": {
+          "type": "string",
+          "format": "date-time"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "schema-dollar-schema",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "schema-title-wrong-type",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "title": 5
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "schema-allof",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "allOf": [
+         {
+          "type": "object"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "schema-additional-properties-object",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "additionalProperties": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "schema-root-not-object",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "string"
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "response-format-json-schema-missing-schema",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "response_format": {
+     "type": "json_schema",
+     "json_schema": {
+      "name": "n"
+     }
+    }
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "message-participant-name",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "name": "alice",
+      "content": "hi"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "assistant-null-content-without-tool-calls",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "assistant",
+      "content": null
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "legacy-function-role",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "function",
+      "name": "f",
+      "content": "x"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "tool-message-without-preceding-call",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_9",
+      "content": "x"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "tool-result-answers-unknown-id",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_2",
+      "content": "x"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "tool-result-answered-twice",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "again"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "duplicate-tool-call-ids",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "g",
+         "arguments": "{}"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "image-url-part",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "image_url",
+        "image_url": {
+         "url": "https://example.invalid/x.png"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "assistant-refusal-field-replayed",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": "a",
+      "refusal": null
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   },
+   "note": "replaying a provider message verbatim (refusal: null) is rejected as an unknown field"
+  },
+  {
+   "id": "metadata-number-value",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "metadata": {
+     "k": 1
+    }
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "metadata-nested-object",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "metadata": {
+     "k": {
+      "a": "b"
+     }
+    }
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "metadata-seventeen-entries",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "metadata": {
+     "k00": "v",
+     "k01": "v",
+     "k02": "v",
+     "k03": "v",
+     "k04": "v",
+     "k05": "v",
+     "k06": "v",
+     "k07": "v",
+     "k08": "v",
+     "k09": "v",
+     "k10": "v",
+     "k11": "v",
+     "k12": "v",
+     "k13": "v",
+     "k14": "v",
+     "k15": "v",
+     "k16": "v"
+    }
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "metadata-key-with-space",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "metadata": {
+     "bad key": "v"
+    }
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "unsupported-beside-secret",
+   "group": "unsupported",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "tok {{S1}}"
+     }
+    ],
+    "frobnicate": 1
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "arguments-invalid-json",
+   "group": "malformed-arguments",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{bad"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "arguments-empty-string",
+   "group": "malformed-arguments",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": ""
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "arguments-trailing-bytes",
+   "group": "malformed-arguments",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{\"a\":1}x"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "arguments-duplicate-key",
+   "group": "malformed-arguments",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{\"a\":1,\"a\":2}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "arguments-escaped-duplicate-key",
+   "group": "malformed-arguments",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{\"a\":1,\"\\u0061\":2}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "arguments-not-an-object",
+   "group": "malformed-arguments",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "[1,2]"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "arguments-key-outside-charset",
+   "group": "malformed-arguments",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{\"bad key\":1}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "arguments-integer-beyond-i64",
+   "group": "malformed-arguments",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{\"n\":9223372036854775808}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 422,
+    "code": "unsupported_input"
+   }
+  },
+  {
+   "id": "arguments-secret-beside-malformed",
+   "group": "malformed-arguments",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{\"a\":\"{{S1}}\","
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "arguments-too-deep",
+   "group": "malformed-arguments",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":1}}}}}}}}}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "ok"
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 413,
+    "code": "limit_exceeded"
+   }
+  },
+  {
+   "id": "too-many-tools",
+   "group": "limits",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "t0"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t1"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t2"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t3"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t4"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t5"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t6"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t7"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t8"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t9"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t10"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t11"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t12"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t13"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t14"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t15"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t16"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t17"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t18"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t19"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t20"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t21"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t22"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t23"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t24"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t25"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t26"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t27"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t28"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t29"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t30"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t31"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t32"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t33"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t34"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t35"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t36"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t37"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t38"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t39"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t40"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t41"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t42"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t43"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t44"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t45"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t46"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t47"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t48"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t49"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t50"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t51"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t52"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t53"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t54"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t55"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t56"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t57"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t58"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t59"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t60"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t61"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t62"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t63"
+      }
+     },
+     {
+      "type": "function",
+      "function": {
+       "name": "t64"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 413,
+    "code": "limit_exceeded"
+   }
+  },
+  {
+   "id": "description-over-bound",
+   "group": "limits",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "description": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 413,
+    "code": "limit_exceeded"
+   }
+  },
+  {
+   "id": "title-over-bound",
+   "group": "limits",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "f",
+       "parameters": {
+        "type": "object",
+        "title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 413,
+    "code": "limit_exceeded"
+   }
+  },
+  {
+   "id": "too-many-tool-calls-in-one-message",
+   "group": "limits",
+   "params": {
+    "model": "qual-json-ok",
+    "messages": [
+     {
+      "role": "user",
+      "content": "q"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "c0",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c1",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c2",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c3",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c4",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c5",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c6",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c7",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c8",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c9",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c10",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c11",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c12",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c13",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c14",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c15",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c16",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c17",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c18",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c19",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c20",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c21",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c22",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c23",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c24",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c25",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c26",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c27",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c28",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c29",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c30",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c31",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       },
+       {
+        "id": "c32",
+        "type": "function",
+        "function": {
+         "name": "f",
+         "arguments": "{}"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "kind": "reject",
+    "status": 413,
+    "code": "limit_exceeded"
+   }
+  },
+  {
+   "id": "raw-duplicate-top-level-key",
+   "group": "raw-body",
+   "raw": "{\"model\":\"qual-json-ok\",\"model\":\"qual-json-ok\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"}]}",
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "raw-escaped-duplicate-key",
+   "group": "raw-body",
+   "raw": "{\"model\":\"qual-json-ok\",\"\\u006dodel\":\"x\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"}]}",
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "raw-duplicate-key-in-tool",
+   "group": "raw-body",
+   "raw": "{\"model\":\"qual-json-ok\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"}],\"tools\":[{\"type\":\"function\",\"type\":\"function\",\"function\":{\"name\":\"f\"}}]}",
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "raw-duplicate-schema-property",
+   "group": "raw-body",
+   "raw": "{\"model\":\"qual-json-ok\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"f\",\"parameters\":{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"},\"a\":{\"type\":\"integer\"}}}}}]}",
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "raw-duplicate-metadata-key",
+   "group": "raw-body",
+   "raw": "{\"model\":\"qual-json-ok\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"}],\"metadata\":{\"k\":\"a\",\"k\":\"b\"}}",
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "raw-lone-surrogate-escape",
+   "group": "raw-body",
+   "raw": "{\"model\":\"qual-json-ok\",\"messages\":[{\"role\":\"user\",\"content\":\"x \\ud800 y\"}]}",
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "raw-trailing-bytes",
+   "group": "raw-body",
+   "raw": "{\"model\":\"qual-json-ok\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"}]} x",
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "raw-byte-order-mark",
+   "group": "raw-body",
+   "raw_hex": "efbbbf7b226d6f64656c223a227175616c2d6a736f6e2d6f6b222c226d65737361676573223a5b7b22726f6c65223a2275736572222c22636f6e74656e74223a2271227d5d7d",
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "raw-invalid-utf8",
+   "group": "raw-body",
+   "raw_hex": "7b226d6f64656c223a227175616c2d6a736f6e2d6f6b222c226d65737361676573223a5b7b22726f6c65223a2275736572222c22636f6e74656e74223a227820ff227d5d7d",
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  },
+  {
+   "id": "raw-non-finite-number",
+   "group": "raw-body",
+   "raw": "{\"model\":\"qual-json-ok\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"}],\"temperature\":NaN}",
+   "expect": {
+    "kind": "reject",
+    "status": 400,
+    "code": "malformed_input"
+   }
+  }
+ ]
+}
