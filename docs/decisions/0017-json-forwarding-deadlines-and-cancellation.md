@@ -23,7 +23,7 @@ Admission (#18), inspection and sealing (#19), fixed destinations (#23), and hea
 ## Consequences
 
 - JSON latency includes the full provider generation time before the first byte reaches the caller (the response is buffered). That is the price of reporting every failure with a real status; SSE is the incremental path (#21).
-- A fresh connection per request is slower than pooling. Revisit with a measurement and an explicit no-replay review.
+- A fresh connection per request is slower than pooling. Measured in #42 ([ADR 0024](0024-connection-reuse-measurement-and-decision.md)): about 230 us of CPU for TCP plus TLS 1.3 on a loopback fake, plus about two round trips on a real path (not measured). Pooling stays off; the ADR lists what would change that and the no-replay and address-recheck tests required first.
 - The response header cap is enforced after parsing, so a hostile provider can make the parser read up to its buffer limit; only reviewed providers are reachable (ADR 0013), so this is accepted.
 - `shutdown_drain_ms` and the other deadlines are provisional and unmeasured. They are finite and validated, nothing more.
 - Provider-side effects of a cancelled or timed-out request cannot be undone.
