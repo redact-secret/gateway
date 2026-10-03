@@ -146,7 +146,8 @@ jobs:
       - name: Measure (a hosted runner is not a quiet host; figures are labelled provisional)
         env:
           GATEWAY_COMMIT: ${{ github.sha }}
-          QUAL_COMMAND: node qualification/perf/run.mjs
+          AGG_QUIET_WAIT_MS: "0"
+          QUAL_COMMAND: node qualification/perf/run.mjs && node qualification/perf/run.mjs --aggregate --runs 3
         run: sh qualification/run-suites.sh --binary qualification/target/release/redact-secret-gateway-qualification --suites none
       - name: Upload the synthetic measurement report (JSON; no payloads)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

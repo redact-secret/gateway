@@ -8,7 +8,7 @@
 //
 // The scenario is chosen by the request `model` (a transmitted-verbatim structural field), so
 // it survives the gateway's sanitizing rewrite and SDK retries hit the same script:
-//   qual-example (json-ok, or sse-ok when stream:true), qual-json-ok, qual-json-large, qual-json-oversize, qual-json-truncated, qual-hang,
+//   qual-example (json-ok, or sse-ok when stream:true), qual-json-ok, qual-json-slow (replies after 150 ms), qual-json-4mib (a 4 MB reply, just under the default response bound; #58 load runs), qual-json-large, qual-json-oversize, qual-json-truncated, qual-hang,
 //   qual-err-<status> (400 401 403 404 408 409 422 429 500 502 503 504),
 //   qual-err-429-retry-after (Retry-After: 0), qual-err-500-hint-no-retry (500 + x-should-retry: false), qual-retry-429-then-ok (two 429s, then 200),
 //   qual-sse-ok, qual-sse-fragmented, qual-sse-multi, qual-sse-interrupted(-close), qual-sse-gated,
@@ -25,6 +25,8 @@
 //   GET  /__admin/await?call=N&event=E&timeout_ms=T   E: received|first_event|gated|closed|finished
 //   GET  /__admin/await-calls?count=N&timeout_ms=T    resolves when >= N calls were received
 //   POST /__admin/release?call=N             -> let a gated stream continue
+//   GET  /__admin/stats                      -> {received, secret_bodies, bytes}: counts that survive keep_bodies=0
+//   POST /__admin/mode?keep_bodies=0|1       -> 0 keeps no request body text (aggregate load runs, #58)
 // Waiting is event-driven (no polling, no sleeping): a deadline only turns a hang into a failure.
 
 import http from "node:http";
@@ -37,6 +39,8 @@ const nowMs = () => Number((process.hrtime.bigint() - T0) / 1000n) / 1000;
 
 /** @type {Array<any>} */
 let calls = [];
+let keepBodies = true;
+let stats = { received: 0, secret_bodies: 0, bytes: 0 };
 let connections = 0;
 let scenarioCounts = new Map();
 let waiters = []; // {test: () => boolean, resolve}
@@ -153,6 +157,14 @@ async function runScenario(call, req, res, json) {
 
   if (model === "qual-json-ok") {
     return sendJson(res, 200, completion(call.seq, PIECES.join("")));
+  }
+  if (model === "qual-json-slow") {
+    await sleep(150);
+    if (!alive()) return;
+    return sendJson(res, 200, completion(call.seq, PIECES.join("")));
+  }
+  if (model === "qual-json-4mib") {
+    return sendJson(res, 200, completion(call.seq, "x".repeat(4_000_000)));
   }
   if (model === "qual-json-large") {
     return sendJson(res, 200, completion(call.seq, "synthetic large reply ".repeat(3000)));
@@ -377,11 +389,15 @@ const provider = http.createServer((req, res) => {
   req.on("end", () => {
     if (partial) return;
     const raw = Buffer.concat(chunks);
-    call.body = raw.toString("utf8");
+    stats.received += 1;
+    stats.bytes += size;
+    if (raw.includes("ghp_SYNTH")) stats.secret_bodies += 1;
+    call.body = keepBodies ? raw.toString("utf8") : "";
+    const text = keepBodies ? call.body : raw.toString("utf8");
     call.body_bytes = size;
     let json = null;
     try {
-      json = JSON.parse(call.body);
+      json = JSON.parse(text);
     } catch {
       /* not JSON: recorded as is */
     }
@@ -410,10 +426,16 @@ const admin = http.createServer(async (req, res) => {
   };
   if (url.pathname === "/__admin/health") return out(200, { ok: true });
   if (url.pathname === "/__admin/calls") return out(200, { connections, calls });
+  if (url.pathname === "/__admin/stats") return out(200, { ...stats, connections });
+  if (url.pathname === "/__admin/mode" && req.method === "POST") {
+    keepBodies = url.searchParams.get("keep_bodies") !== "0";
+    return out(200, { ok: true, keep_bodies: keepBodies });
+  }
   if (url.pathname === "/__admin/reset" && req.method === "POST") {
     for (const release of gates.values()) release();
     gates = new Map();
     calls = [];
+    stats = { received: 0, secret_bodies: 0, bytes: 0 };
     connections = 0;
     scenarioCounts = new Map();
     return out(200, { ok: true });

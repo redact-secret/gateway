@@ -19,7 +19,10 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use redact_secret_gateway::admission::{Admission, AdmissionError, CapacityPlan};
+use redact_secret::Profile;
+use redact_secret_gateway::admission::{Admission, AdmissionError, CapacityPlan, RequestLimits};
+use redact_secret_gateway::boundary::Inspection;
+use redact_secret_gateway::config::{ContentPolicy, RouteId};
 use redact_secret_gateway::protocol::{self, Protocol};
 use serde_json::{Value, json};
 use tokio::io::AsyncReadExt;
@@ -40,7 +43,28 @@ pub enum Shape {
     NoFindings,
     ManyFindings,
     LargeInput,
+    /// Alpha 2 (#58): assistant `tool_calls` with JSON-string arguments (nested, with
+    /// credential-shaped synthetic tokens) followed by `tool` results, repeated.
+    ToolHistory,
+    /// Alpha 2: 64 tool definitions with many described properties.
+    ToolDefs,
+    /// Alpha 2: 16 metadata entries of 512-byte values (half carry a synthetic token).
+    Metadata,
+    /// Alpha 2: node-dense schemas (large enums) that approach the parsed-node budget with
+    /// few bytes, the worst case for the per-node term of the reservation formula.
+    NodeDense,
 }
+
+/// Every shape, in a stable order.
+pub const ALL_SHAPES: [Shape; 7] = [
+    Shape::NoFindings,
+    Shape::ManyFindings,
+    Shape::LargeInput,
+    Shape::ToolHistory,
+    Shape::ToolDefs,
+    Shape::Metadata,
+    Shape::NodeDense,
+];
 
 impl Shape {
     #[must_use]
@@ -49,6 +73,10 @@ impl Shape {
             Self::NoFindings => "no_findings",
             Self::ManyFindings => "many_findings",
             Self::LargeInput => "large_input",
+            Self::ToolHistory => "tool_history",
+            Self::ToolDefs => "tool_defs",
+            Self::Metadata => "metadata",
+            Self::NodeDense => "node_dense",
         }
     }
 }
@@ -58,6 +86,13 @@ impl Shape {
 /// tokens.
 #[must_use]
 pub fn payload(shape: Shape, target_bytes: usize) -> Vec<u8> {
+    match shape {
+        Shape::ToolHistory => return tool_history(target_bytes),
+        Shape::ToolDefs => return tool_defs(target_bytes),
+        Shape::Metadata => return metadata_heavy(),
+        Shape::NodeDense => return node_dense(),
+        Shape::NoFindings | Shape::ManyFindings | Shape::LargeInput => {}
+    }
     let mut text = String::with_capacity(target_bytes);
     let mut n: u64 = 0;
     while text.len() < target_bytes {
@@ -69,6 +104,7 @@ pub fn payload(shape: Shape, target_bytes: usize) -> Vec<u8> {
             Shape::ManyFindings => {
                 let _ = write!(text, "SYNTH-FINDING-{n:06}-NOT-A-CREDENTIAL ");
             }
+            _ => break,
         }
         n += 1;
     }
@@ -77,6 +113,145 @@ pub fn payload(shape: Shape, target_bytes: usize) -> Vec<u8> {
         "messages": [{"role": "user", "content": text}],
     });
     serde_json::to_vec(&doc).unwrap_or_default()
+}
+
+fn filler(n: usize, len: usize) -> String {
+    let mut text = String::with_capacity(len + 40);
+    let mut i = 0_usize;
+    while text.len() < len {
+        let _ = write!(text, "synthetic filler {n} {i} ");
+        i += 1;
+    }
+    text.truncate(len);
+    text
+}
+
+/// A revoked-looking synthetic token (the leak scanner and the core both know the shape).
+fn token(n: usize) -> String {
+    format!("ghp_SYNTHETICREVOKED{n:020}")
+}
+
+fn chat(extra: &Value, messages: Value) -> Vec<u8> {
+    let mut doc = json!({"model": "synthetic-model", "messages": messages});
+    if let (Some(base), Some(add)) = (doc.as_object_mut(), extra.as_object()) {
+        for (k, v) in add {
+            base.insert(k.clone(), v.clone());
+        }
+    }
+    serde_json::to_vec(&doc).unwrap_or_default()
+}
+
+/// Tool history: turns of one assistant message with 4 tool calls (arguments nested 5 deep,
+/// one synthetic token each) and 4 tool results (one token each), until about `target`.
+fn tool_history(target: usize) -> Vec<u8> {
+    let turns = 48_usize;
+    let per_call = (target / (turns * 8)).max(32);
+    let mut messages = vec![json!({"role": "user", "content": "run the lookups"})];
+    let mut n = 0_usize;
+    for t in 0..turns {
+        let mut calls = Vec::new();
+        for c in 0..4 {
+            let args = json!({
+                "query": format!("{} {}", filler(n, per_call), token(n)),
+                "filters": {"a": {"b": {"c": {"d": format!("v{n}")}}}},
+                "limit": 5,
+            });
+            calls.push(json!({
+                "id": format!("call_{t}_{c}"),
+                "type": "function",
+                "function": {"name": "lookup_record", "arguments": args.to_string()},
+            }));
+            n += 1;
+        }
+        messages.push(json!({"role": "assistant", "content": Value::Null, "tool_calls": calls}));
+        for c in 0..4 {
+            messages.push(json!({
+                "role": "tool",
+                "tool_call_id": format!("call_{t}_{c}"),
+                "content": format!("{} {}", filler(n, per_call), token(n)),
+            }));
+            n += 1;
+        }
+    }
+    chat(&json!({}), Value::Array(messages))
+}
+
+/// 64 tools, each with 32 described string properties and a `required` list.
+fn tool_defs(target: usize) -> Vec<u8> {
+    let tools = 64_usize;
+    let props = 32_usize;
+    let desc = (target / (tools * props)).clamp(16, 1024);
+    let mut list = Vec::new();
+    for k in 0..tools {
+        let mut properties = serde_json::Map::new();
+        let mut required = Vec::new();
+        for j in 0..props {
+            let name = format!("p_{j}");
+            let text = if j % 8 == 0 {
+                format!("{} {}", filler(k * props + j, desc), token(k * props + j))
+            } else {
+                filler(k * props + j, desc)
+            };
+            properties.insert(name.clone(), json!({"type": "string", "description": text}));
+            if j < 4 {
+                required.push(Value::String(name));
+            }
+        }
+        list.push(json!({
+            "type": "function",
+            "function": {
+                "name": format!("tool_{k}"),
+                "description": filler(k, desc),
+                "parameters": {"type": "object", "properties": properties, "required": required},
+            },
+        }));
+    }
+    chat(
+        &json!({"tools": list}),
+        json!([{"role": "user", "content": "use a tool"}]),
+    )
+}
+
+/// 16 metadata entries, 64-byte-or-shorter keys, 512-byte values, every other value with a token.
+fn metadata_heavy() -> Vec<u8> {
+    let mut meta = serde_json::Map::new();
+    for i in 0..16_usize {
+        let mut v = filler(i, 440);
+        if i % 2 == 0 {
+            v.push(' ');
+            v.push_str(&token(i));
+        }
+        v.truncate(512);
+        meta.insert(format!("meta_key_{i:02}"), Value::String(v));
+    }
+    chat(
+        &json!({"metadata": meta}),
+        json!([{"role": "user", "content": "hello"}]),
+    )
+}
+
+/// 5 tools x 64 string properties x 40 short enum labels: about 15k parsed nodes in under
+/// 100 KiB, close to `max_nodes` (16,384) with a small body.
+fn node_dense() -> Vec<u8> {
+    let mut list = Vec::new();
+    for k in 0..5_usize {
+        let mut properties = serde_json::Map::new();
+        for j in 0..64_usize {
+            let labels: Vec<String> = (0..40).map(|e| format!("v{e}")).collect();
+            properties.insert(format!("p_{j}"), json!({"type": "string", "enum": labels}));
+        }
+        list.push(json!({
+            "type": "function",
+            "function": {
+                "name": format!("dense_{k}"),
+                "parameters": {"type": "object", "properties": properties},
+            },
+        }));
+    }
+    chat(
+        &json!({"tools": list}),
+        json!([{"role": "user", "content": "use a tool"}]),
+    )
 }
 
 /// Sorted nanosecond samples with percentile lookup.
@@ -417,4 +592,91 @@ pub async fn run_all(plan: Plan, source_commit: Option<&str>) -> Vec<Value> {
     records.extend(run_slow_sse(plan.sse_fragments, plan.sse_delay).await);
     out.extend(records.iter().map(Record::to_json));
     out
+}
+
+/// Memory accounting by retention (#58): hold `n` copies of one stage's product alive and
+/// divide the growth of the process's resident memory by `n`. The caller runs each
+/// `(shape, phase)` in a fresh process so freed memory from an earlier phase cannot hide
+/// growth. Phases: `body` (the received buffer, a control for the method), `parsed` (the
+/// validated typed request with decoded text), `approved` (the sealed transformed output,
+/// which is what the request keeps after inspection). Output carries sizes only.
+pub async fn memory_phase(shape: Shape, size: usize, phase: &str, n: usize) -> Value {
+    let body = payload(shape, size);
+    let limits = RequestLimits::provisional();
+    let units = limits.reservation_units(body.len());
+    let total = units.saturating_mul(u32::try_from(n + 2).unwrap_or(u32::MAX));
+    let plan = CapacityPlan::new(nz(u32::MAX >> 1), nz(total), nz(2), nz(1), nz(1));
+    let admission = Arc::new(Admission::new(&plan));
+    let content = ContentPolicy::new(Profile::Full);
+    let Ok(inspection) = Inspection::start(Arc::clone(&admission), &content, &limits, &plan) else {
+        return json!({"phase": phase, "error": "inspection_start"});
+    };
+
+    // One request through the whole path, dropped, before the baseline: lazy initialization
+    // and thread stacks are not the thing being measured.
+    let one = |bytes: Vec<u8>| {
+        let admission = Arc::clone(&admission);
+        async move {
+            let ticket = admission
+                .begin_body_receipt(bytes.len(), &limits)
+                .await
+                .ok()?;
+            let received = ticket.complete(bytes).ok()?;
+            protocol::validate_with(received, Protocol::ChatCompletionsText, &limits).ok()
+        }
+    };
+    if one(body.clone()).await.is_none() {
+        return json!({
+            "phase": phase, "shape": shape.name(), "input_bytes": body.len(),
+            "error": "the synthetic body is rejected (not a valid measurement input)",
+        });
+    }
+    let before = rss().kb.unwrap_or(0);
+    let mut bodies: Vec<Vec<u8>> = Vec::new();
+    let mut parsed = Vec::new();
+    let mut approved = Vec::new();
+    for _ in 0..n {
+        match phase {
+            "body" => bodies.push(body.clone()),
+            "parsed" => {
+                if let Some(v) = one(body.clone()).await {
+                    parsed.push(v);
+                }
+            }
+            _ => {
+                if let Some(v) = one(body.clone()).await
+                    && let Ok(s) = inspection
+                        .inspect_and_approve(v, RouteId::new("synthetic-route"))
+                        .await
+                {
+                    approved.push(s);
+                }
+            }
+        }
+    }
+    let after = rss().kb.unwrap_or(0);
+    let held = bodies.len() + parsed.len() + approved.len();
+    let delta_bytes = after.saturating_sub(before).saturating_mul(1024);
+    let per = delta_bytes / u64::try_from(held.max(1)).unwrap_or(1);
+    let output_bytes = approved.first().map_or(0, |s| s.body().len());
+    // The sealed output must not hold the synthetic credential shape (the shapes plant them).
+    let output_has_credential_shape = approved
+        .iter()
+        .any(|s| String::from_utf8_lossy(s.body()).contains("ghp_SYNTHETICREVOKED"));
+    json!({
+        "kind": "memory_phase",
+        "shape": shape.name(),
+        "phase": phase,
+        "input_bytes": body.len(),
+        "retained": held,
+        "rss_before_kb": before,
+        "rss_after_kb": after,
+        "bytes_per_request": per,
+        "output_bytes": output_bytes,
+        "output_has_credential_shape": output_has_credential_shape,
+        "reservation_units": units,
+        "reservation_bytes": limits.reservation_bytes(body.len()),
+        "bytes_per_request_over_input": per as f64 / body.len().max(1) as f64,
+        "bytes_per_request_over_reservation": per as f64 / limits.reservation_bytes(body.len()).max(1) as f64,
+    })
 }

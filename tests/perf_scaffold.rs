@@ -105,3 +105,32 @@ fn percentiles_use_nearest_rank() {
     assert_eq!(s.percentile(99.0), 99);
     assert_eq!(workloads::Samples::default().percentile(99.0), 0);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn alpha2_shapes_are_accepted_inspected_and_leave_no_credential_shape() {
+    // Small, CI-friendly retention counts; the heavy runs are `perf_workloads --memory`.
+    for shape in [
+        Shape::ToolHistory,
+        Shape::ToolDefs,
+        Shape::Metadata,
+        Shape::NodeDense,
+    ] {
+        let body = workloads::payload(shape, 64 * 1024);
+        assert!(serde_json::from_slice::<serde_json::Value>(&body).is_ok());
+        assert!(
+            String::from_utf8_lossy(&body).contains("ghp_SYNTHETICREVOKED")
+                || shape == Shape::NodeDense,
+            "{shape:?}: plants synthetic credential shapes (node-dense plants none)"
+        );
+        let record = workloads::memory_phase(shape, 64 * 1024, "approved", 2).await;
+        assert!(record.get("error").is_none(), "{shape:?}: {record}");
+        assert_eq!(record["retained"], 2, "{shape:?}");
+        assert_eq!(
+            record["output_has_credential_shape"], false,
+            "{shape:?}: the sealed output still holds a credential shape"
+        );
+        assert!(record["output_bytes"].as_u64().unwrap_or(0) > 0);
+        let rendered = record.to_string();
+        assert!(!rendered.contains("ghp_") && !rendered.contains("synthetic filler"));
+    }
+}
