@@ -20,8 +20,9 @@ Status: transport framing, the frozen status mapping, and the SDK retry, duplica
 | `invalid_config` | Startup only: static configuration failed validation. Never a request outcome. |
 | `not_ready` | Readiness is false: validated plan or required initialization is missing. |
 | `missing_credential` | No usable provider `Authorization` on a request (#24). The provider credential, not a local-auth result. |
-| `local_auth_required`, `local_auth_invalid` | **Planned (#61, enforced by #63; not yet implemented).** Local caller token absent, or present but duplicate, malformed, out of bounds, or wrong. `401`, before any body read. Distinct from the provider-credential `missing_credential`. Spec: [local-caller-auth](local-caller-auth.md) |
 | `not_implemented` | The request cannot be served by this build or deployment: no `deployment.upstream` is configured (#20). Never forwarded. |
+
+**Planned codes (not yet in `SafeCode`, so not in the table above).** `local_auth_required` and `local_auth_invalid` (#61, enforced by #63): the local caller token is absent, or present but duplicate, malformed, out of bounds, or wrong. `401`, before any body read, distinct from the provider-credential `missing_credential`. Spec: [local-caller-auth](local-caller-auth.md). #63 moves them into the table when it adds the `SafeCode` variants.
 
 Errors never echo payload fragments, credentials, or offending text. Provider response and error bodies are relayed under the response contract and may contain sensitive data. Document status mappings and SDK-retry implications. After response bytes start, errors cannot change the HTTP status; terminate per the stream error contract without fabricating completion events.
 
