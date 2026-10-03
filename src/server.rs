@@ -239,6 +239,28 @@ impl BoundServer {
         self,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> Result<(), StartupError> {
+        self.serve_inner(shutdown, false).await
+    }
+
+    /// Opt-in aggregate telemetry on a numeric loopback listener only. The proxy
+    /// token grants no operations authority; same-Pod loopback access is trusted.
+    /// # Errors
+    /// [`StartupError::Bind`] on non-loopback exposure; otherwise like `serve`.
+    pub async fn serve_observed(
+        self,
+        shutdown: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<(), StartupError> {
+        if !self.local_addr()?.ip().is_loopback() {
+            return Err(StartupError::Bind);
+        }
+        self.serve_inner(shutdown, true).await
+    }
+
+    async fn serve_inner(
+        self,
+        shutdown: impl Future<Output = ()> + Send + 'static,
+        observed: bool,
+    ) -> Result<(), StartupError> {
         let Self {
             listener,
             state,
@@ -247,6 +269,10 @@ impl BoundServer {
         let chat = services.chat();
         let responses = services.responses();
         let mut router = chat_route::mount(health::router(Arc::clone(&state)), Arc::clone(&chat));
+        if observed {
+            router =
+                crate::telemetry::mount_export(router, chat.shared_metrics(), services.admission());
+        }
         if let Some(responses) = &responses {
             router = chat_route::mount(router, Arc::clone(responses));
         }

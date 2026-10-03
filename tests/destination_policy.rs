@@ -292,6 +292,8 @@ fn seam_markers() -> [String; 4] {
 /// here is a deliberate maintainer decision and must update the ADR and
 /// `qualification_allowlist_is_exactly_the_decided_set` in the same change.
 const QUALIFICATION_SEAM_ALLOWLIST: &[&str] = &[
+    ".github/workflows/beta2.yml",
+    "qualification/sidecar/run.py",
     ".github/workflows/qualification.yml",
     "qualification/build.sh",
     "qualification/run-suites.sh",
@@ -345,7 +347,9 @@ fn rel(path: &Path) -> String {
 fn qualification_allowlist_is_exactly_the_decided_set() {
     // Written out a second time on purpose: widening the allowlist fails here until the
     // decision is made visibly (and the ADR is updated), not by editing one constant.
-    let decided: [&str; 8] = [
+    let decided: [&str; 10] = [
+        ".github/workflows/beta2.yml",
+        "qualification/sidecar/run.py",
         ".github/workflows/qualification.yml",
         "qualification/build.sh",
         "qualification/run-suites.sh",

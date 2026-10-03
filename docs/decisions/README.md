@@ -49,6 +49,9 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0033](0033-config-upgrade-rollback.md) | Configuration upgrade, rollback and restart activation: Alpha-to-Beta migration fixtures, compatibility pairs, failed-start behavior | Accepted; implemented | #64 |
 | [0034](0034-responses-qualification-and-beta1-endpoint-matrix.md) | Responses qualification and the Beta 1 endpoint matrix: field-matrix-driven SDK cases, evidence layers, measured SDK-helper table, provisional incremental-cost budgets, candidate manifest capabilities | Accepted; implemented and measured (figures provisional) | #88 |
 
+| [0035](0035-kubernetes-sidecar-trust-and-probes.md) | Same-Pod trust, native sidecar lifecycle and bounded exec probes | Accepted; implementation/qualification in progress | #89–#94 |
+| [0036](0036-loopback-operations-export.md) | Opt-in loopback aggregate operations export | Accepted; implemented, qualification in progress | #95 |
+
 ## Contracts
 
 | Contract | Covers |

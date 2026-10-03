@@ -60,8 +60,12 @@ struct Serving {
 }
 
 fn serve(path: &Path) -> Serving {
+    serve_mode(path, "serve")
+}
+
+fn serve_mode(path: &Path, mode: &str) -> Serving {
     let mut child = bin()
-        .arg("serve")
+        .arg(mode)
         .arg(path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -76,6 +80,38 @@ fn serve(path: &Path) -> Serving {
         .expect("handshake")
         .to_owned();
     Serving { child, addr, out }
+}
+
+#[test]
+fn operations_export_is_opt_in_loopback_and_has_no_request_labels() {
+    let path = temp_file(
+        "observed.json",
+        &config_with(r#""address": "127.0.0.1:0""#, ""),
+    );
+    let mut ordinary = serve(&path);
+    assert_eq!(http_get(&ordinary.addr, "/metrics").0, 404);
+    sigterm(&ordinary.child);
+    assert!(ordinary.child.wait().expect("ordinary stop").success());
+    let mut observed = serve_mode(&path, "serve-observed");
+    let rejected = http_get(&observed.addr, &format!("/metrics?{MARKER}"));
+    assert_eq!(rejected.0, 404);
+    assert!(!rejected.1.contains(MARKER));
+    let (status, response) = http_get(&observed.addr, "/metrics");
+    assert_eq!(status, 200);
+    assert!(!response.contains(MARKER));
+    let (_, body) = response.split_once("\r\n\r\n").expect("HTTP body");
+    let snapshot: serde_json::Value = serde_json::from_str(body).expect("snapshot");
+    assert_eq!(snapshot["snapshot_version"], 1);
+    assert_eq!(snapshot["stages"].as_object().expect("stages").len(), 10);
+    assert_eq!(snapshot["upstream_attempts"], 0);
+    assert_eq!(snapshot["admission"]["waiting"], 0);
+    assert!(
+        response
+            .to_ascii_lowercase()
+            .contains("cache-control: no-store")
+    );
+    sigterm(&observed.child);
+    assert!(observed.child.wait().expect("observed stop").success());
 }
 
 fn sigterm(child: &Child) {
@@ -97,6 +133,79 @@ fn sample_config_validates() {
         String::from_utf8_lossy(&out.stdout).trim(),
         "config valid (schema_version 1)"
     );
+}
+
+#[test]
+fn exec_probe_uses_health_only_and_bounds_invalid_arguments() {
+    let path = temp_file(
+        "exec-probe.json",
+        &config_with(r#""address": "127.0.0.1:0""#, ""),
+    );
+    let mut serving = serve(&path);
+    for kind in ["live", "ready"] {
+        let result = bin()
+            .args(["probe", kind, &serving.addr])
+            .output()
+            .expect("probe");
+        assert!(result.status.success());
+        assert!(result.stdout.is_empty());
+        assert!(result.stderr.is_empty());
+    }
+    for args in [
+        ["probe", "ready", "192.0.2.1:8787"],
+        ["probe", "ready", "localhost:8787"],
+        ["probe", "ready", "127.0.0.1:0"],
+        ["probe", MARKER, "127.0.0.1:8787"],
+    ] {
+        let result = bin().args(args).output().expect("invalid probe");
+        assert_eq!(result.status.code(), Some(2));
+        assert!(!String::from_utf8_lossy(&result.stderr).contains(MARKER));
+    }
+    sigterm(&serving.child);
+    assert!(serving.child.wait().expect("wait").success());
+    assert_eq!(
+        bin()
+            .args(["probe", "ready", &serving.addr])
+            .status()
+            .expect("closed probe")
+            .code(),
+        Some(1)
+    );
+}
+
+#[test]
+fn exec_probe_refuses_false_health_responses_and_oversize() {
+    for response in [
+        "HTTP/1.1 200 OK\r\nContent-Length: 18\r\n\r\n{\"status\":\"wrong\"}".to_owned(),
+        "HTTP/1.1 503 Service Unavailable\r\n\r\n{\"status\":\"ready\"}".to_owned(),
+        format!("HTTP/1.1 200 OK\r\n\r\n{}", "x".repeat(1100)),
+    ] {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let worker = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept");
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .expect("timeout");
+            let mut request = [0; 256];
+            let n = socket.read(&mut request).expect("read");
+            assert!(
+                String::from_utf8_lossy(request.get(..n).expect("slice"))
+                    .starts_with("GET /readyz ")
+            );
+            let _ = socket.write_all(response.as_bytes());
+        });
+        let result = bin()
+            .args(["probe", "ready", &addr.to_string()])
+            .output()
+            .expect("probe");
+        assert_eq!(result.status.code(), Some(1));
+        assert_eq!(
+            String::from_utf8_lossy(&result.stderr).trim(),
+            "probe failed"
+        );
+        worker.join().expect("worker");
+    }
 }
 
 #[test]

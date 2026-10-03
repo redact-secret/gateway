@@ -69,3 +69,15 @@ Before Alpha 1 distribution: private reporting flow verified (enabled, checked t
 Before stable 0.1.0: protocol coverage and unknown-field gates, core completion/failure evidence, header/SSRF tests, stream failure/cancellation/backpressure tests, measured aggregate resource bounds, pinned SDK compatibility, dependency/artifact review, and documented upgrade/rollback are complete. Beta 3 owns final reconciliation; unresolved blockers prevent stable promotion.
 
 No claimed third-party audit or penetration test exists unless its scope, reviewer, date, and evidence are explicitly recorded.
+
+## Beta 2 operations exposure
+
+Bounded `probe live|ready <loopback-address>` reads fixed health responses only,
+no config or credentials. Opt-in `serve-observed` refuses non-loopback before
+bind and exports fixed aggregate counters/histograms at `GET /metrics`; the
+proxy token grants no operations authority. Same-Pod/host loopback readers are
+trusted ([ADR 0036](docs/decisions/0036-loopback-operations-export.md)). The basic
+Kubernetes manifest needs no root/capabilities/API token and cannot enforce
+app egress; the optional operator UID enforcement profile has separate admin
+prerequisites and evidence gates ([ADR 0035](docs/decisions/0035-kubernetes-sidecar-trust-and-probes.md)).
+No support or mandatory-egress claim precedes executed qualification.

@@ -396,6 +396,10 @@ impl EndpointRoute {
         self
     }
 
+    pub(crate) fn shared_metrics(&self) -> Arc<Metrics> {
+        Arc::clone(&self.metrics)
+    }
+
     /// Attach the startup-built local caller authentication (#63). Without it the route is
     /// the Alpha behavior (`Disabled`), which the plan allows on a loopback listener only.
     #[must_use]

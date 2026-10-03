@@ -397,10 +397,152 @@ impl Metrics {
     }
 }
 
+/// Fixed-key operations snapshot. At most ten * 252 histogram buckets; no
+/// request strings or credential types can enter this interface. Relaxed reads
+/// are individually current, not a transactional cross-counter snapshot.
+#[must_use]
+pub fn operations_snapshot(
+    metrics: &Metrics,
+    admission: &crate::admission::Admission,
+) -> serde_json::Value {
+    use serde_json::json;
+    let mut stages = serde_json::Map::new();
+    for (name, stage) in [
+        ("admission_wait", Stage::AdmissionWait),
+        ("parse", Stage::Parse),
+        ("inspection", Stage::Inspection),
+        ("serialization", Stage::Serialization),
+        ("upstream_first_response", Stage::UpstreamFirstResponse),
+        ("upstream_total", Stage::UpstreamTotal),
+        ("stream_first_byte", Stage::StreamFirstByte),
+        ("stream_total", Stage::StreamTotal),
+        ("stream_upstream_wait", Stage::StreamUpstreamWait),
+        ("stream_downstream_wait", Stage::StreamDownstreamWait),
+    ] {
+        let s = metrics.stage(stage);
+        stages.insert(
+            name.to_owned(),
+            json!({"count": s.count, "total_micros": s.total_micros,
+            "max_micros": s.max_micros, "buckets_upper_micros_count": metrics.histogram(stage)}),
+        );
+    }
+    let mut ends = serde_json::Map::new();
+    for (name, end) in [
+        ("completed", StreamEnd::Completed),
+        ("upstream_error", StreamEnd::UpstreamError),
+        ("idle_timeout", StreamEnd::IdleTimeout),
+        ("lifetime_exceeded", StreamEnd::LifetimeExceeded),
+        ("buffer_exceeded", StreamEnd::BufferExceeded),
+        ("shutdown", StreamEnd::Shutdown),
+        ("abandoned", StreamEnd::Abandoned),
+    ] {
+        ends.insert(name.to_owned(), json!(metrics.streams_ended(end)));
+    }
+    let load = admission.load();
+    json!({"snapshot_version": 1, "scope": "both_proxy_endpoints_aggregate", "stages": stages,
+        "upstream_attempts": metrics.upstream_attempts(), "streams_started": metrics.streams_started(),
+        "streams_ended": ends, "stream_bytes": metrics.stream_bytes(),
+        "stream_buffered_now": metrics.stream_buffered(), "stream_buffered_peak": metrics.stream_buffered_peak(),
+        "local_auth_required": metrics.local_auth_rejections(SafeCode::LocalAuthRequired),
+        "local_auth_invalid": metrics.local_auth_rejections(SafeCode::LocalAuthInvalid),
+        "admission": {"receipt_in_use": load.receipt_in_use, "memory_units_in_use": load.memory_units_in_use,
+            "memory_total_units": admission.memory_total_units(), "inspection_in_use": load.inspection_in_use,
+            "upstream_in_use": load.upstream_in_use, "stream_in_use": load.stream_in_use, "waiting": load.waiting}})
+}
+
+pub(crate) fn mount_export(
+    router: axum::Router,
+    metrics: std::sync::Arc<Metrics>,
+    admission: std::sync::Arc<crate::admission::Admission>,
+) -> axum::Router {
+    use axum::http::{StatusCode, header};
+    use axum::response::IntoResponse;
+    router.route(
+        "/metrics",
+        axum::routing::get(move |request: axum::extract::Request| {
+            let metrics = std::sync::Arc::clone(&metrics);
+            let admission = std::sync::Arc::clone(&admission);
+            async move {
+                if request.uri().query().is_some() {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        "{\"error\":{\"code\":\"unsupported_input\"}}",
+                    )
+                        .into_response();
+                }
+                let body = operations_snapshot(&metrics, &admission).to_string();
+                if body.len() > 131_072 {
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "{\"error\":{\"code\":\"overload\"}}",
+                    )
+                        .into_response();
+                }
+                (
+                    [
+                        (header::CONTENT_TYPE, "application/json"),
+                        (header::CACHE_CONTROL, "no-store"),
+                    ],
+                    body,
+                )
+                    .into_response()
+            }
+        })
+        .head(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Metrics, SafeCode, Stage, StageSnapshot};
     use std::time::Duration;
+
+    #[test]
+    fn operations_export_cardinality_and_size_are_fixed_at_maximum_counters() {
+        let metrics = Metrics::new();
+        for stage in [
+            super::Stage::AdmissionWait,
+            super::Stage::Parse,
+            super::Stage::Inspection,
+            super::Stage::Serialization,
+            super::Stage::UpstreamFirstResponse,
+            super::Stage::UpstreamTotal,
+            super::Stage::StreamFirstByte,
+            super::Stage::StreamTotal,
+            super::Stage::StreamUpstreamWait,
+            super::Stage::StreamDownstreamWait,
+        ] {
+            let cell = metrics.cell(stage);
+            cell.count
+                .store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
+            cell.total_micros
+                .store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
+            cell.max_micros
+                .store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
+            for bucket in &cell.buckets {
+                bucket.store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        let one = std::num::NonZeroU32::MIN;
+        let admission = crate::admission::Admission::new(&crate::admission::CapacityPlan::new(
+            one, one, one, one, one,
+        ));
+        let snapshot = super::operations_snapshot(&metrics, &admission);
+        assert!(snapshot.to_string().len() <= 131_072);
+        let stages = snapshot
+            .get("stages")
+            .and_then(serde_json::Value::as_object);
+        assert_eq!(stages.map(serde_json::Map::len), Some(10));
+        for stage in stages.into_iter().flat_map(serde_json::Map::values) {
+            assert_eq!(
+                stage
+                    .get("buckets_upper_micros_count")
+                    .and_then(serde_json::Value::as_array)
+                    .map(Vec::len),
+                Some(super::BUCKETS)
+            );
+        }
+    }
 
     #[test]
     fn metrics_accumulate_without_labels() {

@@ -57,3 +57,12 @@ Preserve Alpha 1 MVP delivery separately from skeleton completion. A compiling e
 Build once from the candidate commit and qualify the exact artifacts. Record checksums, source commit, toolchain, core pin, dependency lock, configuration version, SDK compatibility, and supported platforms. Do not assert signing, SBOM, provenance, or security review exists before those checks are implemented.
 
 Document upgrade and rollback behavior. Never silently reinterpret configuration or weaken rejection behavior to preserve compatibility. License selection is an explicit maintainer decision before distribution. As of 2026-10-02 the license is MIT (maintainer decision) and GitHub private vulnerability reporting is enabled and verified through the GitHub API (see [ADR 0010](docs/decisions/0010-release-prerequisites-license-and-reporting.md)).
+
+## Beta 2 deployment evidence
+
+Use the fixed-key loopback operations export of ADR 0036, preserving the existing
+telemetry exclusions. Native ARM64 execution is required; emulation is supplemental.
+Record OCI manifest/index digests separately from Docker image config IDs. Do not
+claim basic same-Pod NetworkPolicy enforces Gateway traversal. Record all quota,
+load, soak and recovery outcomes before converting provisional resource guidance
+into a support claim; only #15 owns final release reconciliation.
