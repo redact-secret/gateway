@@ -1,0 +1,410 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:redact-secret:gateway:config:v1",
+  "title": "RedactSecret Gateway configuration, schema_version 1",
+  "description": "Machine-readable shape of the static configuration the implementation accepts today. The Rust loader (src/config.rs) is authoritative: it additionally enforces the constraints listed under x-gateway.loader_only_constraints, which JSON Schema cannot express. Keys that are planned but not implemented are NOT accepted here; they are listed under x-gateway.planned. See docs/contracts/config-schema.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "deployment",
+    "content",
+    "resources"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Required. Checked before everything else; any other number is unsupported_schema_version."
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "listener"
+      ],
+      "description": "Deployment authority: listener and upstream provider profile. Nothing under content or resources can change it.",
+      "properties": {
+        "listener": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "type": "string",
+              "description": "IP-literal socket address (no hostnames), for example 127.0.0.1:8787. Port 0 asks the OS for a free port. Syntax is checked by the loader."
+            },
+            "allow_non_loopback": {
+              "type": "boolean",
+              "default": false,
+              "description": "Acknowledges a non-loopback address. Required exactly when the address is not loopback (loader-enforced); not a supported shared or remote deployment (ADR 0009)."
+            }
+          }
+        },
+        "upstream": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider"
+          ],
+          "description": "Optional. Selects a reviewed provider profile; the profile fixes origin, port, TLS rules and routes. Absent means no route exists.",
+          "properties": {
+            "provider": {
+              "enum": [
+                "openai"
+              ],
+              "description": "Reviewed profile name, exact case. No URL, host, port, proxy, TLS or route key exists."
+            }
+          }
+        }
+      }
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile"
+      ],
+      "description": "Content policy: core profile and actions. Cannot change listener, origins, TLS, routing, or credential rules.",
+      "properties": {
+        "profile": {
+          "enum": [
+            "full",
+            "common"
+          ],
+          "description": "Profile name the pinned core accepts."
+        },
+        "pii": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": "Optional PII selectors in the core syntax, for example pii:family:global:email. The pinned core's parser decides validity (loader-enforced)."
+        },
+        "on_warn": {
+          "enum": [
+            "reject",
+            "forward"
+          ],
+          "default": "reject",
+          "description": "Disposition of Warn findings. forward is a deliberate operator choice, not redaction."
+        },
+        "max_findings": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50000,
+          "default": 1024,
+          "x-gateway-provisional": true,
+          "description": "Request-wide bound on findings; exceeding it rejects the request."
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capacity"
+      ],
+      "description": "Resource policy: capacities, limits and deadlines.",
+      "properties": {
+        "capacity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "receipt",
+            "memory_units",
+            "inspection",
+            "upstream",
+            "stream"
+          ],
+          "description": "Global capacity classes. Required; there are no defaults (ADR 0008).",
+          "properties": {
+            "receipt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295,
+              "x-gateway-provisional": true,
+              "description": "Requests receiving a body at once."
+            },
+            "memory_units": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295,
+              "x-gateway-provisional": true,
+              "description": "Aggregate request memory budget in 1 KiB units."
+            },
+            "inspection": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295,
+              "x-gateway-provisional": true,
+              "description": "Inspection worker threads and the bound on queued plus running inspection jobs."
+            },
+            "upstream": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295,
+              "x-gateway-provisional": true,
+              "description": "In-flight provider requests."
+            },
+            "stream": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295,
+              "x-gateway-provisional": true,
+              "description": "Active response streams."
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optional per-request limits. Every field is optional and keeps its provisional default. All values are provisional pending quiet-host measurement (ADR 0008); see docs/contracts/resource-limits.md.",
+          "properties": {
+            "max_body_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216,
+              "default": 1048576,
+              "description": "Largest accepted request body in bytes.",
+              "x-gateway-provisional": true
+            },
+            "max_depth": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64,
+              "default": 16,
+              "description": "Maximum JSON container nesting.",
+              "x-gateway-provisional": true
+            },
+            "max_nodes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576,
+              "default": 16384,
+              "description": "Maximum parsed values plus object keys.",
+              "x-gateway-provisional": true
+            },
+            "max_string_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216,
+              "default": 524288,
+              "description": "Maximum decoded bytes of one string or key.",
+              "x-gateway-provisional": true
+            },
+            "max_messages": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096,
+              "default": 256,
+              "description": "Maximum Chat Completions messages. Also the planned bound on Responses input items (docs/contracts/responses-request.md); no separate key exists.",
+              "x-gateway-provisional": true
+            },
+            "admission_wait_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 60000,
+              "default": 250,
+              "description": "Longest wait for capacity before an overload rejection; 0 never waits.",
+              "x-gateway-provisional": true
+            },
+            "admission_queue": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1024,
+              "default": 16,
+              "description": "Most requests waiting for capacity at once; 0 means no queue.",
+              "x-gateway-provisional": true
+            },
+            "body_deadline_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 300000,
+              "default": 10000,
+              "description": "Deadline to receive the body, and the absolute deadline for the request head.",
+              "x-gateway-provisional": true
+            },
+            "upstream_connect_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000,
+              "default": 5000,
+              "description": "Deadline to establish the provider TCP and TLS session.",
+              "x-gateway-provisional": true
+            },
+            "upstream_header_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600000,
+              "default": 120000,
+              "description": "Deadline to the provider response headers. Must not exceed upstream_total_ms (loader-enforced).",
+              "x-gateway-provisional": true
+            },
+            "upstream_total_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600000,
+              "default": 300000,
+              "description": "Deadline from send to the last buffered response byte.",
+              "x-gateway-provisional": true
+            },
+            "max_response_header_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 262144,
+              "default": 32768,
+              "description": "Largest accepted provider response header block.",
+              "x-gateway-provisional": true
+            },
+            "max_response_body_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 67108864,
+              "default": 4194304,
+              "description": "Largest buffered provider JSON response body.",
+              "x-gateway-provisional": true
+            },
+            "shutdown_drain_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 600000,
+              "default": 10000,
+              "description": "Time in-flight requests may finish after a termination signal; 0 cancels immediately.",
+              "x-gateway-provisional": true
+            },
+            "stream_idle_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600000,
+              "default": 120000,
+              "description": "Longest wait for the next provider stream chunk. Must not exceed stream_lifetime_ms (loader-enforced).",
+              "x-gateway-provisional": true
+            },
+            "stream_lifetime_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600000,
+              "default": 900000,
+              "description": "Longest total stream life.",
+              "x-gateway-provisional": true
+            },
+            "stream_write_stall_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 600000,
+              "default": 30000,
+              "description": "Longest a response write may make no progress.",
+              "x-gateway-provisional": true
+            },
+            "stream_buffer_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216,
+              "default": 1048576,
+              "description": "Most provider bytes the relay holds at once per stream. capacity.stream times this must not exceed 4 GiB (loader-enforced).",
+              "x-gateway-provisional": true
+            },
+            "max_connections": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536,
+              "default": 256,
+              "description": "Most connections served at once; one over the bound is closed at accept.",
+              "x-gateway-provisional": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "planned_local_auth": {
+      "x-gateway-status": "planned",
+      "description": "NOT part of schema_version 1 as implemented. Frozen design from ADR 0030 / docs/contracts/local-caller-auth.md; enforcement is #63. Deliberately not referenced from deployment.properties, so the loader and this schema both reject deployment.local_auth until #63 moves it there.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "disabled",
+            "token"
+          ]
+        },
+        "token": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "env": {
+              "type": "string",
+              "pattern": "^[A-Z_][A-Z0-9_]{0,63}$"
+            },
+            "file": {
+              "type": "string",
+              "pattern": "^/"
+            }
+          }
+        }
+      },
+      "x-gateway-planned-constraints": [
+        "mode disabled forbids token; mode token requires token",
+        "token has exactly one of env or file; it is a reference, never a value",
+        "allow_non_loopback true additionally requires mode token",
+        "token source is resolved at startup (length 32..128, alphabet A-Za-z0-9-._~, file mode and size checks); failures are invalid_config at deployment.local_auth.token"
+      ]
+    }
+  },
+  "x-gateway": {
+    "freeze": {
+      "status": "frozen",
+      "schema_version": 1,
+      "base_revision": "f7936fe000b7c6c1a5675d98675c39fae29b01d7",
+      "base_revision_description": "main after #82 (PR #97); the #62 freeze commit is the one that adds this file.",
+      "provisional": [
+        "resources.capacity.* (no defaults, unmeasured)",
+        "resources.limits.* defaults and ceilings (ADR 0008)",
+        "content.max_findings default and ceiling"
+      ]
+    },
+    "routes": {
+      "openai": [
+        {
+          "id": "openai.chat_completions",
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "status": "implemented"
+        },
+        {
+          "id": "openai.responses",
+          "method": "POST",
+          "path": "/v1/responses",
+          "status": "planned",
+          "owner": "#86",
+          "note": "fixed by the openai provider profile; adds no configuration key"
+        }
+      ]
+    },
+    "planned": {
+      "deployment.local_auth": "#/$defs/planned_local_auth"
+    },
+    "loader_only_constraints": [
+      "schema_version is checked first; unknown versions and fields are rejected at every depth",
+      "duplicate keys, trailing bytes, invalid UTF-8 and files over 64 KiB are rejected before schema evaluation",
+      "listener.address must parse as an IP-literal socket address",
+      "address loopback must equal NOT allow_non_loopback (invalid_combination at deployment.listener)",
+      "content.profile and content.pii are validated by the pinned core, and the whole profile plus PII activation must build",
+      "resources.limits.stream_idle_ms <= stream_lifetime_ms",
+      "resources.limits.upstream_header_ms <= upstream_total_ms",
+      "resources.capacity.stream * stream_buffer_bytes <= 4 GiB (invalid_combination)"
+    ]
+  }
+}

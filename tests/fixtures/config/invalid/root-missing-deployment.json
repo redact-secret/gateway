@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "content": {
+    "profile": "full"
+  },
+  "resources": {
+    "capacity": {
+      "receipt": 8,
+      "memory_units": 65536,
+      "inspection": 2,
+      "upstream": 8,
+      "stream": 8
+    }
+  }
+}

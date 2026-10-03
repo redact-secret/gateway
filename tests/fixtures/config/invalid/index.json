@@ -1,0 +1,376 @@
+{
+  "stages": {
+    "syntax": "file bytes: size, UTF-8, JSON syntax, duplicate keys, trailing bytes (before any schema evaluation)",
+    "version": "schema_version presence, type and value (checked before every other field)",
+    "structure": "unknown, missing and mistyped fields and out-of-range values; expressible in the JSON Schema, which must reject the file too",
+    "semantic": "cross-field, address-syntax and pinned-core checks; the JSON Schema cannot express them and accepts the file"
+  },
+  "cases": [
+    {
+      "file": "capacity-fraction.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "resources.capacity.inspection"
+    },
+    {
+      "file": "capacity-missing.json",
+      "stage": "structure",
+      "kind": "missing_field",
+      "location": "resources.capacity"
+    },
+    {
+      "file": "capacity-missing-class.json",
+      "stage": "structure",
+      "kind": "missing_field",
+      "location": "resources.capacity.stream"
+    },
+    {
+      "file": "capacity-negative.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "resources.capacity.upstream"
+    },
+    {
+      "file": "capacity-overflow-u32.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "resources.capacity.memory_units"
+    },
+    {
+      "file": "capacity-unknown-class.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "resources.capacity"
+    },
+    {
+      "file": "capacity-zero.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "resources.capacity.receipt"
+    },
+    {
+      "file": "content-authority-key.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "content"
+    },
+    {
+      "file": "content-max-findings-over.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "content.max_findings"
+    },
+    {
+      "file": "content-max-findings-zero.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "content.max_findings"
+    },
+    {
+      "file": "content-missing-profile.json",
+      "stage": "structure",
+      "kind": "missing_field",
+      "location": "content.profile"
+    },
+    {
+      "file": "content-on-warn-unknown.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "content.on_warn"
+    },
+    {
+      "file": "content-pii-empty-selector.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "content.pii"
+    },
+    {
+      "file": "content-pii-not-array.json",
+      "stage": "structure",
+      "kind": "invalid_type",
+      "location": "content.pii"
+    },
+    {
+      "file": "content-pii-too-many.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "content.pii"
+    },
+    {
+      "file": "content-pii-unsupported-selector.json",
+      "stage": "semantic",
+      "kind": "invalid_value",
+      "location": "content.pii"
+    },
+    {
+      "file": "content-unknown-action.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "content"
+    },
+    {
+      "file": "content-unknown-profile.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "content.profile"
+    },
+    {
+      "file": "deployment-missing-listener.json",
+      "stage": "structure",
+      "kind": "missing_field",
+      "location": "deployment.listener"
+    },
+    {
+      "file": "deployment-unknown-proxy.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "deployment"
+    },
+    {
+      "file": "deployment-unknown-routes.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "deployment"
+    },
+    {
+      "file": "limits-connections-over.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "resources.limits.max_connections"
+    },
+    {
+      "file": "limits-header-over-total.json",
+      "stage": "semantic",
+      "kind": "invalid_value",
+      "location": "resources.limits.upstream_header_ms"
+    },
+    {
+      "file": "limits-messages-over.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "resources.limits.max_messages"
+    },
+    {
+      "file": "limits-over-ceiling.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "resources.limits.max_body_bytes"
+    },
+    {
+      "file": "limits-stream-aggregate-over-4gib.json",
+      "stage": "semantic",
+      "kind": "invalid_combination",
+      "location": "resources.limits.stream_buffer_bytes"
+    },
+    {
+      "file": "limits-stream-idle-over-lifetime.json",
+      "stage": "semantic",
+      "kind": "invalid_value",
+      "location": "resources.limits.stream_idle_ms"
+    },
+    {
+      "file": "limits-string-number.json",
+      "stage": "structure",
+      "kind": "invalid_type",
+      "location": "resources.limits.max_nodes"
+    },
+    {
+      "file": "limits-unknown-key.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "resources.limits"
+    },
+    {
+      "file": "limits-zero-deadline.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "resources.limits.body_deadline_ms"
+    },
+    {
+      "file": "listener-ack-string.json",
+      "stage": "structure",
+      "kind": "invalid_type",
+      "location": "deployment.listener.allow_non_loopback"
+    },
+    {
+      "file": "listener-address-number.json",
+      "stage": "structure",
+      "kind": "invalid_type",
+      "location": "deployment.listener.address"
+    },
+    {
+      "file": "listener-hostname.json",
+      "stage": "semantic",
+      "kind": "invalid_value",
+      "location": "deployment.listener.address"
+    },
+    {
+      "file": "listener-loopback-acknowledged.json",
+      "stage": "semantic",
+      "kind": "invalid_combination",
+      "location": "deployment.listener"
+    },
+    {
+      "file": "listener-missing-address.json",
+      "stage": "structure",
+      "kind": "missing_field",
+      "location": "deployment.listener.address"
+    },
+    {
+      "file": "listener-no-port.json",
+      "stage": "semantic",
+      "kind": "invalid_value",
+      "location": "deployment.listener.address"
+    },
+    {
+      "file": "listener-remote-unacknowledged.json",
+      "stage": "semantic",
+      "kind": "invalid_combination",
+      "location": "deployment.listener"
+    },
+    {
+      "file": "listener-unknown-tls.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "deployment.listener"
+    },
+    {
+      "file": "listener-wildcard-unacknowledged.json",
+      "stage": "semantic",
+      "kind": "invalid_combination",
+      "location": "deployment.listener"
+    },
+    {
+      "file": "resources-unknown-field.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "resources"
+    },
+    {
+      "file": "root-missing-content.json",
+      "stage": "structure",
+      "kind": "missing_field",
+      "location": "content"
+    },
+    {
+      "file": "root-missing-deployment.json",
+      "stage": "structure",
+      "kind": "missing_field",
+      "location": "deployment"
+    },
+    {
+      "file": "root-missing-resources.json",
+      "stage": "structure",
+      "kind": "missing_field",
+      "location": "resources"
+    },
+    {
+      "file": "root-unknown-field.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "root"
+    },
+    {
+      "file": "syntax-duplicate-key.json",
+      "stage": "syntax",
+      "kind": "malformed",
+      "location": "file"
+    },
+    {
+      "file": "syntax-duplicate-nested-key.json",
+      "stage": "syntax",
+      "kind": "malformed",
+      "location": "file"
+    },
+    {
+      "file": "syntax-empty.json",
+      "stage": "syntax",
+      "kind": "malformed",
+      "location": "file"
+    },
+    {
+      "file": "syntax-trailing-bytes.json",
+      "stage": "syntax",
+      "kind": "malformed",
+      "location": "file"
+    },
+    {
+      "file": "syntax-truncated.json",
+      "stage": "syntax",
+      "kind": "malformed",
+      "location": "file"
+    },
+    {
+      "file": "upstream-credential-value.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "deployment.upstream"
+    },
+    {
+      "file": "upstream-missing-provider.json",
+      "stage": "structure",
+      "kind": "missing_field",
+      "location": "deployment.upstream.provider"
+    },
+    {
+      "file": "upstream-provider-case.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "deployment.upstream.provider"
+    },
+    {
+      "file": "upstream-provider-number.json",
+      "stage": "structure",
+      "kind": "invalid_type",
+      "location": "deployment.upstream.provider"
+    },
+    {
+      "file": "upstream-provider-route-id.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "deployment.upstream.provider"
+    },
+    {
+      "file": "upstream-route.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "deployment.upstream"
+    },
+    {
+      "file": "upstream-unsupported-provider.json",
+      "stage": "structure",
+      "kind": "invalid_value",
+      "location": "deployment.upstream.provider"
+    },
+    {
+      "file": "upstream-url.json",
+      "stage": "structure",
+      "kind": "unknown_field",
+      "location": "deployment.upstream"
+    },
+    {
+      "file": "version-0.json",
+      "stage": "version",
+      "kind": "unsupported_schema_version",
+      "location": "schema_version"
+    },
+    {
+      "file": "version-2.json",
+      "stage": "version",
+      "kind": "unsupported_schema_version",
+      "location": "schema_version"
+    },
+    {
+      "file": "version-missing.json",
+      "stage": "version",
+      "kind": "missing_field",
+      "location": "schema_version"
+    },
+    {
+      "file": "version-string.json",
+      "stage": "version",
+      "kind": "invalid_type",
+      "location": "schema_version"
+    }
+  ]
+}

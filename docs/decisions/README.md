@@ -45,6 +45,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0029](0029-schema-title-keyword.md) | Admit the `title` schema keyword as inspected free text | Accepted | #57 |
 | [0030](0030-local-caller-auth-listener-health.md) | Local caller token, listener and health authority: header, syntax, comparison, secret references, ordering, listener combinations | Accepted (design); contract frozen, planned (not implemented) | #61 (then #63, #86, #62, #64, #65) |
 | [0031](0031-responses-stateless-text-contract.md) | Responses stateless text field and state contract: mandatory `store:false`, closed state and opaque forms, flat item and tool shapes | Accepted (design); planned, contract frozen, no code | #82 (then #83 to #88) |
+| [0032](0032-configuration-schema-freeze.md) | Configuration schema v1 freeze: machine-readable schema, validation stages, planned keys excluded, compatibility and drift tests | Accepted; implemented (schema, fixtures, drift tests); `local_auth` planned (#63) | #62 |
 
 ## Contracts
 
@@ -61,6 +62,7 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [upstream-destinations](../contracts/upstream-destinations.md) | Fixed HTTPS destinations, client hardening, address policy, test-seam isolation |
 | [headers-and-credentials](../contracts/headers-and-credentials.md) | Header allowlists, request-local provider credential, framing, response headers, reserved local authority |
 | [local-caller-auth](../contracts/local-caller-auth.md) | Planned (frozen design, #61): local caller token header, syntax, comparison, secret references, ordering, listener combinations, health authority |
+| [config-schema](../contracts/config-schema.md) | Frozen configuration schema v1: validation stages, planned `local_auth` handling, compatibility and rollback rules (#62) |
 
 ## Template
 

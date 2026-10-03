@@ -15,9 +15,13 @@ Exit codes: 0 success, 1 validation/startup/runtime failure, 2 usage error. Argu
 
 Configuration is static: it is read once at startup and restart-activated. There is no hot reload, no per-request config read, and no request-time policy selection.
 
+## Machine-readable schema
+
+`docs/schema/gateway-config.v1.schema.json` is the published JSON Schema for `schema_version` 1, frozen in [config-schema](contracts/config-schema.md) ([ADR 0032](decisions/0032-configuration-schema-freeze.md), #62). The loader in `src/config.rs` is authoritative; the schema, the examples, and the fixtures under `tests/fixtures/config/` are checked against it by `tests/config_schema.rs`. Constraints the schema cannot express (duplicate keys, address syntax, loopback acknowledgement, core-validated profile and PII, the cross-field limit rules) are listed in the schema under `x-gateway.loader_only_constraints` and in the contract. Planned keys such as `deployment.local_auth` are not part of the accepted shape.
+
 ## Example configurations
 
-`examples/config.openai.json` is the working example: loopback listener, `deployment.upstream.provider: openai`, profile `full`, and capacity numbers (`receipt 8`, `memory_units 65536`, `inspection 2`, `upstream 8`, `stream 8`) that are the ones the SDK qualification ran with. They are **provisional and unmeasured** (ADR 0008), not recommendations. `container/config.container.json` is the same with a non-loopback bind inside the container. Neither holds a credential: the provider key comes from your application per request.
+`examples/config.openai.json` is the working example: loopback listener, `deployment.upstream.provider: openai`, profile `full`, and capacity numbers (`receipt 8`, `memory_units 65536`, `inspection 2`, `upstream 8`, `stream 8`) that are the ones the SDK qualification ran with. They are **provisional and unmeasured** (ADR 0008), not recommendations. `container/config.container.json` is the same with a non-loopback bind inside the container. Neither holds a credential: the provider key comes from your application per request. `examples/config.reference.json` sets every optional key to its provisional default and is a convenient starting point for tuning; it is validated against the schema and the loader.
 
 ## Skeleton configuration
 
