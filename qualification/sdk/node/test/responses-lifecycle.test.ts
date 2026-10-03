@@ -126,7 +126,7 @@ describe("Responses relay lifecycle (Node SDK)", () => {
       assert.equal(r.terminal, null, "no completed/failed/incomplete event: the response is NOT complete");
       assert.ok(!r.types.includes("response.completed"));
       assert.ok(!r.types.includes("response.failed") && !r.types.includes("error"));
-      assert.ok(r.types.length <= 2, "only the events the provider really sent arrived");
+      assert.ok(r.types.length <= 4, "only the events the provider really sent arrived (created, item, part, one delta)");
       assert.equal((await provider.calls()).calls.length, 1, "the gateway never retries or resumes");
       observations.push({ case: model, why, terminal: r.terminal, events: r.types.length, sdk_raised: r.raised });
     });

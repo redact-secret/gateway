@@ -2,7 +2,7 @@
 
 Status: implemented (#7 scaffold; extended to the Alpha 1 MVP candidate in #22). Governing decision: [ADR 0012](decisions/0012-release-candidate-artifact-build.md). Nothing described here is published or distributable.
 
-The artifacts contain the Alpha 1 MVP: `--version`, `validate-config`, a loopback server with `/healthz` and `/readyz`, and `POST /v1/chat/completions` for the OpenAI Chat Completions text subset (strict admission, core inspection, one forward to the fixed OpenAI route, JSON and SSE relay, responses not redacted). Every other route is rejected locally with 404 `unsupported_input`. The smoke checks post only requests that are rejected before inspection and forwarding, so even a config with an upstream cannot reach a provider; CI never contacts a provider. The pinned Node/Python SDK suites are run against a **separate non-release test build**, never against these artifacts ([ADR 0020](decisions/0020-sdk-qualification-test-build.md)).
+The artifacts contain the Alpha 1 MVP: `--version`, `validate-config`, a loopback server with `/healthz` and `/readyz`, and `POST /v1/chat/completions` for the OpenAI Chat Completions text subset and, since the Beta 1 work, `POST /v1/responses` for the stateless OpenAI Responses text subset (#86; the same pipeline and relay bound to the Responses contract, fixed route `openai.responses`). Both proxy routes strictly admit, inspect through the pinned core, forward once to the fixed OpenAI route and relay JSON and SSE with responses not redacted. Every other route is rejected locally with 404 `unsupported_input`. The smoke checks post only requests that are rejected before inspection and forwarding (for both proxy routes, `scripts/probe-endpoints.sh`), so even a config with an upstream cannot reach a provider; CI never contacts a provider. The pinned Node/Python SDK suites are run against a **separate non-release test build**, never against these artifacts ([ADR 0020](decisions/0020-sdk-qualification-test-build.md)).
 
 ## Target matrix
 
@@ -22,7 +22,7 @@ Not included: Linux ARM64 and multi-arch images (Beta 2), Windows, macOS x86_64,
 | `--version` has the expected shape | yes | yes | (same bytes, checksum-compared) |
 | `validate-config` on every shipped example config | yes | yes | the image's own config, with the image's binary |
 | Start on loopback, `/healthz` and `/readyz` 200 | yes | yes | yes, through a host-loopback published port |
-| Seven proxy-route probes, all rejected locally with the documented status and safe code (no credential 401, `{}` 422, unknown field plus a synthetic token 422 with no echo, wrong content type 415, `GET` on the route 405, unknown route 404) | yes | yes | yes |
+| Proxy-route probes for `POST /v1/chat/completions` (seven kinds) and `POST /v1/responses` (store omitted, `previous_response_id`, hosted tool, malformed arguments and the same status classes), all rejected locally with the documented status and safe code (no credential 401, `{}` 422, unknown field plus a synthetic token 422 with no echo, wrong content type 415, `GET` on the route 405, unknown route 404) | yes | yes | yes |
 | Graceful SIGTERM, exit 0, `shutdown complete` | yes | yes | yes (`docker stop`) |
 | Non-root (uid 65532), read-only root, no capabilities, no new privileges | n/a | n/a | yes |
 | Compose example: `docker compose config`, start, ready, probes, down | n/a | n/a | yes, against the candidate image |
@@ -47,7 +47,7 @@ One workflow artifact, `alpha1-candidate-<commit>`, containing the two binaries,
 - source commit, whether the tree was dirty, and the CI run URL; toolchain (`rust-toolchain.toml` channel, `rustc --version`, and each platform's own `rustc`); gateway version
 - exact core pin (`=0.1.0-beta.12` from `Cargo.lock`, with its lock checksum) and `Cargo.lock` sha256
 - config schema version and the sha256 of each shipped example config and the Compose file
-- `capabilities.proxy`: the endpoint, the subset, JSON and SSE relay, `response_redaction: false`, and the fixed upstream
+- `capabilities.proxy`: the endpoints (`POST /v1/chat/completions` and `POST /v1/responses`, each with its reviewed subset), JSON and SSE relay, `response_redaction: false`, and the fixed upstream. The Responses route is part of the shipped binary since #86; its qualification (#88) ran against the separate fake-upstream test build, so a candidate bundle still carries no accepted-request evidence for either endpoint
 - `sdk_pins`: npm `openai` and PyPI `openai` versions and the sha256 of the lockfiles that carry their integrity hashes (examples and qualification harness)
 - per artifact: file, platform, kind, sha256, size
 - image identity: image id, pinned base image digest, runtime user, contained binary sha256

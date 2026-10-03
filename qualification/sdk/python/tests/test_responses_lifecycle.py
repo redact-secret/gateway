@@ -107,7 +107,7 @@ class ResponsesLifecycle(unittest.TestCase):
                 self.assertIsNone(r["terminal"], "the response is NOT complete")
                 for forbidden in ("response.completed", "response.failed", "error"):
                     self.assertNotIn(forbidden, r["types"])
-                self.assertLessEqual(len(r["types"]), 2, "only the events the provider really sent arrived")
+                self.assertLessEqual(len(r["types"]), 4, "only the events the provider really sent arrived (created, item, part, one delta)")
                 self.assertEqual(len(provider.calls()["calls"]), 1, "the gateway never retries or resumes")
                 OBSERVATIONS.append(
                     {"case": model, "why": why, "terminal": r["terminal"], "events": len(r["types"]), "sdk_raised": r["raised"]}

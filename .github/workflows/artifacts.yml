@@ -241,7 +241,7 @@ jobs:
           set -eu
           jq -e '.distributable == false
             and .status == "alpha1-release-candidate-unpublished"
-            and (.capabilities.proxy.endpoint == "POST /v1/chat/completions")
+            and (.capabilities.proxy.endpoints | map(.endpoint) == ["POST /v1/chat/completions", "POST /v1/responses"])
             and (.capabilities.proxy.response_redaction == false)
             and (.distribution_blockers | length) >= 4
             and (.core.pin == "=0.1.0-beta.12")

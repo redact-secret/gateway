@@ -44,9 +44,10 @@ Type, module, and permit names in these ADRs are the names downstream tasks (#2,
 | [0028](0028-aggregate-load-qualification.md) | Aggregate load qualification: measurement aids, findings, no change to defaults | Accepted; measured, decision recorded (figures provisional) | #58 |
 | [0029](0029-schema-title-keyword.md) | Admit the `title` schema keyword as inspected free text | Accepted | #57 |
 | [0030](0030-local-caller-auth-listener-health.md) | Local caller token, listener and health authority: header, syntax, comparison, secret references, ordering, listener combinations | Accepted; implemented for Chat Completions (#63); #86 reuses the boundary for Responses | #61, #63 (then #86, #64, #65) |
-| [0031](0031-responses-stateless-text-contract.md) | Responses stateless text field and state contract: mandatory `store:false`, closed state and opaque forms, flat item and tool shapes | Accepted (design); planned, contract frozen, no code | #82 (then #83 to #88) |
+| [0031](0031-responses-stateless-text-contract.md) | Responses stateless text field and state contract: mandatory `store:false`, closed state and opaque forms, flat item and tool shapes | Accepted; implemented (#83 to #87) and qualified against the fake-upstream build (#88) | #82 (then #83 to #88) |
 | [0032](0032-configuration-schema-freeze.md) | Configuration schema v1 freeze: machine-readable schema, validation stages, planned keys excluded, compatibility and drift tests | Accepted; implemented (schema, fixtures, drift tests); `local_auth` added by #63 | #62, #63 |
 | [0033](0033-config-upgrade-rollback.md) | Configuration upgrade, rollback and restart activation: Alpha-to-Beta migration fixtures, compatibility pairs, failed-start behavior | Accepted; implemented | #64 |
+| [0034](0034-responses-qualification-and-beta1-endpoint-matrix.md) | Responses qualification and the Beta 1 endpoint matrix: field-matrix-driven SDK cases, evidence layers, measured SDK-helper table, provisional incremental-cost budgets, candidate manifest capabilities | Accepted; implemented and measured (figures provisional) | #88 |
 
 ## Contracts
 
