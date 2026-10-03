@@ -58,6 +58,7 @@ mod leak;
 mod lifecycle_tests;
 mod local_auth_tests;
 mod responses_route_tests;
+mod responses_stream_tests;
 mod slot_coverage_tests;
 mod stream_tests;
 mod tool_history_tests;

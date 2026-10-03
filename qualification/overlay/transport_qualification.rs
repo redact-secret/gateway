@@ -20,7 +20,7 @@ use std::sync::Arc;
 use super::destination::{self, Destination, Origin, RouteBinding};
 use super::resolver::{AddressPolicy, AddressSource, PolicyResolver};
 use super::{TransportError, Upstream, hardened_builder};
-use crate::config::{RouteId, RuntimePlan};
+use crate::config::RuntimePlan;
 
 /// Never resolves anything: the fake origin is an IP literal, so no lookup is needed.
 struct NoSource;
@@ -55,16 +55,18 @@ impl Upstream {
             Some(authority) => {
                 let reviewed = destination::reviewed_routes(authority.provider())
                     .map_err(|_| TransportError::ClientInit)?;
-                let path = reviewed
-                    .first()
-                    .map(|r| r.destination().path())
-                    .ok_or(TransportError::ClientInit)?;
-                let dest = Destination::for_test(Origin::for_test_http(fake), path)
+                // Every reviewed route (Chat and Responses, #87) keeps its id and fixed path;
+                // only the origin becomes the loopback fake.
+                let mut bound = Vec::new();
+                for route in &reviewed {
+                    let dest = Destination::for_test(
+                        Origin::for_test_http(fake),
+                        route.destination().path(),
+                    )
                     .map_err(|_| TransportError::ClientInit)?;
-                vec![RouteBinding::for_test(
-                    RouteId::new(destination::OPENAI_CHAT_COMPLETIONS_ROUTE),
-                    dest,
-                )]
+                    bound.push(RouteBinding::for_test(route.id().clone(), dest));
+                }
+                bound
             }
             None => Vec::new(),
         };

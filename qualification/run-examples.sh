@@ -97,4 +97,42 @@ if [ -n "${GATEWAY_AUTHFILE:-}" ]; then
   done
 fi
 
+# Responses examples (#87): two provider calls to /v1/responses (JSON, then stream), sanitized,
+# the stream flag on the second only, each ended by the provider's terminal event.
+verify_responses_calls() {
+  curl -s "$QUAL_ADMIN/__admin/calls" | jq -e '
+    (.calls | length) == 2
+    and ([.calls[].path] | all(. == "/v1/responses"))
+    and ([.calls[].body] | all(contains("<SECRET_1>") and (contains("ghp_") | not) and contains("\"store\":false")))
+    and (.calls[1].body | contains("\"stream\":true"))
+    and (.calls[0].body | contains("\"stream\"") | not)' >/dev/null
+}
+
+echo "== examples/node responses (npm run start:responses -- --demo-redaction)"
+reset
+(cd "$root/examples/node" && npm run start:responses --silent -- --demo-redaction)
+verify_responses_calls
+echo "== examples/python responses (--demo-redaction)"
+reset
+(cd "$root/examples/python" && "$py" responses_via_gateway.py --demo-redaction)
+verify_responses_calls
+echo "== responses examples: a provider-declared failure and a truncated stream exit 1"
+for pair in qual-resp-sse-failed:declared qual-resp-sse-incomplete:declared qual-resp-sse-truncated:terminal qual-resp-sse-clean-no-terminal:terminal; do
+  scenario="${pair%%:*}"
+  word="${pair##*:}"
+  for run in node python; do
+    code=0
+    if [ "$run" = node ]; then
+      (cd "$root/examples/node" && EXAMPLE_MODEL="$scenario" npm run start:responses --silent) >/dev/null 2>"$QUAL_EVIDENCE/example-responses.err" || code=$?
+    else
+      (cd "$root/examples/python" && EXAMPLE_MODEL="$scenario" "$py" responses_via_gateway.py) >/dev/null 2>"$QUAL_EVIDENCE/example-responses.err" || code=$?
+    fi
+    test "$code" -eq 1
+    # The Node example names a provider-declared outcome (the Python example reports the error
+    # class only, by design, so its exit code is the check).
+    if [ "$run" = node ] && [ "$word" = declared ]; then grep -q "declared" "$QUAL_EVIDENCE/example-responses.err"; fi
+  done
+done
+rm -f "$QUAL_EVIDENCE/example-responses.err"
+
 echo "examples verified against the qualification build"

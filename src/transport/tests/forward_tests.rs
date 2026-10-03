@@ -122,6 +122,45 @@ impl Rig {
         caps: Caps,
         local_auth: crate::transport::local_auth::LocalAuth,
     ) -> Self {
+        Self::over_protocol(
+            fake,
+            upstream,
+            limits,
+            caps,
+            local_auth,
+            crate::protocol::Protocol::ChatCompletionsText,
+        )
+    }
+
+    /// A Responses endpoint over a fake whose destination path is `/v1/responses` (#87).
+    pub(super) async fn responses(behavior: Behavior, limits: RequestLimits, caps: Caps) -> Self {
+        let fake = FakeUpstream::start(behavior).await;
+        let mut upstream = http_upstream_with(fake.addr(), limits);
+        let destination = Destination::for_test(
+            upstream.routes[0].destination().origin().clone(),
+            "/v1/responses",
+        )
+        .expect("destination");
+        upstream.routes =
+            vec![RouteBinding::for_test(RouteId::new(ROUTE), destination)].into_boxed_slice();
+        Self::over_protocol(
+            fake,
+            upstream,
+            limits,
+            caps,
+            crate::transport::local_auth::LocalAuth::Disabled,
+            crate::protocol::Protocol::ResponsesText,
+        )
+    }
+
+    pub(super) fn over_protocol(
+        fake: FakeUpstream,
+        upstream: Upstream,
+        limits: RequestLimits,
+        caps: Caps,
+        local_auth: crate::transport::local_auth::LocalAuth,
+        protocol: crate::protocol::Protocol,
+    ) -> Self {
         let metrics = Arc::new(Metrics::new());
         let upstream = Upstream {
             metrics: Some(Arc::clone(&metrics)),
@@ -146,11 +185,16 @@ impl Rig {
             .with_metrics(Arc::clone(&metrics)),
         );
         let route = Arc::new(
-            ChatRoute::new(Arc::clone(&admission), limits, RouteId::new(ROUTE))
-                .with_inspection(Arc::clone(&inspection))
-                .with_upstream(Arc::new(upstream))
-                .with_local_auth(local_auth)
-                .with_metrics(Arc::clone(&metrics)),
+            crate::chat_route::EndpointRoute::for_protocol(
+                protocol,
+                Arc::clone(&admission),
+                limits,
+                RouteId::new(ROUTE),
+            )
+            .with_inspection(Arc::clone(&inspection))
+            .with_upstream(Arc::new(upstream))
+            .with_local_auth(local_auth)
+            .with_metrics(Arc::clone(&metrics)),
         );
         Self {
             route,

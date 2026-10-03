@@ -247,6 +247,29 @@ A stream the Gateway could not finish ends abruptly, with no terminating chunk a
 
 The shipped examples (`examples/node`, `examples/python`) check `finish_reason` and fail when it is absent; both run in the Qualification workflow.
 
+## Responses relay lifecycle and terminal events (#87)
+
+`POST /v1/responses` (#86) is the same endpoint handler as Chat, so its JSON and `stream: true` relay is the Chat relay with the same bounds: response header and body byte bounds, the connect, header and total deadlines, the stream idle and lifetime deadlines, the per-stream buffer bound, the write-stall deadline, the cumulative write budget, the shared upstream and stream permits, and the shutdown drain. Nothing about Responses is parsed on the way back.
+
+**Nothing is added, removed or retried.** Provider bytes are relayed unchanged (event names, `data:` lines, ordering, multibyte text split across transport chunks). The gateway never writes `response.completed`, `response.failed`, `response.incomplete`, an `error` event, a second status, or a resume or retry request, on idle, lifetime, buffer, write-stall, disconnect, provider-cut or shutdown paths. Failures before the response headers are the ordinary gateway statuses in the table above and send zero or one upstream request exactly as for Chat; every rejection of the request (including `stream: true`) sends zero upstream bytes.
+
+**What ends a Responses stream, and what each ending means.** The completion signal is the provider's own terminal event; `finish_reason` and `[DONE]` are Chat's and do not exist here.
+
+| Ending seen by the client | Transport | Meaning |
+| --- | --- | --- |
+| `response.completed` then a normal end | clean | The provider finished. |
+| `response.failed` or `response.incomplete` then a normal end | clean | The provider declared the response failed or incomplete (for example `max_output_tokens`). Provider content relayed as sent; the output is not a success. The HTTP status was already `200`. |
+| Normal end, no terminal event | clean | Truncated or not finished: a provider or an intermediary closed the stream early. Treat as partial. |
+| Abrupt end (SDK may raise, or on some Node.js versions end normally) | cut, no terminating chunk | Truncated: the gateway hit a limit or shutdown, or the provider connection failed. Treat as partial. |
+
+An ordinary (non-stream) Responses answer is a buffered JSON body relayed with the provider's status; a `200` body can still carry `"status": "failed"` or `"incomplete"` and is returned unchanged. Provider error statuses (`4xx`, `5xx`) are relayed with the provider's body.
+
+**Callers must** require a terminal event, treat `response.failed` and `response.incomplete` as non-success, and not rely on the end of an SDK iteration (verified for the pinned Node.js and Python SDKs by the `responses-lifecycle` suites and the `responses_via_gateway` examples). The pinned SDKs did not raise on a provider-declared `response.failed` / `response.incomplete`; the transport ended normally.
+
+**Not redacted, not retractable.** Response contents (generated text, function-call arguments, `response.failed` messages, provider error bodies) are relayed unredacted; applications must handle them as sensitive. Request bytes that already reached the provider cannot be retracted by a client abort, a disconnect, or a gateway cut, and a client abort before or after the response headers cancels the upstream exchange without replaying the request. A client retry is a new request and can duplicate provider-side work.
+
+**Lifecycle ownership.** The body of a streamed response owns the upstream and stream permits until the provider connection is really closed; on abort, stall, idle, lifetime, buffer or shutdown the connection is closed first and the permits return after. Started synchronous inspection work keeps its permits until the work ends. Evidence: `src/transport/tests/responses_stream_tests.rs`.
+
 ## Alpha 2 transport qualification (2026-10-03, #60)
 
 What was added to the qualification (everything synthetic, loopback only, NON-RELEASE build per [ADR 0020](../decisions/0020-sdk-qualification-test-build.md); nothing here is a statement about a real provider, other SDK versions, other runtimes, or an intermediary):

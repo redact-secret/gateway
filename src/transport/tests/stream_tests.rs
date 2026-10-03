@@ -36,7 +36,7 @@ const EVENTS: &str = "data: {\"id\":\"chatcmpl-SYNTH\",\"choices\":[{\"delta\":{
 const EV1: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"하나 😀\"}}]}\n\n";
 const EV2: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"둘 🚀\"}}]}\n\n";
 
-const STREAMY: Caps = Caps {
+pub(super) const STREAMY: Caps = Caps {
     receipt: 8,
     inspection: 2,
     upstream: 4,
@@ -53,7 +53,7 @@ fn stream_request() -> Request {
     request(&stream_body("hello"), KEY, &[])
 }
 
-fn limits_with(f: impl FnOnce(&mut RequestLimits)) -> RequestLimits {
+pub(super) fn limits_with(f: impl FnOnce(&mut RequestLimits)) -> RequestLimits {
     let mut limits = RequestLimits::provisional();
     f(&mut limits);
     limits
@@ -61,14 +61,14 @@ fn limits_with(f: impl FnOnce(&mut RequestLimits)) -> RequestLimits {
 
 /// Split `bytes` into fragments of `n` bytes each, a millisecond apart. Splits fall inside
 /// events and inside multibyte characters.
-fn split_every(bytes: &[u8], n: usize) -> Vec<SseFragment> {
+pub(super) fn split_every(bytes: &[u8], n: usize) -> Vec<SseFragment> {
     bytes
         .chunks(n)
         .map(|c| SseFragment::after(Duration::from_millis(1), c.to_vec()))
         .collect()
 }
 
-fn sse(fragments: Vec<SseFragment>, finish: bool) -> Behavior {
+pub(super) fn sse(fragments: Vec<SseFragment>, finish: bool) -> Behavior {
     Behavior::Sse {
         fragments,
         framing: SseFraming::Chunked,
@@ -77,14 +77,14 @@ fn sse(fragments: Vec<SseFragment>, finish: bool) -> Behavior {
 }
 
 /// What a caller sees of a streamed response, frame by frame.
-struct Streamed {
-    status: u16,
-    headers: reqwest::header::HeaderMap,
-    bytes: Vec<u8>,
-    end: Result<(), String>,
+pub(super) struct Streamed {
+    pub(super) status: u16,
+    pub(super) headers: reqwest::header::HeaderMap,
+    pub(super) bytes: Vec<u8>,
+    pub(super) end: Result<(), String>,
 }
 
-async fn drain(response: Response) -> Streamed {
+pub(super) async fn drain(response: Response) -> Streamed {
     let (parts, mut body) = response.into_parts();
     let mut bytes = Vec::new();
     let end = loop {
@@ -106,7 +106,10 @@ async fn drain(response: Response) -> Streamed {
     }
 }
 
-async fn serve_stalling(route: Arc<ChatRoute>, stall: Duration) -> (SocketAddr, JoinHandle<()>) {
+pub(super) async fn serve_stalling(
+    route: Arc<ChatRoute>,
+    stall: Duration,
+) -> (SocketAddr, JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = chat_route::mount(axum::Router::new(), route);
@@ -118,7 +121,7 @@ async fn serve_stalling(route: Arc<ChatRoute>, stall: Duration) -> (SocketAddr, 
 
 /// Read until the end of the response head; returns the head text and any body bytes
 /// already read.
-async fn read_head(client: &mut TcpStream) -> (String, Vec<u8>) {
+pub(super) async fn read_head(client: &mut TcpStream) -> (String, Vec<u8>) {
     let mut buf = Vec::new();
     let mut tmp = [0_u8; 4096];
     loop {
@@ -137,7 +140,7 @@ async fn read_head(client: &mut TcpStream) -> (String, Vec<u8>) {
 
 /// Read until the peer closes (or errors) or `within` elapses. Returns the bytes and
 /// whether the connection was seen to close.
-async fn read_to_close(client: &mut TcpStream, within: Duration) -> (Vec<u8>, bool) {
+pub(super) async fn read_to_close(client: &mut TcpStream, within: Duration) -> (Vec<u8>, bool) {
     let mut out = Vec::new();
     let mut tmp = [0_u8; 8192];
     let deadline = tokio::time::Instant::now() + within;
