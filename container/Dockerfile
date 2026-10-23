@@ -12,7 +12,7 @@
 # multi-arch index (resolved 2026-10-02 with `docker buildx imagetools inspect`). The
 # glibc runtime matches the x86_64-unknown-linux-gnu binary (ADR 0012). The build is
 # explicitly selects linux/amd64 or linux/arm64 and checks the ELF header first. Dependabot (docker ecosystem) proposes digest updates.
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:83b9b50586253821cf63ffcec87d3d94265a093ad30da232039af962dd8f4edf
 
 COPY --chown=0:0 --chmod=0755 redact-secret-gateway /usr/local/bin/redact-secret-gateway
 COPY --chown=0:0 --chmod=0444 config.container.json /etc/redact-secret-gateway/config.json
