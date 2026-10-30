@@ -87,7 +87,7 @@ jobs:
           got="$(sha256sum stage/redact-secret-gateway-x86_64-unknown-linux-gnu | cut -d ' ' -f 1)"
           test "$got" = "$WANT"
       - name: Upload candidate binary and smoke evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: stage-linux-x86_64
           path: stage/
@@ -148,7 +148,7 @@ jobs:
           jq -n --arg id "$(docker inspect --format '{{.Id}}' redact-secret-gateway:candidate-arm64)" --arg bin "$WANT" \
             '{image_id:$id,platform:"linux/arm64",contains_binary_sha256:$bin,native_execution:true}' > stage/image-info-arm64.json
       - name: Upload candidate binary and smoke evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: stage-linux-arm64
           path: stage/
@@ -200,7 +200,7 @@ jobs:
           got="$(shasum -a 256 stage/redact-secret-gateway-aarch64-apple-darwin | cut -d ' ' -f 1)"
           test "$got" = "$WANT"
       - name: Upload candidate binary and smoke evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: stage-macos-arm64
           path: stage/
@@ -220,7 +220,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Download the candidate Linux binary (no rebuild)
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: stage-linux-x86_64
           path: in
@@ -254,7 +254,7 @@ jobs:
             > stage/image-info.json
           cat stage/image-info.json
       - name: Upload image archive and smoke evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: stage-image-linux-amd64
           path: stage/
@@ -276,7 +276,7 @@ jobs:
       - name: Install pinned toolchain (rust-toolchain.toml)
         run: rustup toolchain install
       - name: Download every candidate stage
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: stage-*
           merge-multiple: true
@@ -342,7 +342,7 @@ jobs:
           cat bundle/manifest.json
           cat bundle/SHA256SUMS
       - name: Upload the candidate bundle (binaries, image archive, manifest, checksums, evidence)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: alpha1-candidate-${{ github.sha }}
           path: bundle/
